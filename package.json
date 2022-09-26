@@ -1,0 +1,16 @@
+{
+  "name": "my-electron-app",
+  "version": "1.0.0",
+  "description": "For learning Electron",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsc && electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^20.2.0"
+  }
+}
