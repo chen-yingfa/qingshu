@@ -47,8 +47,6 @@ function onInputBlockKeyPress(event: KeyboardEvent) {
 }
 
 function onInputBlockKeydown(event: KeyboardEvent) {
-    console.log('keydown');
-
     // For ignoring all keydown events that are part of IMO composition
     if (event.isComposing || event.key == 'Process') return;
 
@@ -71,13 +69,10 @@ function onInputBlockKeydown(event: KeyboardEvent) {
 }
 
 function onInputBlockKeyup(event: KeyboardEvent) {
-    console.log("keyup");
-    
     // For ignoring all keydown events that are part of IMO composition
     if (event.isComposing || event.key == 'Process') return;
     
     // Render
-    console.log("render");
     let curBlock = getCurInputBlock();
     let html = marked(curBlock.innerText);
     PREVIEW_CONTAINER.innerHTML = html;
@@ -85,8 +80,6 @@ function onInputBlockKeyup(event: KeyboardEvent) {
 
 function updateCaretPos() {
     let curBlock = getCurInputBlock();
-
-    // cyf: Continue here...
 
     // TODO: All methods for getting the position of the caret from the Internet
     // are not working. Just manually record the pos.
