@@ -12,6 +12,30 @@ function initGlobals() {
 
 function initListeners() {
     // No default listeners
+    INPUT_CONTAINER.addEventListener('paste', onPaste);
+}
+
+function onPaste(event: ClipboardEvent) {
+    event.preventDefault();
+
+    let curBlock = getCurInputBlock();
+    let plainText = event.clipboardData.getData('text/plain');
+    insertTextAtCaret(plainText);
+}
+
+function insertTextAtCaret(text) {
+    /**
+     * From: https://stackoverflow.com/questions/2920150/insert-text-at-cursor-in-a-content-editable-div
+     */
+    var sel, range;
+    if (window.getSelection) {
+        sel = window.getSelection();
+        if (sel.getRangeAt && sel.rangeCount) {
+            range = sel.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode( document.createTextNode(text) );
+        }
+    }
 }
 
 function onInputBlockKeyPress(event: KeyboardEvent) {

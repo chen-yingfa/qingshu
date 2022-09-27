@@ -9,7 +9,8 @@
     gap: 4px;
     font-size: 14px;
     vertical-align: middle;
-    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+    box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
+    /* background-color: rgb(240, 240, 240); */
 
     -webkit-user-select: none;
     user-select: none;
@@ -44,7 +45,7 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background-color: #3f3f3f;
+    background-color: #c5c5c5;
     border-width: 0px;
 }
 

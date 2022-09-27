@@ -12,7 +12,7 @@ button {
     border-radius: 6px;
     border-width: 0px;
     padding: 4px;
-    background-color: white;
+    /* background-color: white; */
     font-size: 12px;
     font-weight: bold;
     line-height: 100%;
@@ -52,6 +52,7 @@ button:hover {
     display: flex;
     flex-grow: 1;
     flex-direction: row;
+    max-height: calc(100% - 24px - 32px);
 }
 
 
@@ -59,21 +60,43 @@ button:hover {
     font-family: 'Ubuntu Mono', 'Consolas', 'Courier New', Courier, monospace;
     font-size: 14px;
     width: 50%;
+    height: auto;
     padding: 8px;
     margin: 0;
-    overflow: scroll;
+    overflow: auto;
+    
+    /* Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
 }
 
 #preview-container {
     padding: 8px;
     width: 50%;
     margin: 0;
-    background-color: bisque;
-    overflow: scroll;
+    border-left: rgba(99, 99, 99, 0.2) 1px solid;
+    /* background-color: bisque; */
+    overflow: auto;
+    
+    /* Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
 }
 
 
 /* Input and render view */
+
+[contenteditable] {
+    /* display: inline; */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: inherit;
+    -webkit-user-select: auto;
+    user-select: auto;
+    -moz-user-select: -moz-text;
+
+
+}
 
 .input-block {
     margin: 0;
