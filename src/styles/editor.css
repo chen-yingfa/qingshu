@@ -1,0 +1,64 @@
+#body-container {
+    display: flex;
+    flex-grow: 1;
+    flex-direction: row;
+    max-height: calc(100% - 24px - 32px);
+}
+
+#input-container {
+    font-family: 'Ubuntu Mono', 'Consolas', 'Courier New', Courier, monospace;
+    font-size: 14px;
+    width: 50%;
+    height: auto;
+    padding: 8px;
+    margin: 0;
+    overflow: auto;
+    background-color: #eeeeee;
+    
+    /* Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
+}
+
+#preview-container {
+    padding: 8px;
+    width: 50%;
+    margin: 0;
+    border-left: rgba(99, 99, 99, 0.2) 1px solid;
+    /* background-color: bisque; */
+    overflow: auto;
+    
+    /* Scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
+}
+
+
+/* Input and render view */
+
+[contenteditable] {
+    /* display: inline; */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: inherit;
+    -webkit-user-select: auto;
+    user-select: auto;
+    -moz-user-select: -moz-text;
+
+
+}
+
+.input-block {
+    margin: 0;
+    padding: 8px;
+    border: 0;
+    border-radius: 4px;
+    box-shadow: 2 2 2 2 #ccc;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+.input-block:hover {
+    box-shadow: rgba(100, 100, 111, 0.2) 0px 7px 29px 0px;
+}
+
