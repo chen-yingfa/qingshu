@@ -28,7 +28,8 @@ app.on('activate', () => {
     }
 });
 
-ipcMain.handle('close-window', () => {
+ipcMain.on('close-window', () => {
     // Close current window
+    console.log('Closing focused window');
     BrowserWindow.getFocusedWindow().close();
 });

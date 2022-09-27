@@ -2,7 +2,7 @@ const { ipcRenderer } = require('electron');
 
 const QUIT_BUTTON = document.getElementById('close-button');
 
-QUIT_BUTTON.addEventListener('keydown', onClose)
+QUIT_BUTTON.addEventListener('click', onClose)
 
 
 function onClose() {
