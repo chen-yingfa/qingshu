@@ -7,7 +7,7 @@
     height: 32px;
     padding: 4px;
     gap: 4px;
-    background-color: white;
+    font-size: 14px;
     vertical-align: middle;
     box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
 
@@ -29,6 +29,7 @@
     justify-content: center;
     gap: 4px;
     align-items: center;
+    font-weight: bold;
     font-family: 'KaiTi', 'Courier New', Courier, monospace;
 }
 

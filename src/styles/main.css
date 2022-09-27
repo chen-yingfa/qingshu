@@ -61,6 +61,7 @@ button:hover {
     width: 50%;
     padding: 8px;
     margin: 0;
+    overflow: scroll;
 }
 
 #preview-container {
@@ -68,6 +69,7 @@ button:hover {
     width: 50%;
     margin: 0;
     background-color: bisque;
+    overflow: scroll;
 }
 
 
