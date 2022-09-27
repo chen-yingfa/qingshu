@@ -1,0 +1,49 @@
+
+.titlebar {
+    /* border-bottom: 1px solid #bbbbbb; */
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    height: 32px;
+    padding: 4px;
+    gap: 4px;
+    background-color: white;
+    vertical-align: middle;
+    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-app-region: drag;
+}
+
+.titlebar-left-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 4px;
+}
+
+.titlebar-center-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    gap: 4px;
+    align-items: center;
+    font-family: 'KaiTi', 'Courier New', Courier, monospace;
+}
+
+.titlebar-right-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.titlebar-right-container button {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: #3f3f3f;
+    border-width: 0px;
+}
+

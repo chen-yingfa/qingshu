@@ -1,0 +1,25 @@
+#status-bar {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    height: 24px;
+    padding: 4px;
+    vertical-align: middle;
+    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
+    /* background-color: lightblue; */
+}
+
+#status-bar-left-container {
+    display: flex;
+    flex-direction: row;
+    padding-left: 4px;
+}
+
+#status-bar-right-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    padding-right: 4px;
+}
+
+

@@ -1,22 +1,17 @@
+const { marked } = require('marked');
 
 var INPUT_CONTAINER: HTMLDivElement;
+var PREVIEW_CONTAINER: HTMLDivElement;
 var lastFocusBlock: HTMLDivElement;
+var textContent: string;
 
 function initGlobals() {
     INPUT_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
+    PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
 }
 
 function initListeners() {
-    // When user press Enter in an input-block
-    // Path: src\index.html
-    let inputBlocks = document.getElementsByClassName('input-block');
-    for (let i = 0; i < inputBlocks.length; i++) {
-        let inputBlock = inputBlocks[i] as HTMLDivElement;
-        if (inputBlock != null) {
-            // inputBlock.addEventListener('keypress', onInputBlockKeyPress);
-            inputBlock.addEventListener('keydown', onInputBlockKeyDown);
-        }
-    }
+    // No default listeners
 }
 
 function onInputBlockKeyPress(event: KeyboardEvent) {
@@ -27,7 +22,7 @@ function onInputBlockKeyPress(event: KeyboardEvent) {
     }
 }
 
-function onInputBlockKeyDown(event: KeyboardEvent) {
+function onInputBlockKeydown(event: KeyboardEvent) {
     console.log('keydown');
 
     // For ignoring all keydown events that are part of IMO composition
@@ -35,16 +30,33 @@ function onInputBlockKeyDown(event: KeyboardEvent) {
 
     updateCaretPos();
     switch (event.key) {
-        case 'Enter':
-            onInputEnter(event);
-            break;
+        // case 'Enter':
+        //     onInputEnter(event);
+        //     break;
         case 'ArrowDown':
             onInputArrowDown(event);
             break;
         case 'ArrowUp':
             onInputArrowUp(event);
             break;
+        case 'Tab':
+            onInputTab(event);
+            break;
     }
+
+}
+
+function onInputBlockKeyup(event: KeyboardEvent) {
+    console.log("keyup");
+    
+    // For ignoring all keydown events that are part of IMO composition
+    if (event.isComposing || event.key == 'Process') return;
+    
+    // Render
+    console.log("render");
+    let curBlock = getCurInputBlock();
+    let html = marked(curBlock.innerText);
+    PREVIEW_CONTAINER.innerHTML = html;
 }
 
 function updateCaretPos() {
@@ -72,7 +84,8 @@ function newInputBlock(): HTMLDivElement {
     newBlock.id = 'input-block';
     newBlock.contentEditable = 'true';
     newBlock.classList.add('input-block');
-    newBlock.addEventListener('keydown', onInputBlockKeyDown);
+    newBlock.addEventListener('keydown', onInputBlockKeydown);
+    newBlock.addEventListener('keyup', onInputBlockKeyup);
     return newBlock;
 }
 
@@ -103,6 +116,10 @@ function onInputArrowUp(event: KeyboardEvent) {
     if (prevBlock != null) {
         prevBlock.focus();
     }
+}
+
+function onInputTab(event: KeyboardEvent) {
+    let curBlock = event.target as HTMLDivElement;
 }
 
 function initFirstBlock() {
