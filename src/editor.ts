@@ -36,30 +36,34 @@ function initListeners() {
 function onPaste(event: ClipboardEvent) {
     event.preventDefault();
     if (curBlock) {
+        console.log('Pasting');
         const clipboardText = clipboard.readText();
         // const clipboardData = event.clipboardData.getData('text');
         let sel = window.getSelection();
         let range = sel.getRangeAt(0);
         
-        
         /**
          * Scan the clipboard text, for all '\n', create a new line (new <div>)
          * Then paste the remaining text into that div and repeat recursively.
          */
-        let lineDiv = range.commonAncestorContainer.parentElement;
-        let curText = lineDiv.textContent;
+        // let lineDiv = range.commonAncestorContainer.parentElement;
+        let curText = curBlock.textContent;
         let caretPos = range.startOffset;
         
         let textBefore = curText.slice(0, caretPos);
         let textAfter = curText.slice(caretPos, curText.length);
+        console.log(textBefore, textAfter);
         let pasteLines = clipboardText.split('\n');
         pasteLines[0] = textBefore + pasteLines[0];
         pasteLines[pasteLines.length - 1] += textAfter;
-        for (let line of pasteLines) {
-            lineDiv.textContent = line;
-            let newLineDiv = document.createElement('div');
-            curBlock.insertBefore(newLineDiv, lineDiv.nextSibling);
-            lineDiv = newLineDiv;
+        console.log(pasteLines);
+
+        curBlock.textContent = pasteLines[0];
+        for (let i = 1; i < pasteLines.length; i++) {
+            let newBlock = newInputBlock();
+            INPUT_CONTAINER.insertBefore(newBlock, curBlock.nextSibling);
+            newBlock.textContent = pasteLines[i];
+            curBlock = newBlock;
         }
 
         render();
@@ -92,9 +96,9 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'ArrowDown':
             onInputArrowDown(event);
             break;
-        // case 'ArrowUp':
-        //     onInputArrowUp(event);
-        //     break;
+        case 'ArrowUp':
+            onInputArrowUp(event);
+            break;
         case 'Tab':
             onInputTab(event);
             break;
@@ -155,6 +159,8 @@ function newInputBlock(): HTMLDivElement {
     newBlock.classList.add('input-block');
     newBlock.addEventListener('keydown', onInputBlockKeydown);
     newBlock.addEventListener('keyup', onInputBlockKeyup);
+    newBlock.addEventListener('paste', onPaste);
+    newBlock.addEventListener('focus', onFocusBlock);
     return newBlock;
 }
 
@@ -205,8 +211,6 @@ function initFirstBlock() {
     let firstBlock = newInputBlock();
     INPUT_CONTAINER.appendChild(firstBlock);
     firstBlock.focus();
-    firstBlock.addEventListener('paste', onPaste);
-    firstBlock.addEventListener('focus', onFocusBlock);
     inputBlocks.push(firstBlock);
 }
 
