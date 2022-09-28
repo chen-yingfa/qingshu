@@ -125,19 +125,20 @@ function render() {
     let html = marked(mdText);
     document.getElementById("md-container").innerHTML = html;
 
-    updateCaretPos();
+    updateCaretStatus();
 }
 
 
 
-function updateCaretPos() {
+function updateCaretStatus() {
+    // Line number
     let curBlock = getCurInputBlock();
+    let row = Array.from(INPUT_CONTAINER.children).indexOf(curBlock);
+    document.getElementById('caret-row-number').textContent = (row + 1).toString();
 
-    // TODO: All methods for getting the position of the caret from the Internet
-    // are not working. Just manually record the pos.
-
+    // Column number
     let caretPos = getCaretPos();
-    let caretPosElem = document.getElementById('caret-position') as HTMLSpanElement;
+    let caretPosElem = document.getElementById('caret-col-number') as HTMLSpanElement;
     caretPosElem.innerText = caretPos.toString();
 }
 
@@ -220,3 +221,4 @@ function getCaretPos() {
 initGlobals();
 initListeners();
 initFirstBlock();
+render()

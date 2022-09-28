@@ -21,6 +21,14 @@
     flex-direction: row;
     justify-content: flex-end;
     padding-right: 4px;
+    gap: 8px;
+}
+
+#caret-status {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 2px;
 }
 
 
