@@ -76,14 +76,6 @@ function strInsert(s: string, to_insert: string, index: number): string {
     return s.slice(0, 3) + to_insert + s.slice(3);
 }
 
-function onInputBlockKeyPress(event: KeyboardEvent) {
-    switch (event.key) {
-        case 'Enter':
-            onInputEnter(event);
-            break;
-    }
-}
-
 /**
  * All user input should first pass through this function.
  * This should check for hotkeys, special inputs, etc.
@@ -93,7 +85,6 @@ function onInputBlockKeydown(event: KeyboardEvent) {
     // For ignoring all keydown events that are part of IMO composition
     if (event.isComposing || event.key == 'Process') return;
 
-    updateCaretPos();
     switch (event.key) {
         case 'Enter':
             onInputEnter(event);
@@ -107,13 +98,13 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'Tab':
             onInputTab(event);
             break;
-        // case 'V':
-        //     if (event.ctrlKey) {
-        //         onInputPaste(event);
-        //     }
-        //     break;
     }
+}
 
+function onInputBlockKeyup(event: KeyboardEvent) {
+    // For ignoring all keydown events that are part of IMO composition
+    if (event.isComposing || event.key == 'Process') return;
+    
     render();
 }
 
@@ -122,24 +113,24 @@ function onInputBlockKeydown(event: KeyboardEvent) {
  * with Rendered HTML.
  */
 function render() { 
+    /**
+     * Concatenate text of all input blocks
+     */
+    let mdText = "";
+    let blockElems = INPUT_CONTAINER.children;
+    console.log(blockElems);
+    for (let i = 0; i < blockElems.length; i++) {
+        let line = blockElems[i].textContent;
+        mdText += line + '\n\n';
+    }
+    console.log('mdText:', mdText);
     let html = marked(mdText);
     document.getElementById("md-container").innerHTML = html;
+
+    updateCaretPos();
 }
 
-function onInputBlockKeyup(event: KeyboardEvent) {
-    // For ignoring all keydown events that are part of IMO composition
-    if (event.isComposing || event.key == 'Process') return;
-    
-}
 
-/**
- * User has pressed CTRL + V on an input block.
- */
-// function onInputPaste(event: KeyboardEvent) {
-//     navigator.clipboard.readText().then(text => {
-//         insertTextAtCaret(text);
-//     });
-// }
 
 function updateCaretPos() {
     let curBlock = getCurInputBlock();
@@ -162,7 +153,6 @@ function newInputBlock(): HTMLDivElement {
     let newBlock = document.createElement('div');
     newBlock.id = 'input-block';
     newBlock.contentEditable = 'true';
-    newBlock.innerHTML = "<div><br></div>";
     newBlock.classList.add('input-block');
     newBlock.addEventListener('keydown', onInputBlockKeydown);
     newBlock.addEventListener('keyup', onInputBlockKeyup);

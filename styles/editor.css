@@ -31,6 +31,7 @@
     border-left: rgba(99, 99, 99, 0.2) 1px solid;
     /* background-color: bisque; */
     overflow: auto;
+    font-size: 14px;
     
     /* Scrollbar */
     scrollbar-width: thin;
@@ -48,6 +49,7 @@
     -webkit-user-select: auto;
     user-select: auto;
     -moz-user-select: -moz-text;
+    display: inline-block;
 }
 
 .input-block {
@@ -55,10 +57,13 @@
     padding: 4px;
     border: 0;
     border-radius: 4px;
-    box-shadow: 2 2 2 2 #ccc;
     white-space: normal;
     word-wrap: break-word;
     background-color: white;
+    /*make the text center vertically */
+    min-height: 28px;
+    height: 28px;
+    line-height: 20px;
 }
 
 .input-block:hover {
