@@ -118,12 +118,10 @@ function render() {
      */
     let mdText = "";
     let blockElems = INPUT_CONTAINER.children;
-    console.log(blockElems);
     for (let i = 0; i < blockElems.length; i++) {
         let line = blockElems[i].textContent;
         mdText += line + '\n\n';
     }
-    console.log('mdText:', mdText);
     let html = marked(mdText);
     document.getElementById("md-container").innerHTML = html;
 
