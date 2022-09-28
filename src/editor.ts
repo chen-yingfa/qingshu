@@ -58,9 +58,9 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'ArrowDown':
             onInputArrowDown(event);
             break;
-        case 'ArrowUp':
-            onInputArrowUp(event);
-            break;
+        // case 'ArrowUp':
+        //     onInputArrowUp(event);
+        //     break;
         case 'Tab':
             onInputTab(event);
             break;
@@ -75,7 +75,7 @@ function onInputBlockKeyup(event: KeyboardEvent) {
     // Render
     let curBlock = getCurInputBlock();
     let html = marked(curBlock.innerText);
-    PREVIEW_CONTAINER.innerHTML = html;
+    document.getElementById("md-container").innerHTML = html;
 }
 
 function updateCaretPos() {
