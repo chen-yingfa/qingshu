@@ -1,41 +1,79 @@
 const { marked } = require('marked');
+const { clipboard } = require('electron');
 
 var INPUT_CONTAINER: HTMLDivElement;
 var PREVIEW_CONTAINER: HTMLDivElement;
 var lastFocusBlock: HTMLDivElement;
-var textContent: string;
 
+var inputBlocks: Array<HTMLDivElement>;
+
+// TODO: Each input block should save its own copy of MD text and caret pos.
+// Should wrap this into a `InputBlock` class.
+var curBlock: HTMLDivElement;  // The block that user is focusing.
+var mdText: string;
+var caretPos: number;
+
+/**
+ * Initialize all global variables
+ */
 function initGlobals() {
     INPUT_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
     PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
+    inputBlocks = [];
+
+    curBlock = null;  // Means that there is no current active input block.
+    caretPos = 0;
+    mdText = "";
 }
+
 
 function initListeners() {
     // No default listeners
-    INPUT_CONTAINER.addEventListener('paste', onPaste);
 }
+
+
 
 function onPaste(event: ClipboardEvent) {
     event.preventDefault();
+    if (curBlock) {
+        const clipboardText = clipboard.readText();
+        // const clipboardData = event.clipboardData.getData('text');
+        let sel = window.getSelection();
+        let range = sel.getRangeAt(0);
+        
+        
+        /**
+         * Scan the clipboard text, for all '\n', create a new line (new <div>)
+         * Then paste the remaining text into that div and repeat recursively.
+         */
+        let lineDiv = range.commonAncestorContainer.parentElement;
+        let curText = lineDiv.textContent;
+        let caretPos = range.startOffset;
+        
+        let textBefore = curText.slice(0, caretPos);
+        let textAfter = curText.slice(caretPos, curText.length);
+        let pasteLines = clipboardText.split('\n');
+        pasteLines[0] = textBefore + pasteLines[0];
+        pasteLines[pasteLines.length - 1] += textAfter;
+        for (let line of pasteLines) {
+            lineDiv.textContent = line;
+            let newLineDiv = document.createElement('div');
+            curBlock.insertBefore(newLineDiv, lineDiv.nextSibling);
+            lineDiv = newLineDiv;
+        }
 
-    let curBlock = getCurInputBlock();
-    let plainText = event.clipboardData.getData('text/plain');
-    insertTextAtCaret(plainText);
+        render();
+    }
 }
 
-function insertTextAtCaret(text) {
-    /**
-     * From: https://stackoverflow.com/questions/2920150/insert-text-at-cursor-in-a-content-editable-div
-     */
-    var sel, range;
-    if (window.getSelection) {
-        sel = window.getSelection();
-        if (sel.getRangeAt && sel.rangeCount) {
-            range = sel.getRangeAt(0);
-            range.deleteContents();
-            range.insertNode( document.createTextNode(text) );
-        }
-    }
+
+
+function onFocusBlock(event: FocusEvent) {
+    curBlock = event.target as HTMLDivElement;
+}
+
+function strInsert(s: string, to_insert: string, index: number): string {
+    return s.slice(0, 3) + to_insert + s.slice(3);
 }
 
 function onInputBlockKeyPress(event: KeyboardEvent) {
@@ -46,15 +84,20 @@ function onInputBlockKeyPress(event: KeyboardEvent) {
     }
 }
 
+/**
+ * All user input should first pass through this function.
+ * This should check for hotkeys, special inputs, etc.
+ * This should also intercept all default hotkeys of Chromium.
+ */
 function onInputBlockKeydown(event: KeyboardEvent) {
     // For ignoring all keydown events that are part of IMO composition
     if (event.isComposing || event.key == 'Process') return;
 
     updateCaretPos();
     switch (event.key) {
-        // case 'Enter':
-        //     onInputEnter(event);
-        //     break;
+        case 'Enter':
+            onInputEnter(event);
+            break;
         case 'ArrowDown':
             onInputArrowDown(event);
             break;
@@ -64,19 +107,39 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'Tab':
             onInputTab(event);
             break;
+        // case 'V':
+        //     if (event.ctrlKey) {
+        //         onInputPaste(event);
+        //     }
+        //     break;
     }
 
+    render();
+}
+
+/**
+ * Render current MD text into HTML and fill the preview container 
+ * with Rendered HTML.
+ */
+function render() { 
+    let html = marked(mdText);
+    document.getElementById("md-container").innerHTML = html;
 }
 
 function onInputBlockKeyup(event: KeyboardEvent) {
     // For ignoring all keydown events that are part of IMO composition
     if (event.isComposing || event.key == 'Process') return;
     
-    // Render
-    let curBlock = getCurInputBlock();
-    let html = marked(curBlock.innerText);
-    document.getElementById("md-container").innerHTML = html;
 }
+
+/**
+ * User has pressed CTRL + V on an input block.
+ */
+// function onInputPaste(event: KeyboardEvent) {
+//     navigator.clipboard.readText().then(text => {
+//         insertTextAtCaret(text);
+//     });
+// }
 
 function updateCaretPos() {
     let curBlock = getCurInputBlock();
@@ -84,8 +147,7 @@ function updateCaretPos() {
     // TODO: All methods for getting the position of the caret from the Internet
     // are not working. Just manually record the pos.
 
-    // let caretPos = getCaretPos(curBlock);
-    let caretPos = 0;
+    let caretPos = getCaretPos();
     let caretPosElem = document.getElementById('caret-position') as HTMLSpanElement;
     caretPosElem.innerText = caretPos.toString();
 }
@@ -100,6 +162,7 @@ function newInputBlock(): HTMLDivElement {
     let newBlock = document.createElement('div');
     newBlock.id = 'input-block';
     newBlock.contentEditable = 'true';
+    newBlock.innerHTML = "<div><br></div>";
     newBlock.classList.add('input-block');
     newBlock.addEventListener('keydown', onInputBlockKeydown);
     newBlock.addEventListener('keyup', onInputBlockKeyup);
@@ -107,9 +170,19 @@ function newInputBlock(): HTMLDivElement {
 }
 
 function onInputEnter(event: KeyboardEvent) {
-    console.log('Enter pressed');
     let curBlock = event.target as HTMLDivElement;
+
+    /**
+     * Slice the current block into two blocks.
+     */
+    let caretPos = getCaretPos();
+    let curText = curBlock.textContent;
+    let textBefore = curText.slice(0, caretPos);
+    let textAfter = curText.slice(caretPos, curText.length);
+    curBlock.textContent = textBefore;
+    
     let newBlock = newInputBlock();
+    newBlock.textContent = textAfter;
     INPUT_CONTAINER.insertBefore(newBlock, curBlock.nextSibling);
     newBlock.focus();
     event.preventDefault();
@@ -143,6 +216,17 @@ function initFirstBlock() {
     let firstBlock = newInputBlock();
     INPUT_CONTAINER.appendChild(firstBlock);
     firstBlock.focus();
+    firstBlock.addEventListener('paste', onPaste);
+    firstBlock.addEventListener('focus', onFocusBlock);
+    inputBlocks.push(firstBlock);
+}
+
+
+function getCaretPos() {
+    let sel = window.getSelection();
+    let range = sel.getRangeAt(0);
+    let caretPos = range.startOffset;
+    return caretPos;
 }
 
 initGlobals();
