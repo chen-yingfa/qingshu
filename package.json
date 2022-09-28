@@ -11,8 +11,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/marked": "^4.0.7",
     "electron": "^20.2.0",
     "marked": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/marked": "^4.0.7",
+    "typescript": "^4.8.4"
   }
 }
