@@ -219,16 +219,24 @@ export class Editor {
         let numBlocks = this.BLOCK_MANAGER.blocks.length;
         for (let i = 0; i < numBlocks; i++) {
             // Math block
-            if (this.BLOCK_MANAGER.blocks[i].classList.contains('input-block-math')) {
+            let block = this.BLOCK_MANAGER.blocks[i];
+            if (block.classList.contains('input-block-math')) {
                 let mathText = this.BLOCK_MANAGER.blocks[i].textContent;
-                mathText = mathText.substring(2, mathText.length - 4);
+                mathText = mathText.substring(2, mathText.length - 2);
                 console.log(mathText);
                 mathText.replace('\\', '\\\\');
-                htmlResult += '\n\n' + katex.renderToString(mathText, {
-                    throwOnError: 'false',
-                    output: 'html',
-                    displayMode: true,
-                });
+                try {
+
+                    htmlResult += '\n\n' + katex.renderToString(mathText, {
+                        output: 'html',
+                        displayMode: true,
+                    });
+                    block.classList.remove('input-block-math-error');
+                }
+                catch (e) {
+                    console.log(e);
+                    block.classList.add('input-block-math-error');
+                }
             } 
             // Regular text block
             else {
