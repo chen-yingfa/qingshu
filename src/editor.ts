@@ -1,11 +1,13 @@
 const { marked } = require('marked');
 const { clipboard } = require('electron');
 
+var ROOT_CONTAINER: HTMLDivElement;
 var INPUT_CONTAINER: HTMLDivElement;
 var PREVIEW_CONTAINER: HTMLDivElement;
 var lastFocusBlock: HTMLDivElement;
 var INDENT_LEN = 4;
 var FIRST_BLOCK: HTMLDivElement;
+var lastFocusBlock: HTMLDivElement;
 
 var inputBlocks: Array<HTMLDivElement>;
 
@@ -19,6 +21,7 @@ var caretPos: number;
  * Initialize all global variables
  */
 function initGlobals() {
+    ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
     INPUT_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
     PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
     inputBlocks = [];
@@ -31,8 +34,19 @@ function initGlobals() {
 
 function initListeners() {
     // No default listeners
+    INPUT_CONTAINER.addEventListener('click', onInputContainerClick);
 }
 
+
+/**
+ * If the click happens below all input blocks, 
+ * move caret to the end of last input block.
+ */
+function onInputContainerClick(event: MouseEvent) {
+    let blocks = INPUT_CONTAINER.children;
+    let lastBlock = blocks[blocks.length] as HTMLDivElement;
+    setCaretPos(lastBlock, lastBlock.textContent.length);
+}
 
 
 function onPaste(event: ClipboardEvent) {
@@ -99,17 +113,11 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'Enter':
             onInputEnter(event);
             break;
-        case 'ArrowDown':
-            onInputArrowDown(event);
-            break;
         case 'ArrowUp':
             onInputArrowUp(event);
             break;
-        case 'Tab':
-            onInputTab(event);
-            break;
-        case 'Backspace':
-            onBackspace(event);
+        case 'ArrowDown':
+            onInputArrowDown(event);
             break;
         case 'ArrowLeft':
             onArrowLeft(event);
@@ -117,7 +125,23 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'ArrowRight':
             onArrowRight(event);
             break;
+        case 'Tab':
+            onInputTab(event);
+            break;
+        case 'Backspace':
+            onBackspace(event);
+            break;
+        case 'Escape':
+            onEscape(event);
+            break;
     }
+}
+
+function onEscape(event: KeyboardEvent) {
+    let curBlock = event.target as HTMLDivElement;
+    curBlock.blur();
+    event.stopPropagation();
+    event.preventDefault();
 }
 
 function onArrowLeft(event: KeyboardEvent) {
@@ -250,9 +274,15 @@ function onInputArrowDown(event: KeyboardEvent) {
     console.log('Down arrow pressed');
     // Move cursor to next input block
     let curBlock = event.target as HTMLDivElement;
-    let nextBlock = curBlock.nextSibling as HTMLDivElement;
-    if (nextBlock != null) {
-        nextBlock.focus();
+    let caretPos = getCaretPos();
+    // Move to the beginning of next block if the caret is at the end of this block.
+    if (caretPos == curBlock.textContent.length) {
+        let nextBlock = curBlock.nextSibling as HTMLDivElement;
+        if (nextBlock) {
+            setCaretPos(nextBlock, 0);
+            event.stopPropagation();
+            event.preventDefault();
+        }
     }
 }
 
@@ -260,9 +290,15 @@ function onInputArrowUp(event: KeyboardEvent) {
     console.log('Up arrow pressed');
     // Move cursor to previous input block
     let curBlock = event.target as HTMLDivElement;
-    let prevBlock = curBlock.previousSibling as HTMLDivElement;
-    if (prevBlock != null) {
-        prevBlock.focus();
+    let caretPos = getCaretPos();
+    // Move to the end of previous block if caret is at the beginning of this block.
+    if (caretPos == 0) {
+        let prevBlock = curBlock.previousSibling as HTMLDivElement;
+        if (prevBlock) {
+            setCaretPos(prevBlock, prevBlock.textContent.length);
+            event.stopPropagation();
+            event.preventDefault();
+        }
     }
 }
 

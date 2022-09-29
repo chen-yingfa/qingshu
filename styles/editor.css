@@ -39,10 +39,6 @@
     scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
 }
 
-#md-container {
-    white-space: pre-wrap;
-}
-
 
 /* Input and render view */
 
