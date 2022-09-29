@@ -1,10 +1,7 @@
 const { marked } = require('marked');
 const { clipboard } = require('electron');
-// const { mathjax } = require('mathjax');
-const katex = require('katex');
-// import { InputBlock } from './inputBlock';
 import { BlockManager } from "./blockManager";
-
+const { loadAndTypeset, typesetMath } = require("mathjax-electron");
 
 
 export class Editor {
@@ -42,7 +39,7 @@ export class Editor {
 
     initListeners() {
         // No default listeners
-        this.BLOCK_CONTAINER.addEventListener('click', this.onInputContainerClick);
+        this.BLOCK_CONTAINER.onclick = this.onInputContainerClick.bind(this);
     }
 
     /**
@@ -52,6 +49,13 @@ export class Editor {
     onInputContainerClick(event: MouseEvent) {
         let lastBlock = this.BLOCK_MANAGER.blocks.at(-1);
         this.setCaretPos(lastBlock, lastBlock.textContent.length);
+    }
+
+    onClickInputBlock(event: MouseEvent) {
+        let curBlock = event.target as HTMLDivElement;
+        curBlock.focus();
+        event.stopPropagation();
+        event.preventDefault();
     }
 
     onPaste(event: ClipboardEvent) {
@@ -220,31 +224,14 @@ export class Editor {
         for (let i = 0; i < numBlocks; i++) {
             // Math block
             let block = this.BLOCK_MANAGER.blocks[i];
-            if (block.classList.contains('input-block-math')) {
-                let mathText = this.BLOCK_MANAGER.blocks[i].textContent;
-                mathText = mathText.substring(2, mathText.length - 2);
-                console.log(mathText);
-                mathText.replace('\\', '\\\\');
-                try {
-
-                    htmlResult += '\n\n' + katex.renderToString(mathText, {
-                        output: 'html',
-                        displayMode: true,
-                    });
-                    block.classList.remove('input-block-math-error');
-                }
-                catch (e) {
-                    console.log(e);
-                    block.classList.add('input-block-math-error');
-                }
-            } 
-            // Regular text block
-            else {
-                let md = this.BLOCK_MANAGER.blocks[i].textContent;
-                htmlResult += '\n\n' + marked(md);
-            }
+            let md = block.textContent;
+            htmlResult += '\n\n' + marked(md);
         }
-        document.getElementById("md-container").innerHTML = htmlResult;
+        let mdContainer = document.getElementById('md-container') as HTMLDivElement;
+        mdContainer.innerHTML = htmlResult;
+        // console.log('rendering with MathJax');
+        loadAndTypeset(document, mdContainer);
+        // typesetMath(mdContainer);
 
         this.updateCaretStatus();
     }
@@ -304,7 +291,7 @@ export class Editor {
             curBlock.classList.add('input-block-math');
             curBlock.textContent += '\n\n$$';
             this.setCaretPos(curBlock, caretPos + 1);
-            
+
             event.stopPropagation();
             event.preventDefault();
             return;
@@ -353,7 +340,7 @@ export class Editor {
         // Move to the end of previous block if caret is at the beginning of this block.
         if (caretPos == 0) {
             let prevBlock = curBlock.previousSibling as HTMLDivElement;
-            if (prevBlock) { 
+            if (prevBlock) {
                 this.setCaretPos(prevBlock, prevBlock.textContent.length);
                 event.stopPropagation();
                 event.preventDefault();
@@ -412,7 +399,7 @@ export class Editor {
         elem.focus();
         let sel = window.getSelection();
         let range = document.createRange();
-        range.setStart(elem.childNodes[0], index);
+        range.setStart(elem, index);
         range.collapse(true);
 
         sel.removeAllRanges();

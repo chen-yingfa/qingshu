@@ -55,10 +55,10 @@ export class BlockManager {
     }
 
     newBlock(): HTMLDivElement {
-        let newInputDiv = document.createElement('div');
-        newInputDiv.id = 'input-block';
-        newInputDiv.contentEditable = 'true';
-        newInputDiv.classList.add('input-block');
+        let div = document.createElement('div');
+        div.id = 'input-block';
+        div.contentEditable = 'true';
+        div.classList.add('input-block');
 
         /**
          * Pass all event listeners to the Editor class.
@@ -67,10 +67,11 @@ export class BlockManager {
          * elements of the input blocks, which are managed by the BlockManager 
          * class.
          */
-        newInputDiv.onkeydown = this.editor.onInputBlockKeydown.bind(this.editor);
-        newInputDiv.onkeyup = this.editor.onInputBlockKeyup.bind(this.editor);
-        newInputDiv.onpaste = this.editor.onPaste.bind(this.editor);
-        newInputDiv.onfocus = this.editor.onFocusBlock.bind(this.editor);
-        return newInputDiv;
+        div.onkeydown = this.editor.onInputBlockKeydown.bind(this.editor);
+        div.onkeyup = this.editor.onInputBlockKeyup.bind(this.editor);
+        div.onpaste = this.editor.onPaste.bind(this.editor);
+        div.onfocus = this.editor.onFocusBlock.bind(this.editor);
+        div.onclick = this.editor.onClickInputBlock.bind(this.editor);
+        return div;
     }
 }
