@@ -1,6 +1,7 @@
 const { marked } = require('marked');
 const { clipboard } = require('electron');
-// const { katex } = require('katex');
+// const { mathjax } = require('mathjax');
+const katex = require('katex');
 // import { InputBlock } from './inputBlock';
 import { BlockManager } from "./blockManager";
 
@@ -39,12 +40,10 @@ export class Editor {
         this.BLOCK_MANAGER = new BlockManager(this, this.BLOCK_CONTAINER);
     }
 
-
     initListeners() {
         // No default listeners
         this.BLOCK_CONTAINER.addEventListener('click', this.onInputContainerClick);
     }
-
 
     /**
      * If the click happens below all input blocks, 
@@ -54,7 +53,6 @@ export class Editor {
         let lastBlock = this.BLOCK_MANAGER.blocks.at(-1);
         this.setCaretPos(lastBlock, lastBlock.textContent.length);
     }
-
 
     onPaste(event: ClipboardEvent) {
         event.preventDefault();
@@ -93,12 +91,9 @@ export class Editor {
         }
     }
 
-
-
     onFocusBlock(event: FocusEvent) {
         // ...
     }
-
 
     /**
      * Insert a string `to_insert` into another string `s` at given index.
@@ -210,25 +205,41 @@ export class Editor {
     /**
      * Render current MD text into HTML and fill the preview container 
      * with Rendered HTML.
+     * 
+     * This will render each input block individually, then combine the HTML 
+     * result.
      */
     render() {
         /**
          * Concatenate text of all input blocks
          */
-        let mdText = "";
+        // let mdText = "";
+        let htmlResult = "";
         // let blockElems = INPUT_CONTAINER.children;
         let numBlocks = this.BLOCK_MANAGER.blocks.length;
         for (let i = 0; i < numBlocks; i++) {
-            let line = this.BLOCK_MANAGER.blocks[i].textContent;
-            mdText += line + '\n\n';
+            // Math block
+            if (this.BLOCK_MANAGER.blocks[i].classList.contains('input-block-math')) {
+                let mathText = this.BLOCK_MANAGER.blocks[i].textContent;
+                mathText = mathText.substring(2, mathText.length - 4);
+                console.log(mathText);
+                mathText.replace('\\', '\\\\');
+                htmlResult += '\n\n' + katex.renderToString(mathText, {
+                    throwOnError: 'false',
+                    output: 'html',
+                    displayMode: true,
+                });
+            } 
+            // Regular text block
+            else {
+                let md = this.BLOCK_MANAGER.blocks[i].textContent;
+                htmlResult += '\n\n' + marked(md);
+            }
         }
-        let html = marked(mdText);
-        document.getElementById("md-container").innerHTML = html;
+        document.getElementById("md-container").innerHTML = htmlResult;
 
         this.updateCaretStatus();
     }
-
-
 
     updateCaretStatus() {
         // Line number
@@ -255,13 +266,41 @@ export class Editor {
         /**
          * Handle math block
          */
-        if (curText == '$$') {
+        if (curBlock.classList.contains('input-block-math')) {
+            /**
+             * Handle leaving latex mode
+             */
+
+            // If CTRL is held down
+            if (event.ctrlKey) {
+                // Create new text block below
+                let newBlock = this.BLOCK_MANAGER.newBlock();
+                this.BLOCK_MANAGER.insertBlockAfter(newBlock, curBlock);
+                newBlock.focus();
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        /**
+         * Handle creation of math block
+         */
+        if (curText == '$$' || curText == '￥￥') {
+            if (curText == '￥￥') {
+                curBlock.textContent = '$$';
+                curText = '$$';
+            }
             // Turn this into a math block.
+            let caretPos = this.getCaretPos();
+            curBlock.classList.add('input-block-math');
+            curBlock.textContent += '\n\n$$';
+            this.setCaretPos(curBlock, caretPos + 1);
+            
             event.stopPropagation();
             event.preventDefault();
             return;
         }
-
 
         /**
          * Handle regular text.
@@ -284,7 +323,6 @@ export class Editor {
     }
 
     onInputArrowDown(event: KeyboardEvent) {
-        console.log('Down arrow pressed');
         // Move cursor to next input block
         let curBlock = event.target as HTMLDivElement;
         let caretPos = this.getCaretPos();
@@ -307,14 +345,13 @@ export class Editor {
         // Move to the end of previous block if caret is at the beginning of this block.
         if (caretPos == 0) {
             let prevBlock = curBlock.previousSibling as HTMLDivElement;
-            if (prevBlock) {
+            if (prevBlock) { 
                 this.setCaretPos(prevBlock, prevBlock.textContent.length);
                 event.stopPropagation();
                 event.preventDefault();
             }
         }
     }
-
 
     /**
      * Triggered when TAB is pressed on an input block.
@@ -372,22 +409,7 @@ export class Editor {
 
         sel.removeAllRanges();
         sel.addRange(range);
-
     }
-
-    // newInputDiv(): HTMLDivElement {
-    //     let newInputDiv = document.createElement('div');
-    //     newInputDiv.id = 'input-block';
-    //     newInputDiv.contentEditable = 'true';
-    //     newInputDiv.classList.add('input-block');
-    //     newInputDiv.addEventListener('keydown', onInputBlockKeydown);
-    //     newInputDiv.addEventListener('keyup', onInputBlockKeyup);
-    //     newInputDiv.addEventListener('paste', onPaste);
-    //     newInputDiv.addEventListener('focus', onFocusBlock);
-    //     return newInputDiv;
-    // }
-
-
 }
 
 var EDITOR: Editor;
