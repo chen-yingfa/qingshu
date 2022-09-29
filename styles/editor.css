@@ -18,6 +18,7 @@
     flex-direction: column;
     justify-content: flex-start;
     gap: 4px;
+    white-space: pre-wrap;
     
     /* Scrollbar */
     scrollbar-width: thin;
@@ -36,6 +37,10 @@
     /* Scrollbar */
     scrollbar-width: thin;
     scrollbar-color: rgba(99, 99, 99, 0.2) rgba(99, 99, 99, 0.2);
+}
+
+#md-container {
+    white-space: pre-wrap;
 }
 
 
@@ -57,7 +62,7 @@
     padding: 4px;
     border: 0;
     border-radius: 4px;
-    white-space: normal;
+    white-space: pre-wrap;
     word-wrap: break-word;
     background-color: white;
     /*make the text center vertically */

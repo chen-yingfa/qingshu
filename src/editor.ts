@@ -4,6 +4,7 @@ const { clipboard } = require('electron');
 var INPUT_CONTAINER: HTMLDivElement;
 var PREVIEW_CONTAINER: HTMLDivElement;
 var lastFocusBlock: HTMLDivElement;
+var INDENT_LEN = 4;
 
 var inputBlocks: Array<HTMLDivElement>;
 
@@ -76,8 +77,12 @@ function onFocusBlock(event: FocusEvent) {
     curBlock = event.target as HTMLDivElement;
 }
 
+
+/**
+ * Insert a string `to_insert` into another string `s` at given index.
+ */
 function strInsert(s: string, to_insert: string, index: number): string {
-    return s.slice(0, 3) + to_insert + s.slice(3);
+    return s.slice(0, index) + to_insert + s.slice(index);
 }
 
 /**
@@ -203,8 +208,34 @@ function onInputArrowUp(event: KeyboardEvent) {
     }
 }
 
+
+/**
+ * Triggered when TAB is pressed on an input block.
+ * Should insert 4 spaces at caret.
+ */
 function onInputTab(event: KeyboardEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
     let curBlock = event.target as HTMLDivElement;
+    let indentStr = '        '.substring(0, INDENT_LEN);  // INDENT_LEN * ' '
+
+    let curText = curBlock.textContent;
+    let caretPos = getCaretPos();
+
+    console.log('Tab pressed');
+    console.log(curText);
+    console.log('Caret pos: ' + caretPos);
+
+    curText = strInsert(curText, indentStr, caretPos);
+    caretPos += INDENT_LEN;
+
+    curBlock.textContent = curText;
+    setCaretPos(curBlock, caretPos);
+
+    console.log('Tab pressed');
+    console.log(curText);
+    console.log('Caret pos: ' + caretPos);
 }
 
 function initFirstBlock() {
@@ -220,6 +251,16 @@ function getCaretPos() {
     let range = sel.getRangeAt(0);
     let caretPos = range.startOffset;
     return caretPos;
+}
+
+function setCaretPos(elem: HTMLElement, index: number) {
+    let sel = window.getSelection();
+    let range = document.createRange();
+    range.setStart(elem.childNodes[0], index);
+    range.collapse(true);
+
+    sel.removeAllRanges();
+    sel.addRange(range);
 }
 
 initGlobals();
