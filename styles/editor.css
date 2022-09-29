@@ -56,7 +56,7 @@
 .input-block {
     margin: 0;
     padding: 4px;
-    border: 0;
+    border: 2px solid rgba(0,0,0,0);
     border-radius: 4px;
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -71,3 +71,11 @@
     box-shadow: rgba(100, 100, 111, 0.2) 0px 7px 29px 0px;
 }
 
+.input-block:focus {
+    outline: none;
+    box-shadow: rgba(100, 100, 111, 0.2) 0px 7px 29px 0px;
+}
+
+.input-block-math-error {
+    border: 2px solid red;
+}
