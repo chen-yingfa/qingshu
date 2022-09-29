@@ -5,6 +5,7 @@ var INPUT_CONTAINER: HTMLDivElement;
 var PREVIEW_CONTAINER: HTMLDivElement;
 var lastFocusBlock: HTMLDivElement;
 var INDENT_LEN = 4;
+var FIRST_BLOCK: HTMLDivElement;
 
 var inputBlocks: Array<HTMLDivElement>;
 
@@ -107,6 +108,63 @@ function onInputBlockKeydown(event: KeyboardEvent) {
         case 'Tab':
             onInputTab(event);
             break;
+        case 'Backspace':
+            onBackspace(event);
+            break;
+        case 'ArrowLeft':
+            onArrowLeft(event);
+            break;
+        case 'ArrowRight':
+            onArrowRight(event);
+            break;
+    }
+}
+
+function onArrowLeft(event: KeyboardEvent) {
+    console.log('Arrow left');
+    let caretPos = getCaretPos();
+    // Move to end of previous block if caret is at the beginning of this block.
+    if (caretPos == 0) {
+        let prevBlock = curBlock.previousSibling as HTMLDivElement;
+        if (prevBlock) {
+            setCaretPos(prevBlock, prevBlock.textContent.length);
+            event.stopPropagation();
+            event.preventDefault();
+        }
+    }
+}
+
+function onArrowRight(event: KeyboardEvent) {
+    let caretPos = getCaretPos();
+    let curBlock = event.target as HTMLDivElement;
+    // Move to beginning of next block if caret is at the end of this block.
+    if (caretPos == curBlock.textContent.length) {
+        let nextBlock = curBlock.nextSibling as HTMLDivElement;
+        if (nextBlock) {
+            setCaretPos(nextBlock, 0);
+            event.stopPropagation();
+            event.preventDefault();
+        }
+    }
+}
+
+function onBackspace(event: KeyboardEvent) {
+    let caretPos = getCaretPos();
+    let curBlock = event.target as HTMLDivElement;
+    
+    // Concatenate this block and previous block if the caret is on index 0.
+    if (caretPos == 0) {
+        if (curBlock != FIRST_BLOCK) {
+            let curText = curBlock.textContent;
+            let prevBlock = curBlock.previousSibling as HTMLDivElement;
+            let prevText = prevBlock.textContent;
+            prevBlock.textContent = prevText + curText;
+            INPUT_CONTAINER.removeChild(curBlock);
+            prevBlock.focus();
+            setCaretPos(prevBlock, prevText.length);
+            event.stopPropagation();
+            event.preventDefault();
+        }
     }
 }
 
@@ -239,10 +297,10 @@ function onInputTab(event: KeyboardEvent) {
 }
 
 function initFirstBlock() {
-    let firstBlock = newInputBlock();
-    INPUT_CONTAINER.appendChild(firstBlock);
-    firstBlock.focus();
-    inputBlocks.push(firstBlock);
+    FIRST_BLOCK = newInputBlock();
+    INPUT_CONTAINER.appendChild(FIRST_BLOCK);
+    FIRST_BLOCK.focus();
+    inputBlocks.push(FIRST_BLOCK);
 }
 
 
@@ -253,7 +311,15 @@ function getCaretPos() {
     return caretPos;
 }
 
-function setCaretPos(elem: HTMLElement, index: number) {
+/**
+ * Set the caret pos onto given element at given index.
+ * This will focus the element if it's not focused. 
+ * 
+ * @param elem The element to set caret pos on. It should be an input block.
+ * @param index The index to set caret pos to
+ */
+function setCaretPos(elem: HTMLDivElement, index: number) {
+    elem.focus();
     let sel = window.getSelection();
     let range = document.createRange();
     range.setStart(elem.childNodes[0], index);
@@ -261,6 +327,7 @@ function setCaretPos(elem: HTMLElement, index: number) {
 
     sel.removeAllRanges();
     sel.addRange(range);
+
 }
 
 initGlobals();
