@@ -12,9 +12,9 @@
   "license": "ISC",
   "dependencies": {
     "electron": "^20.2.0",
-    "katex": "^0.16.2",
     "marked": "^4.1.0",
-    "mathjax": "^3.2.2"
+    "mathjax": "^3.2.2",
+    "mathjax-electron": "^3.0.0"
   },
   "devDependencies": {
     "@types/marked": "^4.0.7",
