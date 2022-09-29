@@ -1,21 +1,21 @@
 const { marked } = require('marked');
 const { clipboard } = require('electron');
+const { katex } = require('katex');
+// import { InputBlock } from './inputBlock';
 
+/**
+ * Settings
+ */
+var INDENT_LEN: number = 4;
+
+
+/**
+ * Global variables
+ */
 var ROOT_CONTAINER: HTMLDivElement;
 var INPUT_CONTAINER: HTMLDivElement;
 var PREVIEW_CONTAINER: HTMLDivElement;
-var lastFocusBlock: HTMLDivElement;
-var INDENT_LEN = 4;
-var FIRST_BLOCK: HTMLDivElement;
-var lastFocusBlock: HTMLDivElement;
 
-var inputBlocks: Array<HTMLDivElement>;
-
-// TODO: Each input block should save its own copy of MD text and caret pos.
-// Should wrap this into a `InputBlock` class.
-var curBlock: HTMLDivElement;  // The block that user is focusing.
-var mdText: string;
-var caretPos: number;
 
 /**
  * Initialize all global variables
@@ -24,11 +24,6 @@ function initGlobals() {
     ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
     INPUT_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
     PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
-    inputBlocks = [];
-
-    curBlock = null;  // Means that there is no current active input block.
-    caretPos = 0;
-    mdText = "";
 }
 
 
@@ -51,6 +46,7 @@ function onInputContainerClick(event: MouseEvent) {
 
 function onPaste(event: ClipboardEvent) {
     event.preventDefault();
+    let curBlock = event.target as HTMLDivElement;
     if (curBlock) {
         console.log('Pasting');
         const clipboardText = clipboard.readText();
@@ -76,8 +72,7 @@ function onPaste(event: ClipboardEvent) {
 
         curBlock.textContent = pasteLines[0];
         for (let i = 1; i < pasteLines.length; i++) {
-            let newBlock = newInputBlock();
-            INPUT_CONTAINER.insertBefore(newBlock, curBlock.nextSibling);
+            let newBlock = BLOCK_MANAGER.createBlockAfter(curBlock);
             newBlock.textContent = pasteLines[i];
             curBlock = newBlock;
         }
@@ -89,7 +84,7 @@ function onPaste(event: ClipboardEvent) {
 
 
 function onFocusBlock(event: FocusEvent) {
-    curBlock = event.target as HTMLDivElement;
+    // ...
 }
 
 
@@ -146,6 +141,7 @@ function onEscape(event: KeyboardEvent) {
 
 function onArrowLeft(event: KeyboardEvent) {
     console.log('Arrow left');
+    let curBlock = event.target as HTMLDivElement;
     let caretPos = getCaretPos();
     // Move to end of previous block if caret is at the beginning of this block.
     if (caretPos == 0) {
@@ -178,7 +174,7 @@ function onBackspace(event: KeyboardEvent) {
     
     // Concatenate this block and previous block if the caret is on index 0.
     if (caretPos == 0) {
-        if (curBlock != FIRST_BLOCK) {
+        if (curBlock != BLOCK_MANAGER.blocks[0]) {
             let curText = curBlock.textContent;
             let prevBlock = curBlock.previousSibling as HTMLDivElement;
             let prevText = prevBlock.textContent;
@@ -239,33 +235,34 @@ function getCurInputBlock() {
     return curBlock;
 }
 
-function newInputBlock(): HTMLDivElement {
-    let newBlock = document.createElement('div');
-    newBlock.id = 'input-block';
-    newBlock.contentEditable = 'true';
-    newBlock.classList.add('input-block');
-    newBlock.addEventListener('keydown', onInputBlockKeydown);
-    newBlock.addEventListener('keyup', onInputBlockKeyup);
-    newBlock.addEventListener('paste', onPaste);
-    newBlock.addEventListener('focus', onFocusBlock);
-    return newBlock;
-}
-
 function onInputEnter(event: KeyboardEvent) {
     let curBlock = event.target as HTMLDivElement;
+    let curText = curBlock.textContent;
 
     /**
+     * Handle math block
+     */
+    if (curText == '$$') {
+        // Turn this into a math block.
+
+        event.stopPropagation();
+        event.preventDefault();
+        return;
+    }
+
+
+    /**
+     * Handle regular text.
      * Slice the current block into two blocks.
      */
     let caretPos = getCaretPos();
-    let curText = curBlock.textContent;
     let textBefore = curText.slice(0, caretPos);
     let textAfter = curText.slice(caretPos, curText.length);
     curBlock.textContent = textBefore;
     
-    let newBlock = newInputBlock();
+    let newBlock = BLOCK_MANAGER.createBlockAfter(curBlock);
     newBlock.textContent = textAfter;
-    INPUT_CONTAINER.insertBefore(newBlock, curBlock.nextSibling);
+    // INPUT_CONTAINER.insertBefore(newBlock, curBlock.nextSibling);
     newBlock.focus();
     event.preventDefault();
 }
@@ -332,14 +329,10 @@ function onInputTab(event: KeyboardEvent) {
     console.log('Caret pos: ' + caretPos);
 }
 
-function initFirstBlock() {
-    FIRST_BLOCK = newInputBlock();
-    INPUT_CONTAINER.appendChild(FIRST_BLOCK);
-    FIRST_BLOCK.focus();
-    inputBlocks.push(FIRST_BLOCK);
-}
-
-
+/**
+ * Get the pos of caret.
+ * This assumes that an input block is being focused.
+ */
 function getCaretPos() {
     let sel = window.getSelection();
     let range = sel.getRangeAt(0);
@@ -366,7 +359,56 @@ function setCaretPos(elem: HTMLDivElement, index: number) {
 
 }
 
+class BlockManager {
+    public blocks: HTMLDivElement[] = [];
+
+    constructor() {
+        this.blocks = [];
+    }
+
+    public initFirstBlock() {
+        let newBlock = this.newInputBlock();
+        newBlock.focus();
+        this.blocks.push(newBlock);
+        INPUT_CONTAINER.appendChild(newBlock);
+    }
+
+    public newInputBlock(): HTMLDivElement {
+        let newInputDiv = document.createElement('div');
+        newInputDiv.id = 'input-block';
+        newInputDiv.contentEditable = 'true';
+        newInputDiv.classList.add('input-block');
+        newInputDiv.addEventListener('keydown', onInputBlockKeydown);
+        newInputDiv.addEventListener('keyup', onInputBlockKeyup);
+        newInputDiv.addEventListener('paste', onPaste);
+        newInputDiv.addEventListener('focus', onFocusBlock);
+    
+        return newInputDiv;
+    }
+    
+    /**
+     * Insert before the given block. `toInsert` will be placed at the position
+     * of `child`'s current position, and child will be moved to the next position.
+     */
+    public insertBeforeBlock(toInsert: HTMLDivElement, child: HTMLDivElement) {
+        INPUT_CONTAINER.insertBefore(toInsert, child);
+        this.blocks.splice(this.blocks.indexOf(child), 0, toInsert);
+    }
+    
+    public insertAfterBlock(toInsert: HTMLDivElement, child: HTMLDivElement) {
+        this.insertBeforeBlock(toInsert, child.nextSibling as HTMLDivElement);
+    }
+
+    public createBlockAfter(child: HTMLDivElement): HTMLDivElement {
+        let newBlock = this.newInputBlock();
+        this.insertAfterBlock(newBlock, child);
+        return newBlock;
+    }
+}
+
+var BLOCK_MANAGER = new BlockManager();
+
 initGlobals();
 initListeners();
-initFirstBlock();
+BLOCK_MANAGER.initFirstBlock();
 render()
