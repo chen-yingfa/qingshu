@@ -24,6 +24,7 @@ Because none of the existing markdown editors satisfy all of the following:
 ## Features
 
 - Live preview
+- Math rendering with MathJax
 
 ## Upcoming Features
 
