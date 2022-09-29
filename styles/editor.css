@@ -18,6 +18,7 @@
     flex-direction: column;
     justify-content: flex-start;
     gap: 4px;
+    white-space: pre-wrap;
     
     /* Scrollbar */
     scrollbar-width: thin;
@@ -44,7 +45,7 @@
 [contenteditable] {
     /* display: inline; */
     white-space: nowrap;
-    overflow: hidden;
+    /* overflow: hidden; */
     text-overflow: inherit;
     -webkit-user-select: auto;
     user-select: auto;
@@ -57,12 +58,12 @@
     padding: 4px;
     border: 0;
     border-radius: 4px;
-    white-space: normal;
+    white-space: pre-wrap;
     word-wrap: break-word;
     background-color: white;
     /*make the text center vertically */
     min-height: 28px;
-    height: 28px;
+    /* height: 28px; */
     line-height: 20px;
 }
 
