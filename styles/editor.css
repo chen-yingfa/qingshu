@@ -77,7 +77,11 @@
 }
 
 .input-block-math {
-    border-left: 6px solid #00b4d8;
+    border-left: 4px solid #00b4d8;
+}
+
+.input-block-code {
+    border-left: 4px solid #00d8b3;
 }
 
 .input-block-math-error {

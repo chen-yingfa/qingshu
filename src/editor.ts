@@ -3,6 +3,7 @@ const { clipboard } = require('electron');
 import { BlockManager } from "./blockManager";
 const { loadAndTypeset } = require("mathjax-electron");
 const { strInsert, isAlpha } = require('./utils');
+const { ipcRenderer } = require('electron');
 
 let keybindings = require('./keybindings.json');
 
@@ -159,8 +160,6 @@ export class Editor {
                 console.log('evaluating:', action);
                 eval(action);
             }
-            event.stopPropagation();
-            event.preventDefault();
         }
 
     }
@@ -234,7 +233,7 @@ export class Editor {
         let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
         console.log(curBlock);
         if (!curBlock) return;
-        
+
         let caretPos = this.getCaretPos(curBlock);
         this.insertTextAtCaret(curBlock, '**');
         this.setCaretPos(curBlock, caretPos + 1);
@@ -247,7 +246,7 @@ export class Editor {
         let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
         console.log(curBlock);
         if (!curBlock) return;
-        
+
         let caretPos = this.getCaretPos(curBlock);
         this.insertTextAtCaret(curBlock, '****');
         this.setCaretPos(curBlock, caretPos + 2);
@@ -294,8 +293,6 @@ export class Editor {
     }
 
     onInputEnter(event: KeyboardEvent) {
-        event.preventDefault();
-        event.stopPropagation();
         let curBlock = event.target as HTMLDivElement;
         let curText = curBlock.textContent;
         let caretPos = this.getCaretPos(curBlock);
@@ -319,19 +316,59 @@ export class Editor {
             return;
         }
         /**
-         * Handle creation of math block
+         * Handle code block
          */
-        if (curText == '$$' || curText == '￥￥') {
-            // Turn this into a math block.
-            curBlock.textContent =  '$$\n\n$$';
-            this.setCaretPos(curBlock, 3);
-            
-            curBlock.classList.add('input-block-math');
+        else if (curBlock.classList.contains('input-block-code')) {
+            if (event.ctrlKey || caretPos == curText.length) {
+                // Create new text block below
+                let newBlock = this.BLOCK_MANAGER.newBlock();
+                this.BLOCK_MANAGER.insertBlockAfter(newBlock, curBlock);
+                newBlock.focus();
+            }
+            // curBlock.textContent += '\n';
+            this.insertTextAtCaret(curBlock, '\n');
+            this.setCaretPos(curBlock, caretPos + 1);
+            event.preventDefault();
+            event.stopPropagation();
             return;
         }
 
         /**
-         * Handle regular text.
+         * The code below will create a new block, its type depends on the 
+         * content of current block.
+         */
+        event.preventDefault();
+        event.stopPropagation();
+        /**
+         * Handle creation of math block
+         */
+        if (curText == '$$' || curText == '￥￥') {
+            // Turn this block into a math block.
+            curBlock.textContent = '$$\n\n$$';
+            this.setCaretPos(curBlock, 3);
+            curBlock.classList.add('input-block-math');
+            return;
+        }
+        /**
+         * Handle creation of code block
+         */
+        if (
+            curText.startsWith('```') ||
+            curText.startsWith('···')     // Chinese IME outputs '·' when pressing the key for '`'
+        ) {
+            if (curText.startsWith('···')) {
+                curText = '```' + curText.substring(3, curText.length);
+            }
+            // Turn this block into a code block.
+            // this.insertTextAtCaret(curBlock, '\n\n```');
+            curBlock.textContent = curText + '\n\n```';
+            this.setCaretPos(curBlock, caretPos + 1);
+            curBlock.classList.add('input-block-code');
+            return;
+        }
+
+        /**
+         * Create regular text block.
          * Slice the current block into two blocks.
          */
         let textBefore = curText.slice(0, caretPos);
@@ -422,6 +459,8 @@ export class Editor {
      * Set the caret pos onto given element at given index.
      * This will focus the element if it's not focused. 
      * 
+     * see: https://stackoverflow.com/questions/36869503/set-caret-position-in-contenteditable-div-that-has-children
+     * 
      * @param elem The element to set caret pos on. It should be an input block.
      * @param index The index to set caret pos to
      */
@@ -460,3 +499,10 @@ export class Editor {
 
 var editor: Editor;
 editor = new Editor();
+
+/**
+ * Keybindings
+ */
+function closeWindow() {
+    ipcRenderer.send('close-window');
+}
