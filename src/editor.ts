@@ -2,7 +2,9 @@ const { marked } = require('marked');
 const { clipboard } = require('electron');
 import { BlockManager } from "./blockManager";
 const { loadAndTypeset } = require("mathjax-electron");
-const { strInsert } = require('./utils');
+const { strInsert, isAlpha } = require('./utils');
+
+let keybindings = require('./keybindings.json');
 
 export class Editor {
     /**
@@ -13,9 +15,9 @@ export class Editor {
     /**
      * Global variables
      */
-    ROOT_CONTAINER: HTMLDivElement;
+    // ROOT_CONTAINER: HTMLDivElement;
     BLOCK_CONTAINER: HTMLDivElement;
-    PREVIEW_CONTAINER: HTMLDivElement;
+    // PREVIEW_CONTAINER: HTMLDivElement;
     BLOCK_MANAGER: BlockManager;
 
     constructor() {
@@ -31,9 +33,9 @@ export class Editor {
      * Initialize all global variables
      */
     initGlobals() {
-        this.ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
+        // this.ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
         this.BLOCK_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
-        this.PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
+        // this.PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
         this.BLOCK_MANAGER = new BlockManager(this, this.BLOCK_CONTAINER);
     }
 
@@ -133,7 +135,34 @@ export class Editor {
             case 'Escape':
                 this.onInputEscape(event);
                 break;
+            default:
+                if (isAlpha(event.key)) {
+                    this.onInputAlpha(event);
+                }
+                break;
         }
+    }
+
+    onInputAlpha(event: KeyboardEvent) {
+        /**
+         * Check if the input matches any keybindings specified in "keybindings.json".
+         */
+        if (event.ctrlKey) {
+            let keyName = `ctrl`;
+            if (event.shiftKey) {
+                keyName += '+shift';
+            }
+            keyName += '+' + event.key.toUpperCase();
+            console.log(keyName);
+            if (keyName in keybindings) {
+                let action = keybindings[keyName] + '()';
+                console.log('evaluating:', action);
+                eval(action);
+            }
+            event.stopPropagation();
+            event.preventDefault();
+        }
+
     }
 
     onInputEscape(event: KeyboardEvent) {
@@ -196,6 +225,32 @@ export class Editor {
         if (event.isComposing || event.key == 'Process') return;
 
         this.renderAll();
+    }
+
+    /**
+     * This will be called by evaluating a value string in "keybindings.json".
+     */
+    insertItalic() {
+        let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
+        console.log(curBlock);
+        if (!curBlock) return;
+        
+        let caretPos = this.getCaretPos(curBlock);
+        this.insertTextAtCaret(curBlock, '**');
+        this.setCaretPos(curBlock, caretPos + 1);
+    }
+
+    /**
+     * This will be called by evaluating a value string in "keybindings.json".
+     */
+    insertBold() {
+        let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
+        console.log(curBlock);
+        if (!curBlock) return;
+        
+        let caretPos = this.getCaretPos(curBlock);
+        this.insertTextAtCaret(curBlock, '****');
+        this.setCaretPos(curBlock, caretPos + 2);
     }
 
     /**
@@ -390,7 +445,7 @@ export class Editor {
         let col = 0;
         let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
         if (curBlock) {
-            row = Array.from(this.BLOCK_CONTAINER.children).indexOf(curBlock);
+            row = this.BLOCK_MANAGER.getIndexOfBlock(curBlock);
             col = this.getCaretPos(curBlock);
         }
         this.setCaretStatus(row, col);
@@ -403,5 +458,5 @@ export class Editor {
     }
 }
 
-var EDITOR: Editor;
-EDITOR = new Editor();
+var editor: Editor;
+editor = new Editor();

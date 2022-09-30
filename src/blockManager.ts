@@ -118,4 +118,8 @@ export class BlockManager {
             return null;
         }
     }
+
+    getIndexOfBlock(block: HTMLDivElement): number {
+        return Array.from(this.blockContainer.children).indexOf(block);
+    }
 }

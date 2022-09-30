@@ -6,3 +6,6 @@ export function strInsert(s: string, to_insert: string, index: number): string {
 }
 
 
+export function isAlpha(str) {
+    return str.length === 1 && str.match(/[a-z]/i);
+}
