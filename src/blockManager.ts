@@ -8,20 +8,20 @@ import type { Editor } from './editor';
  * This also manages all <div> of the input blocks.
  */
 export class BlockManager {
-    blocks: HTMLDivElement[] = [];
+    // blocks: HTMLDivElement[] = [];
     blockContainer: HTMLDivElement;
     editor: Editor;
 
     constructor(editor: Editor, blockContainer: HTMLDivElement) {
         console.log('BlockManager constructor');
-        this.blocks = [];
+        // this.blocks = [];
         this.editor = editor;
         this.blockContainer = blockContainer;
     }
 
     public initFirstBlock(): HTMLDivElement {
         let firstBlock = this.newBlock();
-        this.blocks.push(firstBlock);
+        // this.blocks.push(firstBlock);
         this.blockContainer.appendChild(firstBlock);
         return firstBlock;
     }
@@ -36,16 +36,23 @@ export class BlockManager {
      */
     insertBlockBefore(toInsert: HTMLDivElement, child: HTMLDivElement) {
         this.blockContainer.insertBefore(toInsert, child);
-        if (child) {
-            let index = this.blocks.indexOf(child);
-            this.blocks.splice(index, 0, toInsert);
-        } else {
-            this.blocks.push(toInsert);
-        }
+        // if (child) {
+        //     let index = this.blocks.indexOf(child);
+        //     this.blocks.splice(index, 0, toInsert);
+        // } else {
+        //     this.blocks.push(toInsert);
+        // }
     }
     
     insertBlockAfter(toInsert: HTMLDivElement, child: HTMLDivElement) {
         this.insertBlockBefore(toInsert, child.nextSibling as HTMLDivElement);
+    }
+
+    /**
+     *  
+     */
+    removeBlock(block: HTMLDivElement) {
+        this.blockContainer.removeChild(block);
     }
 
     createBlockAfter(child: HTMLDivElement): HTMLDivElement {
@@ -73,5 +80,46 @@ export class BlockManager {
         div.onfocus = this.editor.onFocusBlock.bind(this.editor);
         div.onclick = this.editor.onClickInputBlock.bind(this.editor);
         return div;
+    }
+
+    /**
+     * Get the first block in the block container.
+     */
+    getFirstBlock(): HTMLDivElement {
+        return this.blockContainer.firstChild as HTMLDivElement;
+    }
+
+    /**
+     * Get the last block in the block container.
+     */
+    getLastBlock(): HTMLDivElement {
+        return this.blockContainer.lastChild as HTMLDivElement;
+    }
+
+    /**
+     * Get number of blocks in the block container.
+     */
+    getBlockCount(): number {
+        return this.blockContainer.childElementCount;
+    }
+
+    getBlock(index: number): HTMLDivElement {
+        return this.blockContainer.children[index] as HTMLDivElement;
+    }
+
+    /**
+     * Get the block that is currently focused, or null if no block is focused.
+     */
+    getFocusedBlock(): HTMLDivElement {
+        let activeElement = document.activeElement as HTMLDivElement;
+        if (activeElement && activeElement.classList.contains('input-block')) {
+            return activeElement;
+        } else {
+            return null;
+        }
+    }
+
+    getIndexOfBlock(block: HTMLDivElement): number {
+        return Array.from(this.blockContainer.children).indexOf(block);
     }
 }

@@ -1,8 +1,10 @@
 const { marked } = require('marked');
 const { clipboard } = require('electron');
 import { BlockManager } from "./blockManager";
-const { loadAndTypeset, typesetMath } = require("mathjax-electron");
+const { loadAndTypeset } = require("mathjax-electron");
+const { strInsert, isAlpha } = require('./utils');
 
+let keybindings = require('./keybindings.json');
 
 export class Editor {
     /**
@@ -13,27 +15,27 @@ export class Editor {
     /**
      * Global variables
      */
-    ROOT_CONTAINER: HTMLDivElement;
+    // ROOT_CONTAINER: HTMLDivElement;
     BLOCK_CONTAINER: HTMLDivElement;
-    PREVIEW_CONTAINER: HTMLDivElement;
+    // PREVIEW_CONTAINER: HTMLDivElement;
     BLOCK_MANAGER: BlockManager;
 
     constructor() {
         console.log('Editor constructor');
         this.initGlobals();
         this.initListeners();
-        this.BLOCK_MANAGER.initFirstBlock();
-        this.BLOCK_MANAGER.blocks[0].focus();
-        this.render()
+        let firstBlock = this.BLOCK_MANAGER.initFirstBlock();
+        this.renderAll()
+        firstBlock.focus();
     }
 
     /**
      * Initialize all global variables
      */
     initGlobals() {
-        this.ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
+        // this.ROOT_CONTAINER = document.getElementById('root-container') as HTMLDivElement;
         this.BLOCK_CONTAINER = document.getElementById('input-container') as HTMLDivElement;
-        this.PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
+        // this.PREVIEW_CONTAINER = document.getElementById('preview-container') as HTMLDivElement;
         this.BLOCK_MANAGER = new BlockManager(this, this.BLOCK_CONTAINER);
     }
 
@@ -47,7 +49,7 @@ export class Editor {
      * move caret to the end of last input block.
      */
     onInputContainerClick(event: MouseEvent) {
-        let lastBlock = this.BLOCK_MANAGER.blocks.at(-1);
+        let lastBlock = this.BLOCK_MANAGER.getLastBlock();
         this.setCaretPos(lastBlock, lastBlock.textContent.length);
     }
 
@@ -91,19 +93,12 @@ export class Editor {
                 curBlock = newBlock;
             }
 
-            this.render();
+            this.renderAll();
         }
     }
 
     onFocusBlock(event: FocusEvent) {
         // ...
-    }
-
-    /**
-     * Insert a string `to_insert` into another string `s` at given index.
-     */
-    strInsert(s: string, to_insert: string, index: number): string {
-        return s.slice(0, index) + to_insert + s.slice(index);
     }
 
     /**
@@ -140,7 +135,34 @@ export class Editor {
             case 'Escape':
                 this.onInputEscape(event);
                 break;
+            default:
+                if (isAlpha(event.key)) {
+                    this.onInputAlpha(event);
+                }
+                break;
         }
+    }
+
+    onInputAlpha(event: KeyboardEvent) {
+        /**
+         * Check if the input matches any keybindings specified in "keybindings.json".
+         */
+        if (event.ctrlKey) {
+            let keyName = `ctrl`;
+            if (event.shiftKey) {
+                keyName += '+shift';
+            }
+            keyName += '+' + event.key.toUpperCase();
+            console.log(keyName);
+            if (keyName in keybindings) {
+                let action = keybindings[keyName] + '()';
+                console.log('evaluating:', action);
+                eval(action);
+            }
+            event.stopPropagation();
+            event.preventDefault();
+        }
+
     }
 
     onInputEscape(event: KeyboardEvent) {
@@ -153,7 +175,7 @@ export class Editor {
     onInputArrowLeft(event: KeyboardEvent) {
         console.log('Arrow left');
         let curBlock = event.target as HTMLDivElement;
-        let caretPos = this.getCaretPos();
+        let caretPos = this.getCaretPos(curBlock);
         // Move to end of previous block if caret is at the beginning of this block.
         if (caretPos == 0) {
             let prevBlock = curBlock.previousSibling as HTMLDivElement;
@@ -166,8 +188,8 @@ export class Editor {
     }
 
     onInputArrowRight(event: KeyboardEvent) {
-        let caretPos = this.getCaretPos();
         let curBlock = event.target as HTMLDivElement;
+        let caretPos = this.getCaretPos(curBlock);
         // Move to beginning of next block if caret is at the end of this block.
         if (caretPos == curBlock.textContent.length) {
             let nextBlock = curBlock.nextSibling as HTMLDivElement;
@@ -180,18 +202,17 @@ export class Editor {
     }
 
     onInputBackspace(event: KeyboardEvent) {
-        let caretPos = this.getCaretPos();
         let curBlock = event.target as HTMLDivElement;
+        let caretPos = this.getCaretPos(curBlock);
 
         // Concatenate this block and previous block if the caret is on index 0.
         if (caretPos == 0) {
-            if (curBlock != this.BLOCK_MANAGER.blocks[0]) {
+            if (curBlock != this.BLOCK_MANAGER.getFirstBlock()) {
                 let curText = curBlock.textContent;
                 let prevBlock = curBlock.previousSibling as HTMLDivElement;
                 let prevText = prevBlock.textContent;
                 prevBlock.textContent = prevText + curText;
-                this.BLOCK_CONTAINER.removeChild(curBlock);
-                prevBlock.focus();
+                this.BLOCK_MANAGER.removeBlock(curBlock);
                 this.setCaretPos(prevBlock, prevText.length);
                 event.stopPropagation();
                 event.preventDefault();
@@ -203,7 +224,33 @@ export class Editor {
         // For ignoring all keydown events that are part of IMO composition
         if (event.isComposing || event.key == 'Process') return;
 
-        this.render();
+        this.renderAll();
+    }
+
+    /**
+     * This will be called by evaluating a value string in "keybindings.json".
+     */
+    insertItalic() {
+        let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
+        console.log(curBlock);
+        if (!curBlock) return;
+        
+        let caretPos = this.getCaretPos(curBlock);
+        this.insertTextAtCaret(curBlock, '**');
+        this.setCaretPos(curBlock, caretPos + 1);
+    }
+
+    /**
+     * This will be called by evaluating a value string in "keybindings.json".
+     */
+    insertBold() {
+        let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
+        console.log(curBlock);
+        if (!curBlock) return;
+        
+        let caretPos = this.getCaretPos(curBlock);
+        this.insertTextAtCaret(curBlock, '****');
+        this.setCaretPos(curBlock, caretPos + 2);
     }
 
     /**
@@ -213,17 +260,14 @@ export class Editor {
      * This will render each input block individually, then combine the HTML 
      * result.
      */
-    render() {
+    renderAll() {
         /**
-         * Concatenate text of all input blocks
+         * Loop through each input block, concatenate the HTML result.
          */
-        // let mdText = "";
         let htmlResult = "";
-        // let blockElems = INPUT_CONTAINER.children;
-        let numBlocks = this.BLOCK_MANAGER.blocks.length;
+        let numBlocks = this.BLOCK_MANAGER.getBlockCount();
         for (let i = 0; i < numBlocks; i++) {
-            // Math block
-            let block = this.BLOCK_MANAGER.blocks[i];
+            let block = this.BLOCK_MANAGER.getBlock(i);
             let md = block.textContent;
             htmlResult += '\n\n' + marked(md);
         }
@@ -236,27 +280,25 @@ export class Editor {
         this.updateCaretStatus();
     }
 
-    updateCaretStatus() {
-        // Line number
-        let curBlock = this.getCurInputBlock();
-        let row = Array.from(this.BLOCK_CONTAINER.children).indexOf(curBlock);
-        document.getElementById('caret-row-number').textContent = (row + 1).toString();
-
-        // Column number
-        let caretPos = this.getCaretPos();
-        let caretPosElem = document.getElementById('caret-col-number') as HTMLSpanElement;
-        caretPosElem.innerText = caretPos.toString();
-    }
-
-    getCurInputBlock() {
-        // Get the div that is begin focused
-        let curBlock = document.activeElement as HTMLDivElement;
-        return curBlock;
+    /**
+     * Insert text to given block at caret position.
+     */
+    insertTextAtCaret(block: HTMLDivElement, text: string) {
+        let caretPos = this.getCaretPos(block);
+        if (caretPos != -1) {
+            let sel = window.getSelection();
+            let range = sel.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+        }
     }
 
     onInputEnter(event: KeyboardEvent) {
+        event.preventDefault();
+        event.stopPropagation();
         let curBlock = event.target as HTMLDivElement;
         let curText = curBlock.textContent;
+        let caretPos = this.getCaretPos(curBlock);
 
         /**
          * Handle math block
@@ -264,36 +306,27 @@ export class Editor {
         if (curBlock.classList.contains('input-block-math')) {
             /**
              * Handle leaving latex mode
+             * 
+             * Leave if pressed CTRL + ENTER or if the caret is at the end of the block.
              */
 
-            // If CTRL is held down
-            if (event.ctrlKey) {
+            if (event.ctrlKey || caretPos == curText.length) {
                 // Create new text block below
                 let newBlock = this.BLOCK_MANAGER.newBlock();
                 this.BLOCK_MANAGER.insertBlockAfter(newBlock, curBlock);
                 newBlock.focus();
             }
-
-            event.preventDefault();
-            event.stopPropagation();
             return;
         }
         /**
          * Handle creation of math block
          */
         if (curText == '$$' || curText == '￥￥') {
-            if (curText == '￥￥') {
-                curBlock.textContent = '$$';
-                curText = '$$';
-            }
             // Turn this into a math block.
-            let caretPos = this.getCaretPos();
+            curBlock.textContent =  '$$\n\n$$';
+            this.setCaretPos(curBlock, 3);
+            
             curBlock.classList.add('input-block-math');
-            curBlock.textContent += '\n\n$$';
-            this.setCaretPos(curBlock, caretPos + 1);
-
-            event.stopPropagation();
-            event.preventDefault();
             return;
         }
 
@@ -301,7 +334,6 @@ export class Editor {
          * Handle regular text.
          * Slice the current block into two blocks.
          */
-        let caretPos = this.getCaretPos();
         let textBefore = curText.slice(0, caretPos);
         let textAfter = curText.slice(caretPos, curText.length);
         curBlock.textContent = textBefore;
@@ -310,17 +342,12 @@ export class Editor {
         this.BLOCK_MANAGER.insertBlockAfter(newBlock, curBlock);
         newBlock.textContent = textAfter;
         newBlock.focus();
-        event.preventDefault();
-        event.stopPropagation();
-
-        console.log('Enter pressed');
-        console.log(this.BLOCK_MANAGER.blocks);
     }
 
     onInputArrowDown(event: KeyboardEvent) {
         // Move cursor to next input block
         let curBlock = event.target as HTMLDivElement;
-        let caretPos = this.getCaretPos();
+        let caretPos = this.getCaretPos(curBlock);
         // Move to the beginning of next block if the caret is at the end of this block.
         if (caretPos == curBlock.textContent.length) {
             let nextBlock = curBlock.nextSibling as HTMLDivElement;
@@ -336,7 +363,7 @@ export class Editor {
         console.log('Up arrow pressed');
         // Move cursor to previous input block
         let curBlock = event.target as HTMLDivElement;
-        let caretPos = this.getCaretPos();
+        let caretPos = this.getCaretPos(curBlock);
         // Move to the end of previous block if caret is at the beginning of this block.
         if (caretPos == 0) {
             let prevBlock = curBlock.previousSibling as HTMLDivElement;
@@ -360,13 +387,13 @@ export class Editor {
         let indentStr = '        '.substring(0, this.INDENT_LEN);  // INDENT_LEN * ' '
 
         let curText = curBlock.textContent;
-        let caretPos = this.getCaretPos();
+        let caretPos = this.getCaretPos(curBlock);
 
         console.log('Tab pressed');
         console.log(curText);
         console.log('Caret pos: ' + caretPos);
 
-        curText = this.strInsert(curText, indentStr, caretPos);
+        curText = strInsert(curText, indentStr, caretPos);
         caretPos += this.INDENT_LEN;
 
         curBlock.textContent = curText;
@@ -378,14 +405,17 @@ export class Editor {
     }
 
     /**
-     * Get the pos of caret.
-     * This assumes that an input block is being focused.
+     * Get the pos of caret in `block`, if it does not have the caret, return null.
      */
-    getCaretPos() {
-        let sel = window.getSelection();
-        let range = sel.getRangeAt(0);
-        let caretPos = range.startOffset;
-        return caretPos;
+    getCaretPos(block: HTMLDivElement): number | null {
+        if (block == this.BLOCK_MANAGER.getFocusedBlock()) {
+            let sel = window.getSelection();
+            let range = sel.getRangeAt(0);
+            let caretPos = range.startOffset;
+            return caretPos;
+        } else {
+            return null;
+        }
     }
 
     /**
@@ -399,13 +429,34 @@ export class Editor {
         elem.focus();
         let sel = window.getSelection();
         let range = document.createRange();
-        range.setStart(elem, index);
+        
+        range.setStart(elem.childNodes[0], index);  // childNodes[0] is the text node
         range.collapse(true);
 
         sel.removeAllRanges();
         sel.addRange(range);
     }
+
+    /**
+     * Update the caret status in the status bar (bottom right).
+     */
+    updateCaretStatus() {
+        let row = 0;
+        let col = 0;
+        let curBlock = this.BLOCK_MANAGER.getFocusedBlock();
+        if (curBlock) {
+            row = this.BLOCK_MANAGER.getIndexOfBlock(curBlock);
+            col = this.getCaretPos(curBlock);
+        }
+        this.setCaretStatus(row, col);
+    }
+
+    private setCaretStatus(row: number, col: number) {
+        document.getElementById('caret-row-number').textContent = (row + 1).toString();
+        let caretPosElem = document.getElementById('caret-col-number') as HTMLSpanElement;
+        caretPosElem.innerText = col.toString();
+    }
 }
 
-var EDITOR: Editor;
-EDITOR = new Editor();
+var editor: Editor;
+editor = new Editor();
