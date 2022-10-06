@@ -1,3 +1,27 @@
 data
+
+# Logs
+logs
+*.log
+npm-debug.log*
+lerna-debug.log*
+
 node_modules
-src/*.js
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+release
+.vscode/.debug.env
+dist-electron
+
+.vscode
