@@ -1,6 +1,6 @@
 # Qingshu
 
-A modern, minimalistic markdown editor for Windows.
+A modern, minimalistic Markdown editor for Windows, implemented in Vue + Electron + TypeScript.
 
 ## Why Another Markdown Editor?
 
