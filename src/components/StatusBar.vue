@@ -1,7 +1,29 @@
+<template>
+    <div id="status-bar">
+        <div id="status-bar-left-container">
+            This is a status bar.
+        </div>
+        <div id="status-bar-right-container">
+            <div id="caret-status">
+                <div id="caret-line-status">
+                    R <span id="caret-row-number"></span>
+                </div>
+                <div id="caret-row-status">
+                    C <span id="caret-col-number"></span>
+                </div>
+            </div>
+            Words: <span id="word-count"></span>
+        </div>
+    </div>
+</template>
+
+<style scope>
 #status-bar {
+    font-size: 12px;;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
+    align-items: center;
     /* background-color: rgb(30, 30, 30); */
     height: 24px;
     padding: 4px;
@@ -30,5 +52,4 @@
     justify-content: flex-end;
     gap: 2px;
 }
-
-
+</style>

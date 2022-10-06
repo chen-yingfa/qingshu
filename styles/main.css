@@ -12,7 +12,6 @@ button {
     border-radius: 6px;
     border-width: 0px;
     padding: 4px;
-    /* background-color: white; */
     font-size: 12px;
     font-weight: bold;
     line-height: 100%;
@@ -21,7 +20,7 @@ button {
 }
 
 button:hover {
-    background-color: lightblue;
+    background-color: rgba(1, 1, 1, 0.1);
 }
 
 /* Container that fills up the page */
@@ -29,21 +28,10 @@ button:hover {
     display: flex;
     display: -webkit-flex;
     flex-direction: column;
+    flex-grow: 1;
 
     height: 100%;
     width: 100%;
     padding: 0px;
     font-size: 12px;
-    /* background-color: lightcoral; */
-}
-
-/* Overall view layout */
-
-/* This is unused */
-#header-container {
-    padding: 4px;
-    height: 28px;
-    vertical-align: middle;
-    box-shadow: rgba(99, 99, 99, 0.2) 0px 2px 8px 0px;
-    /* background-color: lightblue; */
 }
