@@ -1,10 +1,7 @@
 <script lang="ts" setup>
 
-import { defineProps } from 'vue'
-
 defineProps<{
     title: string
-    height: number
 }>()
 
 // const remote = require('electron').remote

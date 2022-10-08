@@ -1,3 +1,8 @@
+<script lang="ts" setup>
+import { curCaretPos } from '../assets/js/store'
+
+</script>
+
 <template>
     <div id="status-bar">
         <div id="status-bar-left-container">
@@ -6,10 +11,10 @@
         <div id="status-bar-right-container">
             <div id="caret-status">
                 <div id="caret-line-status">
-                    R <span id="caret-row-number"></span>
+                    R <span id="caret-row-number">{{ curCaretPos.row }}</span>
                 </div>
                 <div id="caret-row-status">
-                    C <span id="caret-col-number"></span>
+                    C <span id="caret-col-number">{{ curCaretPos.col }}</span>
                 </div>
             </div>
             Words: <span id="word-count"></span>
