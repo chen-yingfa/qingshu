@@ -40,8 +40,8 @@ const indexHtml = join(process.env.DIST, 'index.html')
 
 async function createWindow() {
   win = new BrowserWindow({
-    width: 600,
-    height: 400,
+    width: 1280,
+    height: 720,
     frame: false,
     minWidth: 450,
     minHeight: 300,
