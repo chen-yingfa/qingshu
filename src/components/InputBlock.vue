@@ -139,11 +139,7 @@ export default {
             if (sel?.rangeCount) {
                 let range = sel.getRangeAt(0)
                 // Get line number within the block
-                let lineDiv = range.commonAncestorContainer.parentElement as HTMLDivElement
-                let lineDivs = el.children
-                console.log('lineDivs', lineDivs)
-                console.log('lineDiv', lineDiv)
-                row = Array.prototype.indexOf.call(lineDivs, lineDiv)
+                row = this.blockId
                 col = range.endOffset
             }
             return {

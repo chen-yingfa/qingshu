@@ -5,7 +5,7 @@ viewed by developers who want to understand the source code.
 
 ## Overview
 
-The architecture of components in 
+The architecture of components:
 
 ```mermaid
 flowchart TD
@@ -24,11 +24,11 @@ The Editor and InputBlock are the main components of this project. Their locatio
 - Editor: `src/components/Editor.vue`
 - InputBlock: `src/components/InputBlock.vue`
 
-An InputBlock is a Vue component (`InputBlock.vue`), each of them manages a div element in the input container, in which user can enter text. The text content is also managed by the InputBlock, and upon request (by the Editor), InputBlocks communicate with the Renderer directly to render the text content into MD string, which is then passed to the Editor for it to show in the preview container.
+An InputBlock is a Vue component (`InputBlock.vue`), each of them manages a div element in the input container, in which user can enter text. The text content is also managed by the InputBlock, and upon request (by the Editor), InputBlocks communicate with the Renderer directly to render the text content into string of HTML, which is then passed to the Editor for it to show in the preview container.
 
-The Editor (`Editor.vue`) is a container around both the **input container** and **preview container**. It manages all logic and states that exceeds the scope of each input block. It manages the creation, deletion and reordering of input blocks. 
+The Editor (`Editor.vue`) is a container around both the **input container** and **preview container** (both are a div element). It manages all logic and states that exceeds the scope of each input block, such as the creation, deletion and reordering of input blocks.
 
-Overall relationship:
+Relationship between Editor and InputBlock:
 
 ```mermaid
 flowchart TD
@@ -68,9 +68,9 @@ flowchart LR
 ```
 
 
-Each InputBlock is responsible for managing its own text content (`content` is a member varable of InputBlock). Since all inputs are triggered by HTML listeners (with `keydown` and `keyup` etc.), they are handled by the InputBlocks directly, so content update are handled internally in this component.
+Each InputBlock is responsible for managing its own text content (`content` is a member varable of InputBlock). When user inputs markdown text, it triggers HTML listeners (with `keydown` and `keyup` etc.), so content update are handled by the InputBlocks internally, and anything that exceeds the scope of an InputBlock, will cause it to emit an event to the Editor.
 
-The Editor should not manipulate the `content` of the InputBlock. Instead, when it needs to render and update the MD preview, it should call the `renderToHtml` method of InputBlock to get the rendered HTML, then pass to the preview container.
+The Editor should not manipulate the `content` of the InputBlock. Instead, when it needs to render and update the preview container, it should call the `renderToHtml` method of InputBlock to get the rendered HTML string, which is then passed to the preview container.
 
 
 ### File IO
