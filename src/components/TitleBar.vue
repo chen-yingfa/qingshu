@@ -24,9 +24,9 @@ function onClose() {
             Qingshu (beta)
         </div>
         <div class="title-bar-right-container">
-            <button id="minimize-button">-</button>
-            <button id="maximize-button">+</button>
-            <button id="close-button" @click="onClose">X</button>
+            <button id="minimize-button">—</button>
+            <button id="maximize-button">⊞</button>
+            <button id="close-button" @click="onClose">✕</button>
         </div>
     </div>
 </template>
