@@ -1,8 +1,6 @@
 <script lang="ts">
+import { marked } from 'marked'
 import InputBlock from './InputBlock.vue'
-import { CaretPos } from '../assets/js/caretPos'
-import { strInsert } from '../assets/js/utils'
-
 
 export default {
     name: 'Editor',
@@ -19,7 +17,7 @@ export default {
             renderedMd: {
                 type: String,
                 default: '<p>Nothing to render.</p>',
-            }
+            },
         }
     },
     methods: {
@@ -28,48 +26,25 @@ export default {
              * Loop through each input block, concatenate the HTML result.
              */
             console.log('renderAll')
-           
-            console.log('blocks', this.blocks)
-            // let inputBlocks = this.$refs.inputBlocks
-            // let numBlocks = inputBlocks.length
-            // for (let i = 0; i < numBlocks; ++i) {
-            //     console.log(inputBlocks[i].getContent())
-            // }
-
-            // var BLOCK_CONTAINER = ref(document.getElementById('input-container') as HTMLDivElement)
-            // var MD_CONTAINER = ref(document.getElementById('md-container') as HTMLDivElement)
-            // let numBlocks = BLOCK_CONTAINER.value.children.length
-            // if (numBlocks) {
-            //     for (let i = 0; i < numBlocks; i++) {
-            //         let block = BLOCK_CONTAINER.value?.children[i] as HTMLDivElement
-            //     }
-            //     MD_CONTAINER.value.innerHTML = htmlResult
-            // }
+            let inputBlocks = this.$refs.inputBlocks
+            let numBlocks = inputBlocks.length
+            this.renderedMd = ''
+            for (let i = 0; i < numBlocks; ++i) {
+                console.log(inputBlocks[i].getContent())
+                this.renderedMd += inputBlocks[i].render()
+            }
         },
 
         onInputBlockKeyup(blockId: number, event: KeyboardEvent): void {
             console.log('onInputBlockKeyup', event)
             this.renderAll()
         },
-        
-        
-        onInputBlockKeydown(block: typeof InputBlock, event: KeyboardEvent): void {
-            
-            let caretPos: CaretPos = block.getCaretPos()
-            let content: string = block.getContent()
 
-            // Get the class variable for the block's content (stored in this)
-            let blockContent = this.blocks[block.blockId - 1].content
-            
-            console.log('Inserting text')
-            console.log('caretPos', caretPos)
-            console.log('content', content)
-            console.log('blockContent', blockContent)
-            blockContent = strInsert(blockContent, event.key, caretPos.col)
+        onContentUpdate(blockId: number, content: string): void {
+            console.log('onContentUpdate', blockId, content)
+            this.renderAll()
+        }
 
-            this.blocks[block.blockId - 1].content = blockContent
-        },
-    
         // insertTextToBlock(block: typeof InputBlock, text: string, pos: number): void {
         //     console.log('insertTextToBlock', blockId, text, pos)
         // }
@@ -85,14 +60,9 @@ export default {
     <div id="editor-container">
         <div id="input-container">
             <!-- Input blocks here -->
-            <InputBlock 
-                v-for="block in blocks" 
-                ref="inputBlocks"
-                :key="block.id" 
-                :blockId="block.id"
-                :initialContent="block.content"
-                @input-block-keydown="onInputBlockKeydown" 
-                @input-block-keyup="onInputBlockKeyup" />
+            <InputBlock v-for="block in blocks" ref="inputBlocks" :key="block.id" :blockId="block.id"
+                :initialContent="block.content" @input-block-keyup="onInputBlockKeyup"
+                @content-update="onContentUpdate" />
         </div>
         <div id="preview-container">
             <link href="../styles/github.css" rel="stylesheet">

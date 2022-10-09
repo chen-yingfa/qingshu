@@ -27,6 +27,7 @@ export default {
     emits: [
         'input-block-keydown',
         'input-block-keyup',
+        'content-update',
         'insert-block',
         'delete-block',
     ],
@@ -41,7 +42,7 @@ export default {
             curCaretPos.row = caretPos.row
 
             // Emit event to Editor
-            this.$emit('input-block-keyup', this.blockId, event)
+            // this.$emit('input-block-keyup', this.blockId, event)
         },
         onKeydown(event: KeyboardEvent): void {
             // For ignoring all keydown events that are part of IMO composition
@@ -50,7 +51,7 @@ export default {
             // Intercept the key, and update the text content manually
             event.preventDefault()
             event.stopPropagation()
-            console.log("onKeydown", event)
+            // console.log("onKeydown", event)
 
             /**
              * Handle keybindings
@@ -88,6 +89,7 @@ export default {
                     if (isAlpha(event.key)) {
                         this.insertContent(event.key)
                     }
+                    this.$emit('content-update', this.blockId, this.content)
                     break
             }
 

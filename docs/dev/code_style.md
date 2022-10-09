@@ -8,6 +8,7 @@ This file specifies the style of the code that we should follow.
 - No trailing spaces.
 - No newline before opening brace.
 - A line should not exceed 80 characters.
+- No semicolon at the end of a line.
 
 ## Naming
 
