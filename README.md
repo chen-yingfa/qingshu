@@ -24,30 +24,31 @@ Because none of the existing markdown editors satisfy all of the following:
 ### Compared To Existing Editors
 
 - Typora:
-  - Not open-source
-  - Not free of charge
-  - Poor support of CJK characters
+  - Not open-source.
+  - Not free of charge.
+  - Poor support of CJK characters.
   - No command palette.
 - Obsidian
-  - Not open-source
-  - Not minimalistic
-  - Use knowledge base (with software-custom syntax)
+  - Not open-source.
+  - Not minimalistic.
+  - Use knowledge base (with software-custom syntax).
   - Notes must exist inside specified folders.
 - MarkText
-  - Too buggy
-  - Too large
-  - Poor support for CJK characters
+  - Too buggy and large.
+  - Poor support for CJK characters.
   - No longer maintained.
 - Notion (and most Notion-like software):
-  - Not a markdown editor
-  - Not open-source
+  - Not a markdown editor.
+  - Not open-source.
   - Support too much non-markdown features.
+  - Poor support of code, CJK characters, etc.
+  - No custom styling.
+  - PDF export is ugly.
 - VSCode: 
-  - Not all features are supported (eg. pasting image, creating tables, etc. although you can install extensions to support it)
-  - Not really WYSIWYG
-  - Poor support for CJK characters
-  - Too large if you only want to edit a markdown file
-  - Does not support common markdown hotkeys (eg. for bold and italic font).
+  - Not all features are supported (eg. inline math, pasting image, table manipulation, etc. although you can install extensions to support it).
+  - Not really WYSIWYG.
+  - Poor support for CJK characters.
+  - Too large if you only want to edit a markdown file.
 
 ## Features
 
