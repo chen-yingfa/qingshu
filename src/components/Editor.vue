@@ -14,10 +14,7 @@ export default {
                 { id: 2, content: 'This is another input block.' },
                 { id: 3, content: 'This is the last input block.' },
             ],
-            renderedMd: {
-                type: String,
-                default: '<p>Nothing to render.</p>',
-            },
+            renderedMd: '<p>Nothing to render.</p>',
         }
     },
     methods: {
@@ -25,13 +22,14 @@ export default {
             /**
              * Loop through each input block, concatenate the HTML result.
              */
-            console.log('renderAll')
-            let inputBlocks = this.$refs.inputBlocks
+            console.debug('renderAll')
+            let inputBlocks = this.$refs.inputBlocks as (typeof InputBlock)[]
             let numBlocks = inputBlocks.length
             this.renderedMd = ''
             for (let i = 0; i < numBlocks; ++i) {
-                console.log(inputBlocks[i].getContent())
-                this.renderedMd += inputBlocks[i].render()
+                // console.debug(inputBlocks[i].getContent())
+                let a = inputBlocks[i] as unknown as { render(): string}
+                this.renderedMd += a.render()
             }
         },
 

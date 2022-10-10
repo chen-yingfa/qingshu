@@ -3,7 +3,7 @@
 import { CaretPos } from '../assets/js/caretPos'
 import { curCaretPos } from '../assets/js/store'
 import { marked } from 'marked'
-import { isAlpha, strInsert } from '../assets/js/utils'
+import { isAlpha, strEnclose, strInsert } from '../assets/js/utils'
 
 import { keybindings } from '../assets/js/keybindings'
 
@@ -21,7 +21,10 @@ export default {
     },
     data() {
         return {
-            content: this.initialContent,
+            // content: this.initialContent, 
+            // ^
+            // Commented out because content should be stored in innerHTML instead. 
+            // This will also let use utilize contenteditable attribute
         }
     },
     emits: [
@@ -42,15 +45,15 @@ export default {
             curCaretPos.row = caretPos.row
 
             // Emit event to Editor
-            // this.$emit('input-block-keyup', this.blockId, event)
+            this.$emit('input-block-keyup', this.blockId, event)
         },
         onKeydown(event: KeyboardEvent): void {
             // For ignoring all keydown events that are part of IMO composition
             if (event.isComposing || event.key == 'Process') return;
 
             // Intercept the key, and update the text content manually
-            event.preventDefault()
-            event.stopPropagation()
+            //event.preventDefault()
+            //event.stopPropagation()
             // console.log("onKeydown", event)
 
             /**
@@ -63,9 +66,10 @@ export default {
                 }
                 keyName += '+' + event.key.toUpperCase()
                 if (keyName in keybindings) {
-                    let action: string = keybindings[keyName] + '()'
-                    console.log('evaluating:', action)
-                    eval(action)
+                    // let action: string = keybindings[keyName] + '()'
+                    // console.log('evaluating:', action)
+                    this.handleKeyboardShortcut(keyName)
+                    event.preventDefault();
                 }
 
                 return
@@ -80,7 +84,10 @@ export default {
                     break
                 case 'Backspace':
                     // Prevent the default behavior of deleting a new line
-                    event.preventDefault()
+                    const selection = window.getSelection() as Selection;
+                    // Don't allow deleting nodes
+                    if (!selection.anchorNode?.isSameNode(selection.focusNode))
+                        event.preventDefault();
                     // Delete the current block
                     this.$emit('delete-block', this.blockId)
                     break
@@ -89,13 +96,22 @@ export default {
                     if (isAlpha(event.key)) {
                         this.insertContent(event.key)
                     }
-                    this.$emit('content-update', this.blockId, this.content)
+                    //this.$emit('content-update', this.blockId, this.content)
                     break
             }
 
         },
 
-        getContent(): string { return this.content },
+        handleKeyboardShortcut(hotkey: string) {
+            switch (hotkey) {
+                case "ctrl+B": 
+                    this.insertEnclosingAtSelection("**","**")
+                    break
+                case "ctrl+I":
+                    this.insertEnclosingAtSelection("*", "*")
+                    break
+            }
+        },
 
         /**
          * Insert string into this block.
@@ -103,8 +119,43 @@ export default {
         insertContent(str: string) {
             console.log('inserting content', str)
             let caretPos = this.getCaretPos()
-            this.content = strInsert(this.content, str, caretPos.col)
+            // this.content = strInsert(this.content, str, caretPos.col)
         },
+
+        
+        insertEnclosingAtSelection(startStr: string, endStr: string) {
+            let selection = window.getSelection() as Selection
+            let range = selection.getRangeAt(0)
+            this.insertEnlosing(range, startStr, endStr)
+        },
+
+        /**
+         * Insert enclosing to a range
+         */
+        insertEnlosing(range: Range, startStr: string, endStr: string) {
+            console.debug("Inserting enclosing with \"" + startStr + "\" and \"" + endStr + "\"")
+            const cc = this.getContentContainer()
+            const clonedOffset = {
+                start: range.startOffset,
+                end: range.endOffset,
+            }
+            cc.innerHTML = strEnclose(cc.innerHTML, range, startStr, endStr)
+
+
+            // After editting the innerHTML, we need to re-apply the selection
+            if (cc.hasChildNodes()) {
+                const newRange = document.createRange();
+                const sel = window.getSelection() as Selection;
+                newRange.setStart(cc.childNodes[0], clonedOffset.start)
+                newRange.setEnd(cc.childNodes[0], clonedOffset.end + startStr.length + endStr.length)
+                sel.removeAllRanges()
+                sel.addRange(newRange)
+            }
+
+            this.$emit('content-update', this.blockId, "")
+        },
+
+        
 
         /**
          * Render the text content of this block to HTML.
@@ -128,11 +179,27 @@ export default {
         },
 
         /**
-         * Get the caret position of the given element.
-         * 
-         * @param el The element to get caret position from.
-         * @returns The caret position.
+         * Get the innerHTML of the block
          */
+        getContent(): string { return this.getContentContainer().innerHTML },
+
+        setCaretPosition(pos: number) {
+            const thisElement = this.$refs.contentContainer as HTMLDivElement;
+            
+            var range = document.createRange()
+            var sel = window.getSelection()
+            
+            range.setStart(thisElement, pos)
+            range.collapse(true)
+            
+            if (sel){
+                sel.removeAllRanges()
+                sel.addRange(range)
+            } else {
+                console.error("Not able to select text!")
+            }
+        },
+
         getCaretPos(): CaretPos {
             let el = this.getContentContainer()
             let col = -1
@@ -149,17 +216,19 @@ export default {
                 row: row,
             }
         },
+
+        
     }
 }
 
 </script>
 <template>
     <div id="input-block-container">
-        <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
-            {{ content }}
-        </div>
         <div class="block-id">
             {{ blockId }}
+        </div>
+        <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
+            {{ initialContent }}
         </div>
     </div>
 </template>
@@ -190,6 +259,7 @@ export default {
 }
 
 .input-block {
+    display: inline-block;
     flex-grow: 1;
     margin: 0;
     padding: 4px;
@@ -227,7 +297,7 @@ export default {
     right: 0px;
     font-size: 12px;
     color: #888888;
-    padding: 2px;
+    padding-right: 5px;
     z-index: 1;
 }
 </style>
