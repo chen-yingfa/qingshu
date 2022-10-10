@@ -14,7 +14,21 @@ export function strEnclose(s: string, range: Range, textAtStart: string, textAtE
 }
 
 
-export function isAlpha(str: String): boolean {
+export function isAlpha(str: string): boolean {
     let bool = str.length === 1 && str.match(/[a-z]/i) != null;
     return bool
+}
+
+/**
+ * Check whether a char is a valid input char.
+ */
+export function isInputChar(str: string): boolean {
+    if (str.length != 1) return false
+    let charCode = str.charCodeAt(0)
+    if (32 <= charCode && charCode <= 126) return true
+    return false
+}
+
+export function strRemoveChar(str: string, index: number): string {
+    return str.slice(0, index) + str.slice(index + 1)
 }

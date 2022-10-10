@@ -1,5 +1,4 @@
 <script lang="ts">
-import { marked } from 'marked'
 import InputBlock from './InputBlock.vue'
 
 export default {
@@ -10,9 +9,9 @@ export default {
     data() {
         return {
             blocks: [
-                { id: 1, content: 'This is an input block.' },
-                { id: 2, content: 'This is another input block.' },
-                { id: 3, content: 'This is the last input block.' },
+                { id: 0, content: 'block 0' },
+                { id: 1, content: 'block 1' },
+                { id: 2, content: 'block 2' },
             ],
             renderedMd: '<p>Nothing to render.</p>',
         }
@@ -41,11 +40,35 @@ export default {
         onContentUpdate(blockId: number, content: string): void {
             console.log('onContentUpdate', blockId, content)
             this.renderAll()
-        }
+        },
 
         // insertTextToBlock(block: typeof InputBlock, text: string, pos: number): void {
         //     console.log('insertTextToBlock', blockId, text, pos)
         // }
+        newBlockAfter(block: typeof InputBlock, initText: string): void {
+            console.log('newBlockAfter', block, initText)
+            let blockId = block.blockId
+            this.blocks.splice(
+                blockId, 0, { id: blockId, content: initText} )
+            let inputBlock = this.$refs.inputBlocks as (typeof InputBlock)[]
+            inputBlock[blockId].focus()
+        },
+        onGotoNextBlock(block: typeof InputBlock): void {
+            let blockId = block.blockId
+            let inputBlocks = this.$refs.inputBlocks as (typeof InputBlock)[]
+            if (blockId < inputBlocks.length - 1) {
+                inputBlocks[blockId + 1].focus()
+                inputBlocks[blockId + 1].moveCaretToStart()
+            }
+        },
+        onGotoPrevBlock(block: typeof InputBlock): void {
+            let blockId = block.blockId
+            let inputBlocks = this.$refs.inputBlocks as (typeof InputBlock)[]
+            if (blockId > 0) {
+                inputBlocks[blockId - 1].focus()
+                inputBlocks[blockId - 1].moveCaretToEnd()
+            }
+        },
     },
     mounted: function () {
         this.renderAll()
@@ -58,9 +81,16 @@ export default {
     <div id="editor-container">
         <div id="input-container">
             <!-- Input blocks here -->
-            <InputBlock v-for="block in blocks" ref="inputBlocks" :key="block.id" :blockId="block.id"
-                :initialContent="block.content" @input-block-keyup="onInputBlockKeyup"
-                @content-update="onContentUpdate" />
+            <InputBlock v-for="block in blocks" 
+                ref="inputBlocks" 
+                :key="block.id" 
+                :blockId="block.id"
+                :initialContent="block.content" 
+                @new-block-after="newBlockAfter"
+                @content-update="onContentUpdate" 
+                @goto-next-block="onGotoNextBlock"
+                @goto-prev-block="onGotoPrevBlock"
+                />
         </div>
         <div id="preview-container">
             <link href="../styles/github.css" rel="stylesheet">
