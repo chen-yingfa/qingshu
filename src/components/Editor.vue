@@ -1,5 +1,4 @@
 <script lang="ts">
-import { marked } from 'marked'
 import InputBlock from './InputBlock.vue'
 
 export default {
@@ -10,14 +9,11 @@ export default {
     data() {
         return {
             blocks: [
-                { id: 1, content: 'This is an input block.' },
-                { id: 2, content: 'This is another input block.' },
-                { id: 3, content: 'This is the last input block.' },
+                { id: 1, content: 'block 1' },
+                { id: 2, content: 'block 2' },
+                { id: 3, content: 'block 3' },
             ],
-            renderedMd: {
-                type: String,
-                default: '<p>Nothing to render.</p>',
-            },
+            renderedMd: '<p>Nothing to render.</p>',
         }
     },
     methods: {
@@ -26,12 +22,12 @@ export default {
              * Loop through each input block, concatenate the HTML result.
              */
             console.log('renderAll')
-            let inputBlocks = this.$refs.inputBlocks
+            let inputBlocks = this.$refs.inputBlocks as Array<typeof InputBlock>
             let numBlocks = inputBlocks.length
             this.renderedMd = ''
             for (let i = 0; i < numBlocks; ++i) {
-                console.log(inputBlocks[i].getContent())
-                this.renderedMd += inputBlocks[i].render()
+                let inputBlock = inputBlocks[i] as typeof InputBlock
+                this.renderedMd += inputBlock.render()
             }
         },
 
@@ -43,11 +39,16 @@ export default {
         onContentUpdate(blockId: number, content: string): void {
             console.log('onContentUpdate', blockId, content)
             this.renderAll()
-        }
+        },
 
         // insertTextToBlock(block: typeof InputBlock, text: string, pos: number): void {
         //     console.log('insertTextToBlock', blockId, text, pos)
         // }
+        newBlockAfter(block: typeof InputBlock, initText: string): void {
+            let blockId = block.blockId
+            this.blocks.splice(
+                blockId, 0, { id: blockId + 1, content: initText} )
+        }
     },
     mounted: function () {
         this.renderAll()
@@ -61,7 +62,9 @@ export default {
         <div id="input-container">
             <!-- Input blocks here -->
             <InputBlock v-for="block in blocks" ref="inputBlocks" :key="block.id" :blockId="block.id"
-                :initialContent="block.content" @input-block-keyup="onInputBlockKeyup"
+                :initialContent="block.content" 
+                @input-block-keyup="onInputBlockKeyup"
+                @new-block-after="newBlockAfter"
                 @content-update="onContentUpdate" />
         </div>
         <div id="preview-container">

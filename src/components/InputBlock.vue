@@ -1,9 +1,9 @@
 <script lang="ts">
 
-import { CaretPos } from '../assets/js/caretPos'
+import { CaretPos, CaretUtils } from '../assets/js/caretPos'
 import { curCaretPos } from '../assets/js/store'
 import { marked } from 'marked'
-import { isAlpha, strInsert } from '../assets/js/utils'
+import { isInputChar, strInsert, strRemoveChar } from '../assets/js/utils'
 
 import { keybindings } from '../assets/js/keybindings'
 
@@ -28,35 +28,29 @@ export default {
         'input-block-keydown',
         'input-block-keyup',
         'content-update',
-        'insert-block',
+        'new-block-after',
         'delete-block',
+        'goto-next-block',
+        'goto-prev-block',
     ],
+    mounted() {
+        this.getContentContainer().textContent = this.content
+    },
     methods: {
         onKeyup(event: KeyboardEvent): void {
-            // console.log('onKeyup', event)
-            let div = event.target as HTMLDivElement
-
-            // Update caret position
-            let caretPos = this.getCaretPos()
-            curCaretPos.col = caretPos.col
-            curCaretPos.row = caretPos.row
-
-            // Emit event to Editor
-            // this.$emit('input-block-keyup', this.blockId, event)
+            this.updateCaretPos()
         },
         onKeydown(event: KeyboardEvent): void {
             // For ignoring all keydown events that are part of IMO composition
             if (event.isComposing || event.key == 'Process') return;
 
-            // Intercept the key, and update the text content manually
-            event.preventDefault()
-            event.stopPropagation()
-            // console.log("onKeydown", event)
 
             /**
              * Handle keybindings
              */
             if (event.ctrlKey) {
+                // event.preventDefault()
+                event.stopPropagation()
                 let keyName = 'ctrl'
                 if (event.shiftKey) {
                     keyName += '+shift'
@@ -75,41 +69,87 @@ export default {
                 case 'Enter':
                     // Prevent the default behavior of inserting a new line
                     event.preventDefault()
-                    // Insert a new block
-                    this.$emit('insert-block', this.blockId)
+                    event.stopPropagation()
+                    this.onInputEnter(event)
                     break
                 case 'Backspace':
                     // Prevent the default behavior of deleting a new line
-                    event.preventDefault()
-                    // Delete the current block
-                    this.$emit('delete-block', this.blockId)
+                    this.onBackspace(event)
                     break
+                case 'ArrowRight':
+                    this.onInputArrowRight(event);
+                    break;
                 default:
                     // Update the text content
-                    if (isAlpha(event.key)) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (isInputChar(event.key)) {
                         this.insertContent(event.key)
                     }
-                    this.$emit('content-update', this.blockId, this.content)
                     break
             }
 
         },
 
-        getContent(): string { return this.content },
+        onInputEnter(event: KeyboardEvent) {
+            event.preventDefault();
+            event.stopPropagation();
+            let curText = this.content;
+            let caretPos = this.getCaretPos();
+            /**
+             * Handle regular text.
+             * Slice the current block into two blocks.
+             */
+            let textBefore = curText.slice(0, caretPos);
+            let textAfter = curText.slice(caretPos, curText.length);
+            this.setContent(this, textBefore)
 
-        /**
-         * Insert string into this block.
-         */
-        insertContent(str: string) {
-            console.log('inserting content', str)
+            this.$emit('new-block-after', textAfter)
+        },
+
+
+        onBackspace(event: KeyboardEvent): void {
+            // Delete if block is empty
+            if (this.content.length == 0) {
+                this.$emit('delete-block', this.blockId)
+            } else {
+                let caretPos = this.getCaretPos()
+                if (caretPos == 0) {
+                    // At the beginning of block, concatenate with prev block
+                } else {
+                    this.content = strRemoveChar(this.content, caretPos - 1)
+                }
+            }
+        },
+
+        insertContent(str: string): void {
             let caretPos = this.getCaretPos()
-            this.content = strInsert(this.content, str, caretPos.col)
+            let newContent = strInsert(this.content, str, caretPos)
+            this.setContent(newContent)
+            this.setCaretPos(caretPos + str.length)
+            this.updateCaretPos()
+            this.$emit('content-update', this.blockId, this.content)
+        },
+
+        onInputArrowRight(event: KeyboardEvent) {
+            if (this.isCaretAtEnd()) {
+                this.$emit('goto-next-block')
+            }
+        },
+
+        getContent(): string { return this.content },
+        /**
+         * This will destroy caret and range selection.
+         */
+        setContent(str: string): void {
+            this.content = str
+            this.getContentContainer().innerText = this.content
         },
 
         /**
          * Render the text content of this block to HTML.
          * 
-         * Return: string of the rendered HTML.
+         * @returns string of the rendered HTML.
          */
         render(): string {
             let htmlResult = ''
@@ -133,30 +173,48 @@ export default {
          * @param el The element to get caret position from.
          * @returns The caret position.
          */
-        getCaretPos(): CaretPos {
-            let el = this.getContentContainer()
-            let col = -1
-            let row = -1
-            let sel = window.getSelection()
-            if (sel?.rangeCount) {
-                let range = sel.getRangeAt(0)
-                // Get line number within the block
-                row = this.blockId
-                col = range.endOffset
-            }
-            return {
-                col: col,
-                row: row,
-            }
+        getCaretPos(): number {
+            let div = this.getContentContainer()
+            let col = CaretUtils.getCaretPos(div)
+            return col
         },
+
+        /**
+         * Set the caret position of the given element.
+         * 
+         * @param el The element to set caret position to.
+         * @param pos The caret position.
+         */
+        setCaretPos(pos: number): void {
+            console.log('setting', pos)
+            let div = this.getContentContainer()
+            CaretUtils.setCaretPos(div, pos)
+            div.focus()
+        },
+
+        /**
+         * Update caret pos (global state)
+         */
+        updateCaretPos(): void {
+            let caretCol = this.getCaretPos()
+            curCaretPos.col = caretCol
+            curCaretPos.row = this.blockId
+        },
+
+        isCaretAtStart(): boolean { return this.getCaretPos() === 0 },
+
+        isCaretAtEnd(): boolean {
+            return this.getCaretPos() === this.content.length
+        }
     }
 }
 
 </script>
 <template>
     <div id="input-block-container">
-        <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
-            {{ content }}
+        <div ref="contentContainer" class="input-block" contenteditable="true" autocapitalize="off" autocomplete="off"
+            @keydown="onKeydown" @keyup="onKeyup">
+            <!-- Don't use Vue reactivity -->
         </div>
         <div class="block-id">
             {{ blockId }}
@@ -190,6 +248,7 @@ export default {
 }
 
 .input-block {
+    display: inline-block;
     flex-grow: 1;
     margin: 0;
     padding: 4px;

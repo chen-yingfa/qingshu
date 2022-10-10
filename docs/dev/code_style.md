@@ -29,7 +29,7 @@ This file specifies the style of the code that we should follow.
 /**
  * Docstring here.
  * 
- * @param argsCanBeInOneLine Description of arg1.
+ * @param argsCanBeInOneLine Description of argsCanBeInOneLine.
  * @returns Description of return value.
  */
 function shortFunc(argsCanBeInOneLine: string): number {
