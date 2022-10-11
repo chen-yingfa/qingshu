@@ -4,48 +4,42 @@ export interface CaretPos {
 }
 
 export class CaretUtils {
-    static getCaretPos(parentElement: HTMLDivElement) {
+    static getCaretPos(parentElement: HTMLDivElement): number {
         let sel = window.getSelection() as Selection
         let charCount = -1
         let node
-
         if (sel.focusNode) {
             if (this._isChildOf(sel.focusNode, parentElement)) {
                 node = sel.focusNode
                 charCount = sel.focusOffset
-
                 while (node) {
-                    if (node === parentElement) {
-                        break
-                    }
+                    if (node === parentElement) break
 
                     if (node.previousSibling) {
                         node = node.previousSibling
                         charCount += node.textContent?.length as number
                     } else {
                         node = node.parentNode
-                        if (node === null) {
-                            break;
-                        }
+                        if (node === null) break
                     }
                 }
             }
         }
-
-        return charCount;
+        return charCount
     }
 
     static setCaretPos(
         div: HTMLDivElement, pos: number
-    ) {
+    ): void {
         if (pos >= 0) {
             div.focus()
             var sel = window.getSelection();
             let range = this._createRange(div, { count: pos });
-            console.log(range)
             range.collapse(true);
             sel?.removeAllRanges();
             sel?.addRange(range);
+        } else {
+            console.error('Attempted to set caret position:', pos);
         }
     }
 
@@ -62,7 +56,7 @@ export class CaretUtils {
      */
     static _createRange(
         node: Node,
-        chars: { count: number },
+        pos: { count: number },
         range: Range | null = null,
     ): Range {
         if (!range) {
@@ -70,18 +64,18 @@ export class CaretUtils {
             range.selectNode(node);
             range.setStart(node, 0);
         }
-        if (chars.count == 0) {
+        if (pos.count == 0) {
             range.setStart(node, 0)
-        } else if (node && chars.count > 0) {
+        } else if (node && pos.count > 0) {
             if (node.nodeType == Node.TEXT_NODE) {
                 // This will only be reached in recursive calls
                 let textLen = node.textContent?.length as number
-                if (textLen < chars.count) {
-                    chars.count -= textLen
+                if (textLen < pos.count) {
+                    pos.count -= textLen
                 } else {
-                    range.setStart(node, chars.count)
+                    range.setStart(node, pos.count)
                     // This will break recursions
-                    chars.count = 0
+                    pos.count = 0
                 }
             } else {
                 for (
@@ -90,8 +84,8 @@ export class CaretUtils {
                     child_idx++
                 ) {
                     range = this._createRange(
-                        node.childNodes[child_idx] as Node, chars, range)
-                    if (chars.count == 0) break
+                        node.childNodes[child_idx] as Node, pos, range)
+                    if (pos.count == 0) break
                 }
             }
         }

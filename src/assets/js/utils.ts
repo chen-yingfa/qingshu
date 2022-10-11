@@ -9,7 +9,7 @@ export function strInsert(s: string, to_insert: string, index: number): string {
  * Enclose a selected range with text before and after
  */
 export function strEnclose(s: string, range: Range, textAtStart: string, textAtEnd: string): string {
-    return s.slice(0, range.startOffset) + textAtStart + s.slice(range.startOffset, range.endOffset) + 
+    return s.slice(0, range.startOffset) + textAtStart + s.slice(range.startOffset, range.endOffset) +
         textAtEnd + s.slice(range.endOffset)
 }
 
