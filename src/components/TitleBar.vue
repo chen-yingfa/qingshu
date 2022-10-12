@@ -24,9 +24,15 @@ function onClose() {
             Qingshu (beta)
         </div>
         <div class="title-bar-right-container">
-            <button id="minimize-button">—</button>
-            <button id="maximize-button">⊞</button>
-            <button id="close-button" @click="onClose">✕</button>
+            <button id="minimize-button">
+                <img src="../assets/icons/minimize_FILL0_wght400_GRAD0_opsz48.svg">
+            </button>
+            <button id="maximize-button">
+                <img src="../assets/icons/fullscreen_FILL0_wght400_GRAD0_opsz48.svg">
+            </button>
+            <button id="close-button" @click="onClose">
+                <img src="../assets/icons/close_FILL0_wght400_GRAD0_opsz48.svg">
+            </button>
         </div>
     </div>
 </template>
@@ -99,6 +105,10 @@ function onClose() {
 
 .title-bar-right-container button:hover {
     background-color: rgba(1, 1, 1, 0.1);
+}
+
+.title-bar-right-container img {
+    height: 100%;
 }
 
 #close-button:hover {
