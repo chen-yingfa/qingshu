@@ -28,6 +28,7 @@ export default {
     data() {
         return {
             content: "",
+            caretPosition: 0,  // Index of character. Only used when this block is in focus
         }
     },
     emits: [
@@ -44,8 +45,9 @@ export default {
         this.setContent(this.initContent)
         console.debug('InputBlock mounted', this)
     },
-    update() {
+    updated() {
         console.debug('InputBlock updated', this)
+        this.setCaretPos(this.caretPosition)
     },
     methods: {
         onKeyup(event: KeyboardEvent): void {
@@ -106,10 +108,9 @@ export default {
                 default:
                     // Update the text content
                     if (isInputChar(event.key)) {
-                        // event.preventDefault()
+                        event.preventDefault()
                         event.stopPropagation()
-                        this.content = this.getContentContainer().innerHTML
-                        // this.insertContent(event.key)
+                        this.insertContent(event.key)
                     }
                     break
             }
@@ -151,25 +152,35 @@ export default {
                     // At the beginning of block, concatenate with prev block
                     this.$emit('concat-with-prev-block', this)
                 } else {
-                    // This is handled automatically by contenteditable
-                    // let caretPos = this.getCaretPos()
-                    // this.setContent(
-                    //     strRemoveChar(this.getContent(), caretPos - 1))
+                    // This is handled automatically by contenteditable. NO LONGER TRUE
+                    event.preventDefault()
+                    let caretPos = this.getCaretPos()
+                    this.setContent(strRemoveChar(this.getContent(), caretPos - 1))
+                    this.setCaretPos(caretPos - 1)
+                    this.debounceRender()
                 }
             }
         },
 
         insertContent(str: string): void {
             let caretPos = this.getCaretPos()
-            // let newContent = strInsert(this.getContent(), str, caretPos)
-            // this.setContent(newContent)
-            // this.setCaretPos(caretPos + str.length)
-            // this.updateCaretPos()
+            let newContent = strInsert(this.getContent(), str, caretPos)
+            this.setContent(newContent)
+            this.setCaretPos(caretPos + str.length)
+            console.log("newContent", newContent)
+            this.updateCaretPos()
             console.log('inserted', str)
+            
             // Debounce to make sure fast consecutive only trigger one emit
-            // debounce(() => {
-            //     this.$emit('content-update', this, newContent)
-            // }, 100)()
+            debounce(() => {
+                this.$emit('content-update', this, newContent)
+            }, 100)()
+        },
+
+        debounceRender() {
+            debounce(() => {
+                this.$emit('content-update', this)
+            }, 100)()
         },
 
         onInputArrowRight(event: KeyboardEvent): void {
@@ -197,17 +208,13 @@ export default {
             }
         },
 
-        getContent(): string {
-            return this.content
-            // return this.getContentContainer().textContent as string
-        },
+        getContent(): string { return this.content },
+
         /**
          * This will destroy caret and range selection.
          */
-        setContent(str: string): void {
-            this.content = str
-            // this.getContentContainer().innerText = str
-        },
+        setContent(str: string): void { this.content = str },
+
         getContentLen(): number { return this.getContent().length },
 
         insertEnclosingAtSelection(startStr: string, endStr: string) {
@@ -282,6 +289,7 @@ export default {
             let div = this.getContentContainer()
             div.focus()
             CaretUtils.setCaretPos(div, pos)
+            this.caretPosition = pos
         },
 
         /**

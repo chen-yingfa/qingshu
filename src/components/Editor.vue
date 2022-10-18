@@ -1,5 +1,15 @@
 <script lang="ts">
+import { BlockList } from 'net'
 import InputBlock from './InputBlock.vue'
+
+
+export interface MetaInputBlock {
+    id: number,
+    type: string,
+    initContent: string,
+    inputBlock?: InstanceType<typeof InputBlock>,
+}
+
 
 export default {
     name: 'Editor',
@@ -13,18 +23,23 @@ export default {
              */
             blocks: [
                 {
+                    id: 1,
                     type: 'text',
-                    initContent: 'block 0'
+                    initContent: 'block 0',
+                    inputBlock: undefined,
                 },
                 {
+                    id: 2,
                     type: 'text',
-                    initContent: 'block 1'
+                    initContent: 'block 1',
+                    inputBlock: undefined,
                 },
                 {
+                    id: 3,
                     type: 'text',
-                    initContent: 'block 2'
-                }
-            ],
+                    initContent: 'block 2',
+                    inputBlock: undefined,
+                }] as MetaInputBlock[],
             renderedMd: '<p>This is a placeholder.</p>',
         }
     },
@@ -33,10 +48,11 @@ export default {
         this.renderAll()
     },
     beforeUpdate() {
-        
+
     },
     updated() {
         console.log(this._getInputBlocks().map(b => b.content))
+        this.renderAll()
     },
     methods: {
         renderAll(): void {
@@ -45,7 +61,7 @@ export default {
              * concatenate the HTML result.
              */
             console.debug('renderAll')
-            let inputBlocks = this._getInputBlocks()
+            let inputBlocks = this.getInputBlocksSorted()
             console.log(inputBlocks)
             let numBlocks = inputBlocks.length
             this.renderedMd = ''
@@ -56,7 +72,7 @@ export default {
             console.log(this.blocks)
         },
         onContentUpdate(block: typeof InputBlock): void {
-            //this.renderAll()
+            this.renderAll()
         },
 
         /**
@@ -135,13 +151,9 @@ export default {
                     // index: blockIdx,
                     type: 'text',
                     initContent: initContent,
+                    id: this.blocks.length + 1,
                 },
             )
-            
-            // // Change all subsequent block indexes
-            // for (let i = blockIdx; i < this.blocks.length; ++i) {
-            //     this.blocks[i].index = i
-            // }
         },
         /**
          * Get InputBlock's, sorted by block ID.
@@ -156,23 +168,18 @@ export default {
             return this._getInputBlocks()[blockId]
         },
 
-        // /**
-        //  * Get input blocks sorted by their actual position in the DOM, which
-        //  * is given by `this.blocks`.
-        //  * 
-        //  * By default, Vue's `$ref` array is sorted by the :key attribute,
-        //  * which is set to be block ID, so we just sort them according to 
-        //  * `this.blocks`.
-        //  */
-        // getInputBlocksSorted(): (typeof InputBlock)[] {
-        //     let inputBlocks = this._getInputBlocks()
-        //     let sorted = Array<typeof InputBlock>(inputBlocks.length)
-        //     for (let i = 0; i < inputBlocks.length; ++i) {
-        //         let curBlockId = this.blocks[i].id
-        //         sorted[i] = inputBlocks[curBlockId]
-        //     }
-        //     return sorted
-        // },
+        /**
+         * Get input blocks sorted by their actual position in the DOM, which
+         * is given by `this.blocks`.
+         * 
+         * By default, Vue's `$ref` array is sorted by the :key attribute,
+         * which is set to be block ID, so we just sort them according to 
+         * `this.blocks`.
+         */
+        getInputBlocksSorted(): (typeof InputBlock)[] {
+            let inputBlocks = this._getInputBlocks()
+            return inputBlocks.sort((a,b) => a.id - b.id)
+        },
 
         /**
          * Get the index of a given InputBlock in the DOM.
@@ -222,10 +229,10 @@ export default {
             -->
             <InputBlock v-for="(block, index) of blocks" 
                 ref="inputBlocks" 
-                :key="block.id"
-                :type="block.type"
-                :id="index"
-                :initContent="block.initContent"
+                :key=block.id
+                :type=block.type
+                :id=index
+                :initContent=block.initContent
                 @content-update="onContentUpdate" 
                 @goto-next-block="onGotoNextBlock" 
                 @goto-prev-block="onGotoPrevBlock"
