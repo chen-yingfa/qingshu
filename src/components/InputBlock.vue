@@ -26,6 +26,9 @@ export default {
         },
     },
     data() {
+        return {
+            content: "",
+        }
     },
     emits: [
         'input-block-keydown',
@@ -103,9 +106,10 @@ export default {
                 default:
                     // Update the text content
                     if (isInputChar(event.key)) {
-                        event.preventDefault()
+                        // event.preventDefault()
                         event.stopPropagation()
-                        this.insertContent(event.key)
+                        this.content = this.getContentContainer().innerHTML
+                        // this.insertContent(event.key)
                     }
                     break
             }
@@ -147,24 +151,25 @@ export default {
                     // At the beginning of block, concatenate with prev block
                     this.$emit('concat-with-prev-block', this)
                 } else {
-                    let caretPos = this.getCaretPos()
-                    this.setContent(
-                        strRemoveChar(this.getContent(), caretPos - 1))
+                    // This is handled automatically by contenteditable
+                    // let caretPos = this.getCaretPos()
+                    // this.setContent(
+                    //     strRemoveChar(this.getContent(), caretPos - 1))
                 }
             }
         },
 
         insertContent(str: string): void {
             let caretPos = this.getCaretPos()
-            let newContent = strInsert(this.getContent(), str, caretPos)
-            this.setContent(newContent)
-            this.setCaretPos(caretPos + str.length)
-            this.updateCaretPos()
+            // let newContent = strInsert(this.getContent(), str, caretPos)
+            // this.setContent(newContent)
+            // this.setCaretPos(caretPos + str.length)
+            // this.updateCaretPos()
             console.log('inserted', str)
             // Debounce to make sure fast consecutive only trigger one emit
-            debounce(() => {
-                this.$emit('content-update', this, newContent)
-            }, 100)()
+            // debounce(() => {
+            //     this.$emit('content-update', this, newContent)
+            // }, 100)()
         },
 
         onInputArrowRight(event: KeyboardEvent): void {
@@ -193,13 +198,15 @@ export default {
         },
 
         getContent(): string {
-            return this.getContentContainer().textContent as string
+            return this.content
+            // return this.getContentContainer().textContent as string
         },
         /**
          * This will destroy caret and range selection.
          */
         setContent(str: string): void {
-            this.getContentContainer().innerText = str
+            this.content = str
+            // this.getContentContainer().innerText = str
         },
         getContentLen(): number { return this.getContent().length },
 
@@ -283,7 +290,7 @@ export default {
         updateCaretPos(): void {
             let caretCol = this.getCaretPos()
             curCaretPos.col = caretCol
-            curCaretPos.row = this.blockId
+            curCaretPos.row = this.id
         },
 
         isCaretAtStart(): boolean { return this.getCaretPos() === 0 },
@@ -317,7 +324,7 @@ export default {
             {{ id }}
         </div>
         <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
-            <!-- This should only be set on setContent() -->
+            {{content}}
         </div>
     </div>
 </template>
