@@ -34,6 +34,6 @@ export function strRemoveChar(str: string, index: number): string {
 }
 
 export function strSlice(str: string, lo: number, hi: number | null = null): string {
-    if (!hi) hi = str.length
+    if (hi == null) hi = str.length
     return [...str].slice(lo, hi).join('')
 }
