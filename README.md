@@ -16,9 +16,13 @@ Because none of the existing markdown editors satisfy all of the following:
   - Markdown PDF extension for VSCode is not my cup of tea.
 - Few bugs (MarkText is too buggy for me)
 - Better support for CJK characters
+  - Can automatically convert to correct Markdown syntax when the user is using CJK characters IME.
+    - i.e. when the user is typing `》[space]`, `￥{something}￥` or `·{something}·`, the editor should automatically convert it to `>[space]`, `${something}$` or `` `{something}` ``.
   - Automatically predict whether to use CJK quotation marks (full width) instead of ordinary ones (half width).
   - Correctly perform word segmentation when moving cursor while holding down CTRL.
   - Can automatically add space between CJK and latin letters for more appealing text.
+  - Align half-width and full-width characters when using monospace font.
+- Support Marp (for slides)
 - WYSIWYG
 
 ### Compared To Existing Editors
@@ -47,7 +51,7 @@ Because none of the existing markdown editors satisfy all of the following:
 - VSCode: 
   - Not all features are supported (eg. inline math, pasting image, table manipulation, etc. although you can install extensions to support it).
   - Not really WYSIWYG.
-  - Poor support for CJK characters.
+  - Poor support for CJK characters (word segmentation and alignment of half-width and full-width monospace characters)
   - Too large if you only want to edit a markdown file.
 
 ## Features

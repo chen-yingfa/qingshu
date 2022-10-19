@@ -92,9 +92,11 @@ InputBlocks are managed by the Editor in the `blocks` array.
 Note that the Editor passes the following properties to each InputBlock:
 
 - 1 built-in property: `:key`
-- 3 custom properties: `id`, `type` and `initContent`.
+- 3 custom properties: `uid`, `type`, `index`, `initContent`.
 
 Any changes to these properties will cause the InputBlock to re-render. 
+
+> This means that updating the order of the `blocks` array in the Editor will cause all InputBlocks whose index has been modified to re-render. E.g. inserting a block at i, will cause all blocks after i to re-render.
 
 Note that that `blocks` array only stores an Object containing the 3 properties, and *not* the actual InputBlock components, which is accessed through `this.$refs.inputBlock`. The former is a data member of the Editor, and the latter is a reference to the InputBlock components in the template DOM. Also, `v-for` will render the InputBlock in the order of the `blocks` array, but when accessing the actual InputBlock components through `this.$refs.inputBlocks`, the order is determined by the `:key` property, which is the `id` of the InputBlock.
 

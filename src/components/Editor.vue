@@ -4,7 +4,7 @@ import InputBlock from './InputBlock.vue'
 
 
 export interface MetaInputBlock {
-    id: number,
+    uid: number,
     type: string,
     initContent: string,
     inputBlock?: InstanceType<typeof InputBlock>,
@@ -23,19 +23,19 @@ export default {
              */
             blocks: [
                 {
-                    id: 1,
+                    uid: 0,
                     type: 'text',
                     initContent: 'block 0',
                     inputBlock: undefined,
                 },
                 {
-                    id: 2,
+                    uid: 1,
                     type: 'text',
                     initContent: 'block 1',
                     inputBlock: undefined,
                 },
                 {
-                    id: 3,
+                    uid: 2,
                     type: 'text',
                     initContent: 'block 2',
                     inputBlock: undefined,
@@ -47,12 +47,9 @@ export default {
         console.debug('Editor mounted')
         this.renderAll()
     },
-    beforeUpdate() {
-
-    },
     updated() {
-        console.log(this._getInputBlocks().map(b => b.content))
-        this.renderAll()
+        // console.log(this._getInputBlocks().map(b => b.content))
+        // this.renderAll()
     },
     methods: {
         renderAll(): void {
@@ -85,65 +82,81 @@ export default {
          */
         newBlockAfter(block: typeof InputBlock, initContent: string): void {
             console.log('newBlockAfter', block, initContent)
-            let newIndex = block.id + 1
+            let newIndex = this.getBlockIndex(block) + 1
             this._insertNewBlockBefore(newIndex, initContent)
             /**
              * The content of the new block can only be modified after the DOM
              * is updated. So we need to wait for the next tick.
              */
-            // this.$nextTick(() => {
-            //     let inputBlocks = this._getInputBlocks()
-            //     let newBlock = inputBlocks[newIndex]
-            //     newBlock.focus()
-            //     // this.renderAll()
-            // })
+            this.$nextTick(() => {
+                let inputBlocks = this.getInputBlocksSorted()
+                let newBlock = inputBlocks[newIndex]
+                newBlock.focus()
+                // this.renderAll()
+            })
         },
         onGotoNextBlock(block: typeof InputBlock): void {
-            // console.log('onGotoNextBlock', block)
-            // let blockIdx = this.getBlockIndex(block)
-            // let inputBlocks = this._getInputBlocks()
-            // if (blockIdx < inputBlocks.length - 1) {
-            //     inputBlocks[blockIdx + 1].focus()
-            //     inputBlocks[blockIdx + 1].moveCaretToStart()
-            // }
+            console.log('onGotoNextBlock', block)
+            let blockIdx = this.getBlockIndex(block)
+            console.debug('cur index', blockIdx)
+            console.debug(blockIdx)
+            let inputBlocks = this.getInputBlocksSorted()
+            if (blockIdx < inputBlocks.length - 1) {
+                inputBlocks[blockIdx + 1].focus()
+                inputBlocks[blockIdx + 1].moveCaretToStart()
+            }
         },
         onGotoPrevBlock(block: typeof InputBlock): void {
+            console.log('onGotoPrevBlock', block.uid)
             let blockIdx = this.getBlockIndex(block)
-            let inputBlocks = this._getInputBlocks()
+            // let inputBlocks = this._getInputBlocks()
+            let inputBlocks = this.getInputBlocksSorted()
             if (blockIdx > 0) {
                 inputBlocks[blockIdx - 1].focus()
                 inputBlocks[blockIdx - 1].moveCaretToEnd()
             }
         },
         onDeleteBlock(block: typeof InputBlock): void {
-            this._removeBlock(block.id)
+            let prevIndex = block.index - 1
+            if (prevIndex >= 0) {
+                this._removeBlockByIndex(block.index)
+                let inputBlocks = this.getInputBlocksSorted()
+                inputBlocks[prevIndex].moveCaretToEnd()
+            }
         },
         onConcatWithPrevBlock(block: typeof InputBlock): void {
             console.log('onConcatWithPrevBlock', block)
-            let blockId = block.id
-            if (blockId > 0) {
-                let inputBlocks = this._getInputBlocks()
-                let prevBlock = inputBlocks[blockId - 1]
+            let blockIdx = this.getBlockIndex(block)
+            if (blockIdx > 0) {
+                let inputBlocks = this.getInputBlocksSorted()
+                let prevBlock = inputBlocks[blockIdx - 1]
                 let prevContent = prevBlock.getContent()
                 let content = block.getContent()
                 prevBlock.setContent(prevContent + content)
-                this._removeBlock(blockId)
-                for (let i = blockId; i < inputBlocks.length; ++i) {
-                    inputBlocks[i].setBlockId(i - 1)
-                }
-                prevBlock.setCaretPos(prevContent.length)
+                console.log('setting content', prevContent + content)
+                this._removeBlockByIndex(blockIdx)
+                this.$nextTick(() => {
+                    prevBlock.setCaretPos(prevContent.length)
+                })
             }
         },
-        _removeBlock(blockId: number): void {
-            // this.blocks.splice(blockId, 1)
-            // // Change all subsequent block ID
-            // for (let i = blockId; i < this.blocks.length; ++i) {
-            //     this.blocks[i].index = i
-            // }
+        /**
+         * Remove block by block index
+         */
+        _removeBlockByIndex(index: number): void {
+            this.blocks.splice(index, 1)
+        },
+        /**
+         * Remove block by UID
+         */
+        _removeBlockByUid(uid: number): void {
+            let block = this._getInputBlockByUid(uid)
+            let index = this.getBlockIndex(block)
+            this._removeBlockByIndex(index)
         },
         _insertNewBlockBefore(blockIdx: number, initContent: string): void {
-            console.debug('_insertNewBlockBefore', blockIdx, initContent)
-            
+            // console.debug('_insertNewBlockBefore', blockIdx)
+            // console.debug(initContent)
             this.blocks.splice(
                 blockIdx,
                 0,
@@ -151,7 +164,7 @@ export default {
                     // index: blockIdx,
                     type: 'text',
                     initContent: initContent,
-                    id: this.blocks.length + 1,
+                    uid: this.blocks.length,
                 },
             )
         },
@@ -162,10 +175,10 @@ export default {
             return this.$refs.inputBlocks as (typeof InputBlock)[]
         },
         /**
-         * Alias for `_getInputBlock()[blockId]`
+         * Alias for `_getInputBlock()[blockUid]`
          */
-        _getInputBlock(blockId: number): typeof InputBlock {
-            return this._getInputBlocks()[blockId]
+        _getInputBlockByUid(uid: number): typeof InputBlock {
+            return this._getInputBlocks()[uid]
         },
 
         /**
@@ -173,12 +186,19 @@ export default {
          * is given by `this.blocks`.
          * 
          * By default, Vue's `$ref` array is sorted by the :key attribute,
-         * which is set to be block ID, so we just sort them according to 
-         * `this.blocks`.
+         * which is set to be block UID, so we just sort them according to 
+         * to `uid` property of the elements of `this.blocks`.
          */
         getInputBlocksSorted(): (typeof InputBlock)[] {
-            let inputBlocks = this._getInputBlocks()
-            return inputBlocks.sort((a,b) => a.id - b.id)
+            let refInputBlocks = this._getInputBlocks()  // Sorted by block UID
+            let numBlocks = this.blocks.length
+            let blockUids = this.blocks.map(b => b.uid)
+            let sorted = Array<typeof InputBlock>(numBlocks)
+            for (let i = 0; i < numBlocks; ++i) {
+                let uid = blockUids[i]
+                sorted[i] = refInputBlocks[uid];
+            }
+            return sorted
         },
 
         /**
@@ -186,7 +206,9 @@ export default {
          * Return -1 if `block` is not found.
          */
         getBlockIndex(block: typeof InputBlock): number {
-            return block.id
+            // return block.index
+            // TODO: Change this to a hash map for speed.
+            return this.blocks.findIndex(b => b.uid === block.uid)
         },
 
         /**
@@ -229,9 +251,10 @@ export default {
             -->
             <InputBlock v-for="(block, index) of blocks" 
                 ref="inputBlocks" 
-                :key=block.id
+                :key=block.uid
                 :type=block.type
-                :id=index
+                :uid=block.uid
+                :index=index
                 :initContent=block.initContent
                 @content-update="onContentUpdate" 
                 @goto-next-block="onGotoNextBlock" 

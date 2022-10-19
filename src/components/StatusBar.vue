@@ -11,7 +11,7 @@ import { curCaretPos } from '../assets/js/store'
         <div id="status-bar-right-container">
             <div id="caret-status">
                 <div id="caret-line-status">
-                    R <span id="caret-row-number">{{ curCaretPos.row }}</span>
+                    B <span id="caret-row-number">{{ curCaretPos.row }}</span>
                 </div>
                 <div id="caret-row-status">
                     C <span id="caret-col-number">{{ curCaretPos.col }}</span>

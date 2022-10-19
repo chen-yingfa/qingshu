@@ -12,7 +12,11 @@ import { keybindings } from '../assets/js/keybindings'
 export default {
     name: 'InputBlock',
     props: {
-        id: {
+        index: {
+            type: Number,
+            required: true
+        },
+        uid: {
             type: Number,
             required: true
         },
@@ -27,6 +31,7 @@ export default {
     },
     data() {
         return {
+            isFocused: false,
             content: "",
             caretPosition: 0,  // Index of character. Only used when this block is in focus
         }
@@ -43,15 +48,15 @@ export default {
     ],
     mounted() {
         this.setContent(this.initContent)
-        console.debug('InputBlock mounted', this)
+        console.debug('InputBlock mounted', this.uid)
     },
-    updated() {
-        console.debug('InputBlock updated', this)
-        this.setCaretPos(this.caretPosition)
-    },
+    // updated() {
+    //     console.debug('InputBlock updated', this)
+    //     this.setCaretPos(this.caretPosition)
+    // },
     methods: {
         onKeyup(event: KeyboardEvent): void {
-            this.updateCaretPos()
+            // this.updateCaretPos()
         },
         onKeydown(event: KeyboardEvent): void {
             // For ignoring all keydown events that are part of IMO composition
@@ -91,7 +96,7 @@ export default {
                     // Don't allow deleting nodes
                     if (!selection.anchorNode?.isSameNode(selection.focusNode))
                         event.preventDefault()
-                    this.onBackspace(event)
+                    this._onBackspace(event)
                     break
                 case 'ArrowUp':
                     this.onInputArrowUp(event)
@@ -141,7 +146,7 @@ export default {
             this.setContent(textBefore)
             this.$emit('new-block-after', this, textAfter)
         },
-        onBackspace(event: KeyboardEvent): void {
+        _onBackspace(event: KeyboardEvent): void {
             // Delete if block is empty
             if (this.getContentLen() == 0) {
                 event.preventDefault()
@@ -152,31 +157,39 @@ export default {
                     // At the beginning of block, concatenate with prev block
                     this.$emit('concat-with-prev-block', this)
                 } else {
-                    // This is handled automatically by contenteditable. NO LONGER TRUE
+                    /**
+                     * Should this be handled automatically by contenteditable?
+                     * Intercept and manually edit content prop and caret pos.
+                     */
                     event.preventDefault()
+                    console.debug('handling backspace')
+                    console.debug(this.content)
                     let caretPos = this.getCaretPos()
-                    this.setContent(strRemoveChar(this.getContent(), caretPos - 1))
-                    this.setCaretPos(caretPos - 1)
+                    let newContent = strRemoveChar(this.getContent(), caretPos - 1)
+                    this.setContent(newContent)
+                    this.setCaretPosAfterUpdate(caretPos - 1)
                     this.debounceRender()
                 }
             }
         },
 
-        insertContent(str: string): void {
-            let caretPos = this.getCaretPos()
-            let newContent = strInsert(this.getContent(), str, caretPos)
+        /**
+         * Insert str into content at index
+         */
+        insertContent(str: string, index: number | null = null): void {
+            if (!index) {
+                index = this.getCaretPos()
+            }
+            let newContent = strInsert(this.getContent(), str, index)
             this.setContent(newContent)
-            this.setCaretPos(caretPos + str.length)
-            console.log("newContent", newContent)
-            this.updateCaretPos()
-            console.log('inserted', str)
-            
-            // Debounce to make sure fast consecutive only trigger one emit
-            debounce(() => {
-                this.$emit('content-update', this, newContent)
-            }, 100)()
-        },
+            this.setCaretPosAfterUpdate(index + str.length)
 
+            this.debounceRender()
+        },
+        
+        /**
+         * Debounce to make sure fast consecutive only trigger one emit
+         */
         debounceRender() {
             debounce(() => {
                 this.$emit('content-update', this)
@@ -214,6 +227,31 @@ export default {
          * This will destroy caret and range selection.
          */
         setContent(str: string): void { this.content = str },
+
+        /**
+         * Remove a substring [start, end) from the content, this will 
+         * automatically handle the caret position after modification.
+         * 
+         * @param start The starting index of the substring to remove (inclusive)
+         * @param end The ending index of the substring to remove (exclusive)
+         */
+        removeContentSubstr(start: number, end: number): void {
+            let strBefore = this.getContent().slice(0, start)
+            let strAfter = this.getContent().slice(end, this.getContent().length)
+            let caretPos = this.getCaretPos()
+            let finalCaretPos = null
+            this.setContent(strBefore + strAfter)
+            if (caretPos <= start) {
+                // Caret is before the removed substring
+                finalCaretPos = caretPos
+            } else if (caretPos <= end) {
+                // Caret is between in [start, end]
+                finalCaretPos = start
+            } else {
+                finalCaretPos = caretPos - (end - start)
+            }
+            this.setCaretPos(finalCaretPos)
+        },
 
         getContentLen(): number { return this.getContent().length },
 
@@ -265,13 +303,6 @@ export default {
         },
 
         /**
-         * Get the content-container Div element.
-         */
-        getContentContainer(): HTMLDivElement {
-            return this.$refs.contentContainer as HTMLDivElement
-        },
-
-        /**
          * Get current caret position.
          */
         getCaretPos(): number {
@@ -287,9 +318,15 @@ export default {
         setCaretPos(pos: number): void {
             console.debug('setCaretPos', pos)
             let div = this.getContentContainer()
-            div.focus()
             CaretUtils.setCaretPos(div, pos)
             this.caretPosition = pos
+            this.updateCaretPos()
+        },
+
+        setCaretPosAfterUpdate(pos: number): void {
+            this.$nextTick(() => {
+                this.setCaretPos(pos)
+            })
         },
 
         /**
@@ -298,7 +335,7 @@ export default {
         updateCaretPos(): void {
             let caretCol = this.getCaretPos()
             curCaretPos.col = caretCol
-            curCaretPos.row = this.id
+            curCaretPos.row = this.uid
         },
 
         isCaretAtStart(): boolean { return this.getCaretPos() === 0 },
@@ -322,17 +359,26 @@ export default {
         getContainer(): HTMLDivElement {
             return this.$refs.container as HTMLDivElement
         },
+        /**
+         * Get the content-container Div element.
+         */
+        getContentContainer(): HTMLDivElement {
+            return this.$refs.contentContainer as HTMLDivElement
+        },
     }
 }
 
 </script>
 <template>
     <div id="input-block-container" ref="container">
-        <div class="block-id">
-            {{ id }}
+        <div class="block-index-container">
+            {{ index }}
         </div>
         <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
-            {{content}}
+            {{ content }}
+        </div>
+        <div class="block-uid-container">
+            {{ uid }}
         </div>
     </div>
 </template>
@@ -395,13 +441,24 @@ export default {
     border: 2px solid red;
 }
 
-.block-id {
+.block-index-container {
     position: relative;
     bottom: 0px;
     right: 0px;
     font-size: 12px;
     color: #888888;
     padding-right: 5px;
+    z-index: 1;
+}
+
+.block-uid-container {
+    font-weight: 600;
+    position: relative;
+    bottom: 0px;
+    left: 0px;
+    font-size: 12px;
+    color: #888888;
+    padding-left: 5px;
     z-index: 1;
 }
 </style>
