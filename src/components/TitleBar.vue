@@ -1,27 +1,54 @@
 <script lang="ts" setup>
 
+// import electron from 'electron'
+// import { ipcRenderer } from 'electron'
+const electron = require('electron')
+const ipcRenderer = electron.ipcRenderer
+
 defineProps<{
     title: string
+    fileName: string
 }>()
 
-// const remote = require('electron').remote
+const emit = defineEmits<{
+    (e: 'open-file'): void
+    (e: 'save-file'): void
+    (e: 'save-as'): void
+}>()
 
-function onClose() {
-    console.log('closing window');
-    // var win = remote.getCurrentWindow();
-    // win.close();
+
+function onClose(): void {
+    console.log('closing window')
+    ipcRenderer.invoke('close-window')
 }
+
+function onClickOpen(): void {
+    console.log('open clicked')
+    emit('open-file')
+}
+
+function onClickSave(): void {
+    console.log('save clicked')
+    emit('save-file')
+}
+
+function onClickSaveAs(): void {
+    console.log('save as clicked')
+    emit('save-as')
+}
+
 </script>
     
     
 <template>
     <div id="title-bar">
         <div class="title-bar-left-container">
-            <button id="save-button">Save</button>
-            <button id="open-button">Open</button>
+            <button id="open-button" @click="onClickOpen">Open</button>
+            <button id="save-button" @click="onClickSave">Save</button>
+            <button id="save-as-button" @click="onClickSaveAs">Save As</button>
         </div>
         <div class="title-bar-center-container">
-            Qingshu (beta)
+            <span>{{ fileName }}</span> - Qingshu (beta)
         </div>
         <div class="title-bar-right-container">
             <button id="minimize-button">
@@ -47,6 +74,7 @@ function onClose() {
 
     height: 26px;
     font-size: 14px;
+    color: #666666;
     box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
     z-index: 1;
 

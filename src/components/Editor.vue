@@ -206,6 +206,15 @@ export default {
         getBlockIndex(block: typeof InputBlock): number {
             return block.index
         },
+
+        getAllContents(): string {
+            let inputBlocks = this.getInputBlocksSorted()
+            let numBlocks = inputBlocks.length
+            let contents = inputBlocks.map((block) => {
+                return block.getContent()
+            })
+            return contents.join('\n\n')
+        },
     },
 }
 

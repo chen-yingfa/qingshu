@@ -40,8 +40,8 @@ const indexHtml = join(process.env.DIST, 'index.html')
 
 async function createWindow() {
   win = new BrowserWindow({
-    width: 1280,
-    height: 720,
+    width: 640,
+    height: 360,
     frame: false,
     minWidth: 450,
     minHeight: 300,
@@ -113,4 +113,35 @@ ipcMain.handle('open-win', (event, arg) => {
     childWindow.loadURL(`${url}/#${arg}`)
     // childWindow.webContents.openDevTools({ mode: "undocked", activate: true })
   }
+})
+
+ipcMain.handle('close-window', (event, arg) => {
+  console.error('close-window', arg)
+  win?.close()
+})
+
+
+ipcMain.handle('open-file', (event, arg) => {
+  console.error('open-file', arg)
+  const { dialog } = require('electron')
+  const path = dialog.showOpenDialogSync({
+      properties: ['openFile'],
+      filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'All Files', extensions: ['*'] }
+      ]
+  })
+  return path
+})
+
+ipcMain.handle('save-file', (event, arg) => {
+  console.error('save-file', arg)
+  const { dialog } = require('electron')
+  const path = dialog.showSaveDialogSync({
+      filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'All Files', extensions: ['*'] }
+      ]
+  })
+  return path
 })

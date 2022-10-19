@@ -91,35 +91,28 @@ InputBlocks are managed by the Editor in the `blocks` array.
 
 Note that the Editor passes the following properties to each InputBlock:
 
-- 1 built-in property: `:key`
-- 3 custom properties: `uid`, `type`, `index`, `initContent`.
+- built-in property: `:key`
+- custom properties: `uid`, `type`, `index`, `initContent`.
 
-Any changes to these properties will cause the InputBlock to re-render. 
+Any changes to these properties will cause the InputBlock to re-render and re-mount.
 
-> This means that updating the order of the `blocks` array in the Editor will cause all InputBlocks whose index has been modified to re-render. E.g. inserting a block at i, will cause all blocks after i to re-render.
+> There are circumstances when prop updating does not cause re-rendering, but it's very rare.
 
-Note that that `blocks` array only stores an Object containing the 3 properties, and *not* the actual InputBlock components, which is accessed through `this.$refs.inputBlock`. The former is a data member of the Editor, and the latter is a reference to the InputBlock components in the template DOM. Also, `v-for` will render the InputBlock in the order of the `blocks` array, but when accessing the actual InputBlock components through `this.$refs.inputBlocks`, the order is determined by the `:key` property, which is the `id` of the InputBlock.
+> This means that updating the order of the `blocks` array in the Editor will cause all InputBlocks whose index has been modified to re-render. E.g. inserting a block at index i, will cause all blocks after i to re-render.
+
+#### `Editor.blocks` array vs. `InputBlock`
+
+Note that each element in the `blocks` array is a `MetaInputBlock` interface that contains the properties to pass to InputBlocks, and *not* the actual InputBlock components, which is accessed through `this.$refs.inputBlock`. The former is a data member of the Editor, and the latter is a reference to the InputBlock components in the template DOM. 
+
+#### The order of `blocks` array and DOM elements
+
+`v-for` will render the InputBlock in the order of the `blocks` array, but when accessing the actual InputBlock components through `this.$refs.inputBlocks`, the order is determined by the `:key` property, which is the `id` of the InputBlock.
 
 **Instantiation**: We need to ensure that other blocks are not re-rendered, so none of the InputBlock's prop should be changed. We create a new block Object, and insert it into `blocks` with `splice`.
 
 **Deletion**: We just remove the corresponding block Object from `blocks` with `splice`.
 
 **Reordering**: We just reorder the elements in `blocks`.
-
-## File IO
-
-> Note: This section is not yet implemented.
-
-### File Loading
-
-Upon file opening, the input container is cleared, then the Editor creates a new InputBlock for each Markdown block in of the file (defined by an empty line), and pass the initial content to each InputBlock. The Editor then calls `renderToHtml` for each InputBlock to get the rendered HTML, and pass to the preview container.
-
-> Note that the content that Editor passes to each InputBlock is only the initial content, all further content updates are handled by the InputBlock itself.
-
-### File Saving
-
-Since all Markdown text is stored in the `content` of each InputBlock, the Editor can simply iterate through all InputBlocks and get the `content` of each one, then concatenate them together to get the final Markdown text, which is then saved to the file.
-
 
 ## Global State Management
 

@@ -189,7 +189,7 @@ export default {
             console.debug('oldContent', oldContent)
             console.debug('newContent', newContent)
 
-            if (caretPos <= index) {
+            if (caretPos < index) {
                 this.setCaretPosAfterUpdate(caretPos)
             }
             else {
