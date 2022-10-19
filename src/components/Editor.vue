@@ -41,6 +41,7 @@ export default {
                     inputBlock: undefined,
                 }] as MetaInputBlock[],
             renderedMd: '<p>This is a placeholder.</p>',
+            maxBlockId: 2,
         }
     },
     mounted() {
@@ -82,6 +83,7 @@ export default {
          */
         newBlockAfter(block: typeof InputBlock, initContent: string): void {
             console.log('newBlockAfter', block, initContent)
+            console.log(block.index, block.uid)
             let newIndex = this.getBlockIndex(block) + 1
             this._insertNewBlockBefore(newIndex, initContent)
             /**
@@ -132,9 +134,9 @@ export default {
                 let prevBlock = inputBlocks[blockIdx - 1]
                 let prevContent = prevBlock.getContent()
                 let content = block.getContent()
-                prevBlock.setContent(prevContent + content)
                 console.log('setting content', prevContent + content)
                 this._removeBlockByIndex(blockIdx)
+                prevBlock.setContent(prevContent + content)
                 this.$nextTick(() => {
                     prevBlock.setCaretPos(prevContent.length)
                 })
@@ -155,8 +157,8 @@ export default {
             this._removeBlockByIndex(index)
         },
         _insertNewBlockBefore(blockIdx: number, initContent: string): void {
-            // console.debug('_insertNewBlockBefore', blockIdx)
-            // console.debug(initContent)
+            console.debug('_insertNewBlockBefore', blockIdx)
+            console.debug(initContent)
             this.blocks.splice(
                 blockIdx,
                 0,
@@ -164,7 +166,7 @@ export default {
                     // index: blockIdx,
                     type: 'text',
                     initContent: initContent,
-                    uid: this.blocks.length,
+                    uid: ++this.maxBlockId,
                 },
             )
         },
@@ -186,19 +188,15 @@ export default {
          * is given by `this.blocks`.
          * 
          * By default, Vue's `$ref` array is sorted by the :key attribute,
-         * which is set to be block UID, so we just sort them according to 
-         * to `uid` property of the elements of `this.blocks`.
+         * which is set to be block UID, so we have to sort them by their
+         * index in `this.blocks`.
          */
         getInputBlocksSorted(): (typeof InputBlock)[] {
             let refInputBlocks = this._getInputBlocks()  // Sorted by block UID
-            let numBlocks = this.blocks.length
-            let blockUids = this.blocks.map(b => b.uid)
-            let sorted = Array<typeof InputBlock>(numBlocks)
-            for (let i = 0; i < numBlocks; ++i) {
-                let uid = blockUids[i]
-                sorted[i] = refInputBlocks[uid];
+            let cmp = (a: typeof InputBlock, b: typeof InputBlock) => {
+                return a.index - b.index
             }
-            return sorted
+            return refInputBlocks.sort(cmp)
         },
 
         /**
@@ -206,37 +204,8 @@ export default {
          * Return -1 if `block` is not found.
          */
         getBlockIndex(block: typeof InputBlock): number {
-            // return block.index
-            // TODO: Change this to a hash map for speed.
-            return this.blocks.findIndex(b => b.uid === block.uid)
+            return block.index
         },
-
-        /**
-         * The order of the blocks are given by the `blocks` array.
-         * 
-         * But, getting blocks from Vue's $ref is not sorted by 
-         * their order in the DOM tree, but sorted by the :key attribute,
-         * which is set to be block ID.
-         * 
-         * So to get the next block, we have to first find the corresponding
-         * element in the `blocks` array using block ID, and then get the next 
-         * element, then use its block ID to get the corresponding block.
-         * 
-         * @param block The block whose next block is to be returned.
-         * @returns The next block. `null` if `block` is the last block.
-         */
-        getNextBlock(block: typeof InputBlock): typeof InputBlock | null {
-            let inputBlocks = this._getInputBlocks()
-            let curId = block.id
-            let curBlockIndex = block.id
-            let nextBlockIndex = curBlockIndex + 1
-            let nextBlockId = nextBlockIndex
-            if (nextBlockId < this.blocks.length) {
-                return inputBlocks[nextBlockId]
-            } else {
-                return null
-            }
-        }
     },
 }
 

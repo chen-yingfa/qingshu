@@ -2,15 +2,15 @@
  * Insert a string `to_insert` into another string `s` at given index.
  */
 export function strInsert(s: string, to_insert: string, index: number): string {
-    return s.slice(0, index) + to_insert + s.slice(index)
+    return strSlice(s, 0, index) + to_insert + strSlice(s, index)
 }
 
 /**
  * Enclose a selected range with text before and after
  */
 export function strEnclose(s: string, range: Range, textAtStart: string, textAtEnd: string): string {
-    return s.slice(0, range.startOffset) + textAtStart + s.slice(range.startOffset, range.endOffset) +
-        textAtEnd + s.slice(range.endOffset)
+    return strSlice(s, 0, range.startOffset) + textAtStart + strSlice(s, range.startOffset, range.endOffset) +
+        textAtEnd + strSlice(s, range.endOffset)
 }
 
 
@@ -30,5 +30,10 @@ export function isInputChar(str: string): boolean {
 }
 
 export function strRemoveChar(str: string, index: number): string {
-    return str.slice(0, index) + str.slice(index + 1)
+    return strSlice(str, 0, index) + strSlice(str, index + 1)
+}
+
+export function strSlice(str: string, lo: number, hi: number | null = null): string {
+    if (!hi) hi = str.length
+    return [...str].slice(lo, hi).join('')
 }

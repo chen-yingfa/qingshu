@@ -5,7 +5,7 @@ import { debounce } from 'lodash'
 import { CaretUtils } from '../assets/js/caretPos'
 import { curCaretPos } from '../assets/js/store'
 import { marked } from 'marked'
-import { strEnclose, isInputChar, strInsert, strRemoveChar } from '../assets/js/utils'
+import { strEnclose, isInputChar, strInsert, strRemoveChar, strSlice } from '../assets/js/utils'
 
 import { keybindings } from '../assets/js/keybindings'
 
@@ -59,8 +59,10 @@ export default {
             // this.updateCaretPos()
         },
         onKeydown(event: KeyboardEvent): void {
-            // For ignoring all keydown events that are part of IMO composition
+            // For ignoring all keydown events that are part of IME composition
             if (event.isComposing || event.key == 'Process') return;
+
+            console.log(event)
 
             /**
              * Handle keybindings
@@ -121,7 +123,11 @@ export default {
             }
 
         },
-
+        onCompositionEnd(event: CompositionEvent): void {
+            // For ignoring all keydown events that are part of IME composition
+            console.log(event)
+            this.insertContent(event.data)
+        },
         handleKeyboardShortcut(hotkey: string): void {
             switch (hotkey) {
                 case "ctrl+B":
@@ -147,43 +153,48 @@ export default {
             this.$emit('new-block-after', this, textAfter)
         },
         _onBackspace(event: KeyboardEvent): void {
-            // Delete if block is empty
-            if (this.getContentLen() == 0) {
+            if (this.isCaretAtStart()) {
                 event.preventDefault()
-                this.$emit('delete-block', this)
+                // At the beginning of block, concatenate with prev block
+                this.$emit('concat-with-prev-block', this)
             } else {
-                if (this.isCaretAtStart()) {
-                    event.preventDefault()
-                    // At the beginning of block, concatenate with prev block
-                    this.$emit('concat-with-prev-block', this)
-                } else {
-                    /**
-                     * Should this be handled automatically by contenteditable?
-                     * Intercept and manually edit content prop and caret pos.
-                     */
-                    event.preventDefault()
-                    console.debug('handling backspace')
-                    console.debug(this.content)
-                    let caretPos = this.getCaretPos()
-                    let newContent = strRemoveChar(this.getContent(), caretPos - 1)
-                    this.setContent(newContent)
-                    this.setCaretPosAfterUpdate(caretPos - 1)
-                    this.debounceRender()
-                }
+                /**
+                 * Should this be handled automatically by contenteditable?
+                 * Intercept and manually edit content prop and caret pos.
+                 */
+                event.preventDefault()
+                console.debug('handling backspace')
+                console.debug(this.content)
+                let caretPos = this.getCaretPos()
+                this.removeContentSubstr(caretPos - 1, caretPos)
+                this.debounceRender()
             }
         },
 
         /**
          * Insert str into content at index
+         * 
+         * This will automatically handle the caret position after insertion.
          */
         insertContent(str: string, index: number | null = null): void {
+            let caretPos = this.getCaretPos()
             if (!index) {
-                index = this.getCaretPos()
+                index = caretPos
             }
-            let newContent = strInsert(this.getContent(), str, index)
+            let oldContent = this.getContent()
+            let newContent = strInsert(oldContent, str, index)
             this.setContent(newContent)
-            this.setCaretPosAfterUpdate(index + str.length)
 
+            console.debug('insertContent')
+            console.debug('oldContent', oldContent)
+            console.debug('newContent', newContent)
+
+            if (caretPos <= index) {
+                this.setCaretPosAfterUpdate(caretPos)
+            }
+            else {
+                this.setCaretPosAfterUpdate(caretPos + str.length)
+            }
             this.debounceRender()
         },
         
@@ -236,8 +247,10 @@ export default {
          * @param end The ending index of the substring to remove (exclusive)
          */
         removeContentSubstr(start: number, end: number): void {
-            let strBefore = this.getContent().slice(0, start)
-            let strAfter = this.getContent().slice(end, this.getContent().length)
+            let strBefore = strSlice(
+                this.getContent(), 0, start)
+            let strAfter = strSlice(
+                this.getContent(), end, this.getContent().length)
             let caretPos = this.getCaretPos()
             let finalCaretPos = null
             this.setContent(strBefore + strAfter)
@@ -250,7 +263,7 @@ export default {
             } else {
                 finalCaretPos = caretPos - (end - start)
             }
-            this.setCaretPos(finalCaretPos)
+            this.setCaretPosAfterUpdate(finalCaretPos)
         },
 
         getContentLen(): number { return this.getContent().length },
@@ -374,7 +387,8 @@ export default {
         <div class="block-index-container">
             {{ index }}
         </div>
-        <div ref="contentContainer" class="input-block" contenteditable="true" @keydown="onKeydown" @keyup="onKeyup">
+        <div ref="contentContainer" class="input-block" contenteditable="true" 
+            @keydown="onKeydown" @keyup="onKeyup" @compositionend="onCompositionEnd">
             {{ content }}
         </div>
         <div class="block-uid-container">
