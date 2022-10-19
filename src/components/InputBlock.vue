@@ -177,7 +177,7 @@ export default {
          * This will automatically handle the caret position after insertion.
          */
         insertContent(str: string, index: number | null = null): void {
-            let caretPos = this.getCaretPos()
+            let caretPos = this.caretPosition
             if (!index) {
                 index = caretPos
             }
@@ -188,12 +188,15 @@ export default {
             console.debug('insertContent')
             console.debug('oldContent', oldContent)
             console.debug('newContent', newContent)
+            console.debug([...newContent].length)
+            console.debug([...str].length)
+            console.debug('caretPos', caretPos)
 
             if (caretPos < index) {
                 this.setCaretPosAfterUpdate(caretPos)
             }
             else {
-                this.setCaretPosAfterUpdate(caretPos + str.length)
+                this.setCaretPosAfterUpdate(caretPos + [...str].length)
             }
             this.debounceRender()
         },
@@ -266,7 +269,7 @@ export default {
             this.setCaretPosAfterUpdate(finalCaretPos)
         },
 
-        getContentLen(): number { return this.getContent().length },
+        getContentLen(): number { return [...this.getContent()].length },
 
         insertEnclosingAtSelection(startStr: string, endStr: string) {
             let selection = window.getSelection() as Selection
@@ -359,6 +362,13 @@ export default {
 
         focus(): void {
             this.getContentContainer().focus()
+            this.onFocus()
+        },
+        onFocus(): void {
+            this.$nextTick(() => {
+                this.caretPosition = this.getCaretPos()
+                this.updateCaretPos()
+            })
         },
         moveCaretToStart(): void {
             this.setCaretPos(0)
@@ -387,8 +397,13 @@ export default {
         <div class="block-index-container">
             {{ index }}
         </div>
-        <div ref="contentContainer" class="input-block" contenteditable="true" 
-            @keydown="onKeydown" @keyup="onKeyup" @compositionend="onCompositionEnd">
+        <div ref="contentContainer" 
+            class="input-block" 
+            contenteditable="true" 
+            @keydown="onKeydown" 
+            @keyup="onKeyup" 
+            @compositionend="onCompositionEnd" 
+            @focus="onFocus">
             {{ content }}
         </div>
         <div class="block-uid-container">

@@ -93,7 +93,9 @@ export class CaretUtils {
         } else if (node && pos.count > 0) {
             if (node.nodeType == Node.TEXT_NODE) {
                 // This will only be reached in recursive calls
-                let textLen = node.textContent?.length as number
+                // let textLen = node.textContent?.length as number
+                let text = node.textContent as string
+                let textLen = [...text].length
                 if (textLen < pos.count) {
                     pos.count -= textLen
                 } else {
