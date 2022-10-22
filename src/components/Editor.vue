@@ -256,6 +256,7 @@ export default {
     display: flex;
     flex-direction: row;
     height: calc(100% - 20px - 26px);
+    overflow: hidden;
 }
 
 #input-container {
