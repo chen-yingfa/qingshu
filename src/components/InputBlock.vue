@@ -50,10 +50,10 @@ export default {
         this.setContent(this.initContent)
         console.debug('InputBlock mounted', this.uid)
     },
-    // updated() {
-    //     console.debug('InputBlock updated', this)
-    //     this.setCaretPos(this.caretPosition)
-    // },
+    updated() {
+        console.debug('InputBlock updated', this)
+        this.setCaretPos(this.caretPosition)
+    },
     methods: {
         onKeyup(event: KeyboardEvent): void {
             // this.updateCaretPos()
@@ -117,7 +117,7 @@ export default {
                     if (isInputChar(event.key)) {
                         event.preventDefault()
                         event.stopPropagation()
-                        this.insertContent(event.key)
+                        this.insertContentAtCaret(event.key)
                     }
                     break
             }
@@ -126,7 +126,8 @@ export default {
         onCompositionEnd(event: CompositionEvent): void {
             // For ignoring all keydown events that are part of IME composition
             console.log(event)
-            this.insertContent(event.data)
+            const inputStr = event.data
+            this.insertContentAtCaret(inputStr, true)
         },
         handleKeyboardShortcut(hotkey: string): void {
             switch (hotkey) {
@@ -172,32 +173,21 @@ export default {
         },
 
         /**
-         * Insert str into content at index
+         * Insert str into content at caret. This will automatically handle the caret position after insertion.
          * 
-         * This will automatically handle the caret position after insertion.
+         * @param str The string to insert at caret position
+         * @param caretAutoMoved Set this to true if the input forced to caret to move already
          */
-        insertContent(str: string, index: number | null = null): void {
-            let caretPos = this.caretPosition
-            if (!index) {
-                index = caretPos
-            }
-            let oldContent = this.getContent()
-            let newContent = strInsert(oldContent, str, index)
+        insertContentAtCaret(str: string, caretAutoMoved = false): void {
+            const strLength = [...str].length
+            const caretPos = this.getCaretPos()
+            const oldContent = this.getContent()
+
+            const newContent = strInsert(oldContent, str, caretPos - (caretAutoMoved ? strLength : 0))
             this.setContent(newContent)
 
-            console.debug('insertContent')
-            console.debug('oldContent', oldContent)
-            console.debug('newContent', newContent)
-            console.debug([...newContent].length)
-            console.debug([...str].length)
-            console.debug('caretPos', caretPos)
+            this.setCaretPosAfterUpdate(this.getCaretPos() + (caretAutoMoved ? 0 : strLength))
 
-            if (caretPos < index) {
-                this.setCaretPosAfterUpdate(caretPos)
-            }
-            else {
-                this.setCaretPosAfterUpdate(caretPos + [...str].length)
-            }
             this.debounceRender()
         },
         
@@ -340,9 +330,7 @@ export default {
         },
 
         setCaretPosAfterUpdate(pos: number): void {
-            this.$nextTick(() => {
-                this.setCaretPos(pos)
-            })
+            this.setCaretPos(pos)
         },
 
         /**
@@ -365,10 +353,8 @@ export default {
             this.onFocus()
         },
         onFocus(): void {
-            this.$nextTick(() => {
-                this.caretPosition = this.getCaretPos()
-                this.updateCaretPos()
-            })
+            this.caretPosition = this.getCaretPos()
+            this.updateCaretPos()
         },
         moveCaretToStart(): void {
             this.setCaretPos(0)
