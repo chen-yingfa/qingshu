@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Editor from './components/Editor.vue'
+import SimpleEditor from './components/SimpleEditor.vue'
 import TitleBar from './components/TitleBar.vue'
 import StatusBar from './components/StatusBar.vue'
 
@@ -70,8 +71,9 @@ function saveToFile(path: string): void {
     <div id="root-container">
         <TitleBar title="Qingshu (beta)" :fileName="fileName" @open-file="openFile" @save-file="saveFile"
             @save-as="saveAs" />
-        <Editor id="editor-container" ref="editor" />
-        <StatusBar />
+        <!-- <Editor id="editor-container" ref="editor" /> -->
+        <SimpleEditor id="editor-container" ref="editor" />
+        <StatusBar/>
     </div>
 </template>
     
@@ -86,6 +88,16 @@ body {
     flex-direction: column;
     height: 100vh;
     width: 100vw;
+}
+
+#editor-container {
+    display: flex;
+    flex-grow: 1;
+    /* z-index: -5; */
+    /* font-family: 'Fira Code', monospace; */
+    /* font-size: 16px; */
+    /* line-height: 1.5; */
+    overflow: auto;
 }
 </style>
     

@@ -24,7 +24,8 @@ import { curCaretPos } from '../assets/js/store'
 
 <style scope>
 #status-bar {
-    font-size: 12px;;
+    font-size: 12px;
+    z-index: 5;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
