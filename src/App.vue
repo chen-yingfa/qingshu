@@ -8,26 +8,38 @@ import type { Ref } from 'vue'
 import { ref } from 'vue'
 
 const { ipcRenderer } = require('electron')  // Somehow this can't be changed to import
-import * as fs from 'fs'
+const fs = require('fs')
 
 let fileName = ref('Untitled-1')
 let isSelectedFile = ref(false)
 let editor: Ref<typeof SimpleEditor | null> = ref(null)
 
-function openFile() {
-    ipcRenderer.invoke('open-file').then((paths: string[]) => {
-        console.log('got files:', paths)
-        if (paths.length > 0) {
-            const path = paths[0]
-            fs.readFile(path, 'utf-8', (err: any, data: string) => {
-                if (err) {
-                    console.error(err)
-                    return
-                }
-                console.log(data)
-            })
+
+function readFile(path: string) {
+    fs.readFile(path, 'utf-8', (err: any, content: string) => {
+        if (err) {
+            console.error(err)
+            return
+        }
+        fileName.value = path
+        // Replace the content of the editor
+        if (editor.value === null) {
+            console.error('editor is undefined')
+        } else {
+            editor.value.setContent(content)
         }
     })
+}
+
+function openFile() {
+    ipcRenderer.invoke('open-file')
+        .then((paths: string[]) => {
+            console.log('got files:', paths)
+            if (paths.length > 0) {
+                const path = paths[0]
+                readFile(path)
+            }
+        })
 }
 
 function saveFile() {
@@ -40,31 +52,45 @@ function saveFile() {
 }
 
 function saveAs() {
-    ipcRenderer.invoke('save-file').then((path: string) => {
-        console.log('got path:', path)
-        if (path.length > 0) {
-            saveToFile(path)
-        }
-    })
+    ipcRenderer.invoke('save-file')
+        .then((path: string) => {
+            console.log('got path:', path)
+            if (path.length > 0) {
+                saveToFile(path)
+            }
+        })
 }
-function saveToFile(path: string): void {
-    console.log('saving to file:', path)
-    let content = ''
-    if (editor.value === null) {
-        console.error('editor is undefined')
-    } else {
-        console.log(editor.value)
-        content = editor.value.getAllContents()
-    }
-    fs.writeFile(path, content, (err: any) => {
+
+function dump(content: string, path: string) {
+    fs.writeFileSync(path, content, (err: any) => {
         if (err) {
-            console.error(err)
+            warn(err)
             return
         }
         console.log('file saved')
         fileName.value = path
         isSelectedFile.value = true
     })
+}
+
+function saveToFile(path: string): void {
+    console.log('saving to file:', path)
+    if (editor.value === null) {
+        console.error('editor is undefined')
+    } else {
+        try {
+            const content: string = editor.value.getAllContents()
+            console.info('content', content)
+            dump(content, path)
+            fileName.value = path
+        } catch (e: any) {
+            warn(e)
+        }
+    }
+}
+
+function warn(err: any) {
+    console.warn('warn', err)
 }
 
 </script>
@@ -76,7 +102,7 @@ function saveToFile(path: string): void {
             @save-as="saveAs" />
         <!-- <Editor id="editor-container" ref="editor" /> -->
         <SimpleEditor id="editor-container" ref="editor" />
-        <StatusBar/>
+        <StatusBar />
     </div>
 </template>
     

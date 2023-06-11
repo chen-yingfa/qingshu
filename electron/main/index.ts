@@ -40,11 +40,11 @@ const indexHtml = join(process.env.DIST, 'index.html')
 
 async function createWindow() {
   win = new BrowserWindow({
-    width: 640,
-    height: 360,
+    width: 800,
+    height: 600,
     frame: false,
-    minWidth: 450,
-    minHeight: 300,
+    minWidth: 600,
+    minHeight: 450,
     webPreferences: {
       preload,
       // Warning: Enable nodeIntegration and disable contextIsolation is not secure in production

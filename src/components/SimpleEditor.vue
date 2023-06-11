@@ -76,6 +76,8 @@ const containerDiv = ref<HTMLDivElement | null>(null)
 const editorDiv = ref<HTMLInputElement | null>(null)
 const resizerDiv = ref<HTMLInputElement | null>(null)
 // Width in % instead of px to work with resizable window.
+const MIN_EDITOR_WIDTH = 25;
+const MAX_EDITOR_WIDTH = 75;
 const editorWidthProp = ref(50)
 
 // Variables for resizing
@@ -98,8 +100,13 @@ function onMouseMove(event: MouseEvent) {
     } else {
         const newX = editorWidthOnDown + dx
         const containerWidth = containerDiv.value.clientWidth
-        editorWidthProp.value = 100 * newX / containerWidth
-        console.log(editorWidthProp.value)
+        var newProp = 100 * newX / containerWidth
+        if (newProp < MIN_EDITOR_WIDTH) {
+            newProp = MIN_EDITOR_WIDTH
+        } else if (newProp > MAX_EDITOR_WIDTH) {
+            newProp = MAX_EDITOR_WIDTH
+        }
+        editorWidthProp.value = newProp
 
         if (resizerDiv.value === null) {
             console.log('resizer is undefined')
@@ -207,14 +214,29 @@ async function render() {
 /**
  * Get the current content of the editor
  */
-function getAllContents() {
+function getAllContents(): string {
     if (editor === null) {
         console.debug('curText is undefined')
-        return
+        throw new Error('editor is undefined')
     } else {
         content = editor.getValue()
     }
+    return content
 }
+
+function setContent(content: string) {
+    if (editor === null) {
+        console.debug('curText is undefined')
+        throw new Error('editor is undefined')
+    } else {
+        editor.setValue(content)
+    }
+}
+
+defineExpose({
+    getAllContents,
+    setContent,
+})
 
 </script>
 

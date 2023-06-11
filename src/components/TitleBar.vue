@@ -48,7 +48,7 @@ function onClickSaveAs(): void {
             <button id="save-as-button" @click="onClickSaveAs">Save As</button>
         </div>
         <div class="title-bar-center-container">
-            <span>{{ fileName }}</span> - Qingshu (beta)
+            <span>{{ fileName }}</span> - Qingshu
         </div>
         <div class="title-bar-right-container">
             <button id="minimize-button">
