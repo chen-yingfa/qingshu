@@ -48,7 +48,7 @@ function onClickSaveAs(): void {
             <button id="save-as-button" @click="onClickSaveAs">Save As</button>
         </div>
         <div class="title-bar-center-container">
-            <span>{{ fileName }}</span> - Qingshu
+            {{ fileName }} - Qingshu
         </div>
         <div class="title-bar-right-container">
             <button id="minimize-button">
@@ -87,6 +87,8 @@ function onClickSaveAs(): void {
     display: flex;
     flex-direction: row;
     justify-content: flex-start;
+    min-width: max-content;
+    word-wrap: nowrap;
     gap: 4px;
     padding: 4px;
 }
@@ -95,6 +97,7 @@ function onClickSaveAs(): void {
     display: flex;
     flex-direction: row;
     justify-content: center;
+    /* overflow: hidden; */
     align-items: center;
     gap: 4px;
     font-size: 12px;

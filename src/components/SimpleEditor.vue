@@ -27,6 +27,11 @@ var initContent: string = `# 你好！
 
 ## Markdown 测试
 
+| Method | Score ($\\mathbb U$) |
+| ------ | -------- |
+| SVM    | 0.9      |
+| LR     | 0.8      |
+
 There are 3 types of [Transformers](example.com) architecture.
 
 - Encoder-decoder:

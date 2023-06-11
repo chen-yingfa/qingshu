@@ -3,13 +3,14 @@
     padding: 8px;
     background-color: white;
     color: black;
+    font-size: 1.1em;
 }
 
 .md-html-container > p {
     font-size: 1.2em;
     /* font-family: 'SimHei', 'Arial'; */
     margin: 0px;
-    padding: 0px;
+    padding: 4px;
 }
 
 .md-html-container > h1 {
@@ -19,10 +20,20 @@
     margin: 4px;
 }
 
+sup > a{
+    font-size: 0.8em;
+    /* background-color: #ddd; */
+    margin: 0px;
+    /* padding: 1px; */
+    /* border-radius: 2px; */
+    text-decoration: none;
+}
+
 code {
+    font-family: 'Ubuntu Mono', monospace;
     background-color: #f3f4f4;
     padding: 0 2px 0 2px;
-    font-size: 0.9em;
+    font-size: 1.0em;
     border-radius: 3px;
     border: 1px solid #e7eaed;
 }
@@ -35,10 +46,40 @@ blockquote {
 }
 
 .language-python {
+    word-break: break-word;
+    overflow-wrap: break-word;
+    overflow-x: auto;
     margin: 8px;
     padding: 12px;
     border-radius: 4px;
-    display: block;
+    display: inline-block;
     background-color: #f7f7f7;
     border: 1px solid #e7eaed;
+}
+
+table {
+    margin: 8px auto;
+    padding: 0px;
+    border: 1px solid #eee;
+    /* border-radius: 8px; */
+    border-spacing: 0;
+}
+
+thead {
+    background-color: #eee;
+    text-align: center;
+    height: 24px;
+    margin: 0px;
+    /* padding: 4px 6px; */
+    border-bottom: 1px solid red;
+    font-weight: bold;
+}
+
+th {
+    padding: 2px 6px;
+}
+
+td {
+    padding: 2px 4px;
+    border-top: 1px solid #eee;
 }
