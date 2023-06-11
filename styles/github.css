@@ -250,6 +250,7 @@ table tr td:last-child {
     border-top: 1px solid #eef2f2;
 }
 
+
 .md-fences,
 code,
 tt {
@@ -264,6 +265,12 @@ tt {
 code {
     background-color: #f3f4f4;
     padding: 0 2px 0 2px;
+}
+
+.language-python {
+    /* background-color: #888888; */
+    width: 100%;
+    border: 1px solid black;
 }
 
 .md-fences {

@@ -12,7 +12,7 @@ import * as fs from 'fs'
 
 let fileName = ref('Untitled-1')
 let isSelectedFile = ref(false)
-let editor: Ref<typeof Editor | null> = ref(null)
+let editor: Ref<typeof SimpleEditor | null> = ref(null)
 
 function openFile() {
     ipcRenderer.invoke('open-file').then((paths: string[]) => {
@@ -50,7 +50,10 @@ function saveAs() {
 function saveToFile(path: string): void {
     console.log('saving to file:', path)
     let content = ''
-    if (editor.value !== null) {
+    if (editor.value === null) {
+        console.error('editor is undefined')
+    } else {
+        console.log(editor.value)
         content = editor.value.getAllContents()
     }
     fs.writeFile(path, content, (err: any) => {
