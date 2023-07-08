@@ -1,31 +1,47 @@
-# Qingshu
+# 轻书 Qingshu
 
-A modern, minimalistic Markdown editor for Windows, implemented in Vue + Electron + TypeScript.
+一个现代的，简约的 Markdown 编辑器给 Windows，基于 Vue + Electron + TypeScript。
 
-## Why Another Markdown Editor?
+## 为何再一个 Markdown 编辑器？
 
-Because none of the existing markdown editors satisfy all of the following:
+因为现有编辑器没有一个符合一下所有要求：
 
-- Minimalistic: no knowledge base, no zettelkasten, no fancy syntax sugar that are not compatible with other editors.
-- Support Windows: I use Windows, and I don't want to buy a Mac.
-- Free of charge and open source.
-- Modern and minimalistic UI
-- Support GitHub Flavored Markdown + LaTeX (including inline math).
-- Can export (beautiful looking) PDF
-  - It should support syntax highlighting for code, footnotes, etc.
-  - Markdown PDF extension for VSCode is not my cup of tea.
-- Few bugs (MarkText is too buggy for me)
-- Better support for CJK characters
-  - Can automatically convert to correct Markdown syntax when the user is using CJK characters IME.
-    - i.e. when the user is typing `》[space]`, `￥{something}￥` or `·{something}·`, the editor should automatically convert it to `>[space]`, `${something}$` or `` `{something}` ``.
-  - Automatically predict whether to use CJK quotation marks (full width) instead of ordinary ones (half width).
-  - Correctly perform word segmentation when moving cursor while holding down CTRL.
-  - Can automatically add space between CJK and latin letters for more appealing text.
-  - Align half-width and full-width characters when using monospace font.
-- Support Marp (for slides)
-- WYSIWYG
+- 简约：不要知识库、zettelkasten 等无法导出纯 Markdown 的功能。
+- 支持 Windows。
+- 开源。
+- 现代且简约的用户界面。
+- 支持 GitHub Flavored Markdown + LaTeX（包括行内公式）。
+- 导出（好看的）PDF。
+  - 代码高亮、脚注等。
+  - VSCode 的 Markdown PDF 插件太丑了。
+- bug 少（MarkText 太多 bug 了）
+- 中文友好。
+  - 自动转换 Markdown 语句对应的「中文字符」：
+    - 比如，输入 `》[space]`、`￥{something}￥`、`·{something}·`，应自动转换成 `>[space]`, `${something}$`、`` `{something}` ``.
+  - 自动判断是否用全角引号。
+  - 具有中文分词能力，按下 CTRL 时移动光标和双击文字时应该能正确选中一个中文词。
+  - 可以自动在汉字和拉丁文字之间添加空格。
+  - 等宽字符中，中文英文可以对齐。
+- 支持 Marp/Slidev。
+- 所见即所得。
 
-### Compared To Existing Editors
+### 跟主流编辑器的比较
+
+要求：支持 Windows，是免费。
+
+| 软件      | 开源 | 中文友好 | 导出 PDF | 轻  | Bug 少 | A4 预览 | 代码友好 | GFM |
+| ----      | ---- | -------- | -------- | --- | ------ | ------- | -------- | --- |
+| Typora    | ❌   |    ❌    |          |     |        |  ❌     |          |   |
+| Obsidian  | ❌   |    ❌    |          |     |        |  ❌     |          | ❌ |
+| MarkText  |      |    ❌    |          |     | ❌     |  ❌     |          | ❌ |
+| VSCode    |      |    ❌    |  插件    | ❌  |        |  ❌     |          | 插件 |
+| Notion    | ❌   |    ❌    |    ❌    | ❌  |        |  ❌     |     ❌   | ❌ |
+| Zettlr    |      |    ❌    |          |     |  ❌    |  ❌     |          |    |
+
+> 值得注意的是，很多导出的 PDF 都巨丑，而且没有 A4 预览的话，其实严格来说都不算是所见即所得。
+
+
+### 关于主流编辑器的更多细节
 
 - Typora:
   - Not open-source.
@@ -54,17 +70,14 @@ Because none of the existing markdown editors satisfy all of the following:
   - Poor support for CJK characters (word segmentation and alignment of half-width and full-width monospace characters)
   - Too large if you only want to edit a markdown file.
 
-## Features
+## 功能
 
-- Live preview
-- Math rendering with MathJax
+- 实时渲染，所见即所得。
+- 支持 GFM 和 KaTeX。
 
-## Upcoming Features
+## 计划功能
 
-- Save and open file.
-- Chinese README
-- Support GitHub Flavored Markdown.
-- Acrylic/Mica material and Fluent design.
-- Export HTML
-- Export PDF
-- Command palette
+- Acrylic/Mica material 和 Fluent 设计.
+- 导出 HTML
+- 导出 PDF
+- 命令面板

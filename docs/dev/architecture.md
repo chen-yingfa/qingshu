@@ -98,7 +98,9 @@ Any changes to these properties will cause the InputBlock to re-render and re-mo
 
 > There are circumstances when prop updating does not cause re-rendering, but it's very rare.
 
-> This means that updating the order of the `blocks` array in the Editor will cause all InputBlocks whose index has been modified to re-render. E.g. inserting a block at index i, will cause all blocks after i to re-render.
+> This means that updating the order of the `blocks` array in the Editor will cause all InputBlocks whose index has been modified to re-render. E.g., inserting a block at index i, will cause all blocks after i to re-render.
+
+> TODO: 应该尽量减少重新渲染的次数，修改顺序不应该重新渲染。更新 `initContent` 时也没有必要重新渲染。
 
 #### `Editor.blocks` array vs. `InputBlock`
 
