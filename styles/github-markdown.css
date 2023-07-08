@@ -4,11 +4,11 @@
     background-color: white;
     color: black;
     font-size: 1.1em;
+    font-family: 'Arial', 'Microsoft YaHei';
 }
 
 .md-html-container > p {
     font-size: 1.2em;
-    /* font-family: 'SimHei', 'Arial'; */
     margin: 0px;
     padding: 4px;
 }

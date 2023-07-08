@@ -3,9 +3,7 @@
 import { ref, onMounted } from 'vue'
 import { debounce } from 'lodash'
 import * as monaco from 'monaco-editor'
-import { marked } from 'marked'
-import { remark } from 'remark'
-import {unified} from 'unified'
+import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import remarkRehype from 'remark-rehype'
@@ -16,6 +14,8 @@ import rehypeDocument from 'rehype-document'
 
 var renderDelay: number = 160;
 var initContent: string = `# 你好！
+
+欢迎来到【轻书】，这是一个现代的，简约的 Markdown 编辑器。
 
 > 这是一个注释
 
@@ -137,7 +137,7 @@ function onMouseDownResizer(e: MouseEvent) {
         downY = e.clientY
         isResizing = true
         editorWidthOnDown = editorDiv.value.clientWidth
-        
+
         // Attach the listeners to `document`
         document.addEventListener('mousemove', onMouseMove)
     }
@@ -292,7 +292,7 @@ defineExpose({
 
 
 body {
-	/* margin:0; */
-	border: 10px solid #aaa;
+    /* margin:0; */
+    border: 10px solid #aaa;
 }
 </style>
