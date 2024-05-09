@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import Editor from './components/Editor.vue'
+// import Editor from './components/Editor.vue'
 import SimpleEditor from './components/SimpleEditor.vue'
+import RichEditor from './components/rich-editor/RichEditor.vue'
 import TitleBar from './components/TitleBar.vue'
 import StatusBar from './components/StatusBar.vue'
 

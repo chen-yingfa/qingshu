@@ -2,6 +2,14 @@
 
 一个现代的，简约的 Markdown 编辑器给 Windows，基于 Vue + Electron + TypeScript。
 
+## How to Run?
+
+Install node and electron, then execute:
+
+```shell
+npm run dev
+```
+
 ## 为何再一个 Markdown 编辑器？
 
 因为现有编辑器没有一个符合一下所有要求：
@@ -70,14 +78,12 @@
   - Poor support for CJK characters (word segmentation and alignment of half-width and full-width monospace characters)
   - Too large if you only want to edit a markdown file.
 
-## 功能
+## Roadmap
 
-- 实时渲染，所见即所得。
-- 支持 GFM 和 KaTeX。
-
-## 计划功能
-
-- Acrylic/Mica material 和 Fluent 设计.
-- 导出 HTML
-- 导出 PDF
-- 命令面板
+- [x] 实时渲染，所见即所得。
+- [x] 支持 GFM 和 KaTeX。
+- [ ] Block editing/editing.
+- [ ] Acrylic/Mica material 和 Fluent 设计.
+- [ ] 导出 HTML
+- [ ] 导出 PDF
+- [ ] 命令面板

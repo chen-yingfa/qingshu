@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { curCaretPos } from '../assets/js/store'
+import { curCaretPos, contentStats } from '../assets/js/store'
 
 </script>
 
@@ -14,7 +14,7 @@ import { curCaretPos } from '../assets/js/store'
                     B <span id="caret-row-number">{{ curCaretPos.row }}</span>
                 </div>
                 <div id="caret-row-status">
-                    C <span id="caret-col-number">{{ curCaretPos.col }}</span>
+                    C <span id="caret-col-number">{{ contentStats.numChars }}</span>
                 </div>
             </div>
             Words: <span id="word-count"></span>

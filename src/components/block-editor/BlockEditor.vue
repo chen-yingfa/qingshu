@@ -11,7 +11,6 @@ import rehypeStringify from 'rehype-stringify'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeDocument from 'rehype-document'
-import { contentStats } from '../assets/js/store'
 
 var renderDelay: number = 160;
 var initContent: string = `# 你好！
@@ -77,6 +76,8 @@ def bin_search(vec: list, target) -> int:
 
 // Monaco works better with non-reactive variables
 var content = initContent
+var contents = []
+var curBlock: Number = -1
 var editor: monaco.editor.IStandaloneCodeEditor | null = null
 // We use reactive variables for previewing
 const renderedHtml = ref('')
@@ -215,7 +216,6 @@ async function textToHtml(text: string): Promise<string> {
  * concatenate the HTML result.
  */
 async function render() {
-    contentStats.numChars = content.length;
     renderedHtml.value = await textToHtml(content)
     // console.log(renderedHtml.value)
 }
@@ -258,7 +258,7 @@ defineExpose({
             <link href="../styles/github-markdown.css" rel="stylesheet">
             <!-- <link href="../styles/katex.css" rel="stylesheet"> -->
             <!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" integrity="sha384-Xi8rHCmBmhbuyyhbI88391ZKP2dmfnOl4rT9ZfRI7mLTdk1wblIUnrIq35nqwEvC" crossorigin="anonymous"></link> -->
-            <div class="md-html-container" v-html="renderedHtml" contenteditable="false"></div>
+            <div class="md-html-container" v-html="renderedHtml" contenteditable="true"></div>
         </div>
     </div>
 </template>
