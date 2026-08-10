@@ -113,8 +113,12 @@ describe('LiveEditor state synchronization', () => {
     expect(screen.queryByLabelText('Edit Markdown block')).toBeNull()
     const reference = await screen.findByRole('link', { name: '1' })
     expect(document.querySelectorAll('.rendered-block')).toHaveLength(1)
-    expect(reference.getAttribute('href')).toBe('#user-content-fn-note')
-    expect(document.getElementById('user-content-fn-note')?.textContent).toContain(
+    expect(reference.getAttribute('href')).toBe(
+      '#user-content-fn-cp-6e-6f-74-65',
+    )
+    expect(
+      document.getElementById('user-content-fn-cp-6e-6f-74-65')?.textContent,
+    ).toContain(
       'Footnote content',
     )
   })
@@ -138,9 +142,10 @@ describe('LiveEditor state synchronization', () => {
     const guide = await screen.findByRole('link', { name: 'the guide' })
     const footnote = await screen.findByRole('link', { name: '1' })
     expect(guide.getAttribute('href')).toBe('https://example.com/guide')
-    expect(footnote.getAttribute('href')).toBe('#user-content-fn-tip')
+    const footnoteTarget = '#user-content-fn-cp-74-69-70'
+    expect(footnote.getAttribute('href')).toBe(footnoteTarget)
     expect(document.querySelectorAll('[data-footnotes]')).toHaveLength(1)
-    expect(document.getElementById('user-content-fn-tip')?.textContent).toContain(
+    expect(document.querySelector(footnoteTarget)?.textContent).toContain(
       'Shared tip',
     )
   })

@@ -156,11 +156,11 @@ describe('application safety controls', () => {
     expect(document.querySelectorAll('.rendered-block')).toHaveLength(1)
     expect(document.querySelector('.editor')?.textContent).toContain('First')
     expect(screen.getByRole('link', { name: '1' }).getAttribute('href')).toBe(
-      '#user-content-fn-note',
+      '#user-content-fn-cp-6e-6f-74-65',
     )
-    expect(document.getElementById('user-content-fn-note')?.textContent).toContain(
-      'Footnote text',
-    )
+    expect(
+      document.getElementById('user-content-fn-cp-6e-6f-74-65')?.textContent,
+    ).toContain('Footnote text')
     expect(screen.queryByRole('button', { name: 'Exit focus mode' })).toBeNull()
     finishExport?.()
     await waitFor(() =>

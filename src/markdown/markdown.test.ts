@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canonicalFootnoteId,
   createDocumentRenderContext,
   parseDocument,
   parseBlocks,
@@ -97,14 +98,15 @@ describe('renderMarkdown', () => {
     const second = await renderMarkdownBlock(blocks[1], context)
     const footnotes = await renderDocumentFootnotes(context)
 
-    expect(first).toContain('id="user-content-fnref-note"')
-    expect(second).toContain('id="user-content-fnref-note-2"')
+    const id = canonicalFootnoteId('note')
+    expect(first).toContain(`id="user-content-fnref-${id}"`)
+    expect(second).toContain(`id="user-content-fnref-${id}-2"`)
     expect(first).not.toContain('data-footnotes')
     expect(second).not.toContain('data-footnotes')
     expect(footnotes.match(/data-footnotes/g)).toHaveLength(1)
     expect(footnotes).toContain('Shared <strong>footnote</strong>.')
-    expect(footnotes).toContain('href="#user-content-fnref-note"')
-    expect(footnotes).toContain('href="#user-content-fnref-note-2"')
+    expect(footnotes).toContain(`href="#user-content-fnref-${id}"`)
+    expect(footnotes).toContain(`href="#user-content-fnref-${id}-2"`)
   })
 
   it('derives footnote ordinals only from AST footnoteReference nodes', async () => {
@@ -130,11 +132,52 @@ describe('renderMarkdown', () => {
     )
 
     expect(model.renderContext.references).toHaveLength(2)
-    expect(rendered.join('\n')).toContain('id="user-content-fnref-real"')
-    expect(rendered.join('\n')).toContain('id="user-content-fnref-real-2"')
+    const id = canonicalFootnoteId('real')
+    expect(rendered.join('\n')).toContain(`id="user-content-fnref-${id}"`)
+    expect(rendered.join('\n')).toContain(`id="user-content-fnref-${id}-2"`)
     expect(rendered.join('\n')).not.toContain('fnref-front-matter')
     expect(rendered.join('\n')).not.toContain('fnref-inline-code')
     expect(rendered.join('\n')).not.toContain('fnref-fenced-code')
     expect(rendered.join('\n')).not.toContain('fnref-html-comment')
+  })
+
+  it('uses collision-resistant HTML-safe IDs for hostile footnote labels', async () => {
+    const source = [
+      'Quote[^"><img src=x onerror=alert(1)>].',
+      'Unicode[^雪].',
+      'Dash[^a-b].',
+      'Space[^a b].',
+      '',
+      '[^"><img src=x onerror=alert(1)>]: Hostile.',
+      '[^雪]: Snow.',
+      '[^a-b]: Dash.',
+      '[^a b]: Space.',
+    ].join('\n')
+    const model = parseDocument(source)
+    const body = (
+      await Promise.all(
+        model.blocks.map((block) =>
+          renderMarkdownBlock(block, model.renderContext),
+        ),
+      )
+    ).join('')
+    const footnotes = await renderDocumentFootnotes(model.renderContext)
+    const html = body + footnotes
+
+    expect(canonicalFootnoteId('雪')).toBe('cp-96ea')
+    expect(canonicalFootnoteId('a-b')).not.toBe(canonicalFootnoteId('a b'))
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('onerror')
+    expect(html).not.toContain('id="user-content-fnref-&quot;')
+
+    const targets = [...html.matchAll(/data-footnote-ref=""[^>]*|<a href="(#[^"]+)"/gu)]
+      .map((match) => match[1])
+      .filter(Boolean)
+    for (const target of targets) {
+      expect(html).toContain(`id="${target.slice(1)}"`)
+    }
+    for (const reference of model.renderContext.references) {
+      expect(html).toContain(canonicalFootnoteId(reference.identifier))
+    }
   })
 })

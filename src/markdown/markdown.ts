@@ -108,7 +108,7 @@ const renderer = unified()
   .use(rehypeKatex)
   .use(rehypeStringify)
 
-export async function renderMarkdown(source: string): Promise<string> {
+async function processMarkdown(source: string): Promise<string> {
   return String(await renderer.process(source))
 }
 
@@ -187,11 +187,71 @@ export function createDocumentRenderContext(source: string): DocumentRenderConte
   return parseDocument(source).renderContext
 }
 
+export function canonicalFootnoteId(identifier: string): string {
+  return `cp-${Array.from(identifier, (character) =>
+    character.codePointAt(0)!.toString(16),
+  ).join('-')}`
+}
+
 function withoutFootnoteSection(html: string): string {
   return html.replace(
     /(?:\n)?<section[^>]*data-footnotes(?:=""|="true")?[^>]*>[\s\S]*?<\/section>\s*$/u,
     '',
   )
+}
+
+function canonicalizeFootnoteAttributes(
+  html: string,
+  references: FootnoteReference[],
+): string {
+  const definitionTargets = new Map<string, string>()
+  const referenceTargets = new Map<string, string>()
+  let referenceIndex = 0
+
+  let rewritten = html.replace(
+    /href="(#user-content-fn-(?!ref-)[^"]+)"/gu,
+    (attribute, originalTarget: string) => {
+      const reference = references[referenceIndex++]
+      if (!reference) return attribute
+      const canonicalTarget = `#user-content-fn-${canonicalFootnoteId(reference.identifier)}`
+      definitionTargets.set(originalTarget, canonicalTarget)
+      return `href="${canonicalTarget}"`
+    },
+  )
+
+  referenceIndex = 0
+  rewritten = rewritten.replace(
+    /id="(user-content-fnref-[^"]+)"/gu,
+    (attribute, originalId: string) => {
+      const reference = references[referenceIndex++]
+      if (!reference) return attribute
+      const suffix = reference.ordinal === 1 ? '' : `-${reference.ordinal}`
+      const canonicalId = `user-content-fnref-${canonicalFootnoteId(reference.identifier)}${suffix}`
+      referenceTargets.set(`#${originalId}`, `#${canonicalId}`)
+      return `id="${canonicalId}"`
+    },
+  )
+
+  rewritten = rewritten.replace(
+    /id="(user-content-fn-(?!ref-)[^"]+)"/gu,
+    (attribute, originalId: string) => {
+      const canonical = definitionTargets.get(`#${originalId}`)
+      return canonical ? `id="${canonical.slice(1)}"` : attribute
+    },
+  )
+  rewritten = rewritten.replace(
+    /href="(#user-content-fnref-[^"]+)"/gu,
+    (attribute, originalTarget: string) => {
+      const canonical = referenceTargets.get(originalTarget)
+      return canonical ? `href="${canonical}"` : attribute
+    },
+  )
+  return rewritten
+}
+
+export async function renderMarkdown(source: string): Promise<string> {
+  const context = parseDocument(source).renderContext
+  return canonicalizeFootnoteAttributes(await processMarkdown(source), context.references)
 }
 
 export async function renderMarkdownBlock(
@@ -201,21 +261,11 @@ export async function renderMarkdownBlock(
   const input = context.supportSource
     ? `${block.source}\n\n${context.supportSource}`
     : block.source
-  let html = withoutFootnoteSection(await renderMarkdown(input))
+  let html = await processMarkdown(input)
   const references = context.references.filter(
     (reference) => reference.start >= block.start && reference.end <= block.end,
   )
-  let referenceIndex = 0
-  html = html.replace(
-    /id="user-content-fnref-([^"]+)"/gu,
-    (_match, generated: string) => {
-      const reference = references[referenceIndex++]
-      if (!reference) return `id="user-content-fnref-${generated}"`
-      const suffix = reference.ordinal === 1 ? '' : `-${reference.ordinal}`
-      return `id="user-content-fnref-${reference.identifier}${suffix}"`
-    },
-  )
-  return html
+  return withoutFootnoteSection(canonicalizeFootnoteAttributes(html, references))
 }
 
 export async function renderDocumentFootnotes(
@@ -225,9 +275,9 @@ export async function renderDocumentFootnotes(
   const syntheticReferences = context.references
     .map(({ label }) => `[^${label}]`)
     .join(' ')
-  const html = await renderMarkdown(
+  const html = canonicalizeFootnoteAttributes(await processMarkdown(
     `${syntheticReferences}\n\n${context.footnoteSource}`,
-  )
+  ), context.references)
   return (
     html.match(
       /<section[^>]*data-footnotes(?:=""|="true")?[^>]*>[\s\S]*?<\/section>/u,
