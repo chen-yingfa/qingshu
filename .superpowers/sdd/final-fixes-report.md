@@ -199,3 +199,101 @@ No commits were amended and nothing was pushed.
 - electron-builder continues to log duplicate dependency references while
   packaging the unified/remark graph; package creation succeeds.
 - macOS DMG creation remains unavailable on this Linux agent.
+
+---
+
+## Latest Security and Save-lifecycle Review
+
+All latest findings were verified against `f2819f5` and were valid. No reasoned
+pushback was recorded.
+
+### Canonical footnote identifiers
+
+The renderer previously sanitized Markdown and then interpolated the raw mdast
+footnote identifier into an HTML `id` attribute. A label containing quotes could
+therefore cross the sanitizer boundary.
+
+All footnote references, definition targets, and backlinks now use
+`canonicalFootnoteId()`. It encodes every Unicode code point as delimiter-separated
+hex under a fixed `cp-` prefix, so output is restricted to an HTML-safe alphabet
+and distinct code-point sequences cannot collide. The same canonical mapping is
+applied to normal block previews, consolidated document footnotes, full-document
+print preview, and HTML export.
+
+The focused security test includes a parsed label containing quotes, angle
+brackets, and an SVG-shaped payload, a CJK label, and punctuation variants which
+would be vulnerable to lossy slug collisions. It verifies all four references are
+real AST nodes, no hostile attribute/content survives, every href resolves to an
+existing canonical ID, and collision cases differ.
+
+### Save content revisions and renderer feedback
+
+`useDocument` now maintains a monotonic content revision independent of content
+bytes. Save requests capture that revision. Any intervening edit supersedes the
+response even when the text is later reverted byte-for-byte. A current Save As
+response still adopts the main-authorized selected path while leaving the document
+dirty and returning `superseded`, so App does not show a Saved toast.
+
+Successful renames with directory durability failures return a typed `warning`
+field over the preload API. The hook marks committed content clean and returns a
+`warning` operation result; App displays “Saved … with warning” using a
+non-assertive warning toast.
+
+### Atomic save transaction hardening
+
+- Save As installs a placeholder authorized record and queue synchronously after
+  the dialog returns, before any `stat` or revision initialization. Initialization,
+  conflict checks, writing, and response delivery all run inside that queue.
+- Atomic writing now repeats exact target revision comparison after temporary-file
+  write/fsync/fstat and immediately before rename. An interleaved external change
+  closes and removes the temporary file without renaming.
+- Revision comparison includes verified permission bits. The temporary file uses
+  only the verified mode, and a chmod before rename is a conflict rather than
+  being silently reverted.
+- Rename commitment and directory durability are modeled separately. Once rename
+  succeeds, the exact temp-handle revision becomes the authorized revision even
+  if directory open/fsync/close fails. The warning is returned and the next save
+  compares against the committed revision successfully.
+
+### TDD red/green evidence
+
+- RED: hostile-footnote focused test failed because `canonicalFootnoteId` did not
+  exist; the pre-fix path directly injected `reference.identifier`.
+- GREEN: Markdown, LiveEditor DOM, and App footnote suites passed 40/40.
+- RED: hook/App lifecycle run failed 4 tests: an edited Save As returned success
+  without adopting the path, and a warning was reported as ordinary success.
+- RED validation: with the content-revision response guard disabled, the
+  byte-for-byte edit/revert regression returned success instead of `superseded`.
+- GREEN: hook/reducer/App/main focused lifecycle suites passed 51/51.
+- RED: main save transaction run failed 7 expected tests, including missing
+  pre-rename checks, parallel Save As initialization, mode-insensitive conflict
+  handling, and stale authorization after post-rename directory-sync failure.
+- GREEN: all 28 main-process IPC tests passed.
+- Full-suite migration exposed one old HTML-export slug expectation; after updating
+  it to the canonical function, the focused export suite passed 4/4.
+
+### Commits
+
+- `e31aa5d24a15e9fa46ee27681bcf540ac8cc29db` — canonical safe footnote IDs
+- `0991c7e444362963c1b8be0bb85dab045b57dd81` — atomic save transaction lifecycle
+- `aea1eefaf9e6db8cb884c261f9a1faf404f62e98` — renderer content revisions/warnings
+- `73cb1113dab377de76265b3975bdebb04b1a062b` — parsed hostile-label coverage
+- `9aac70cf2fb17157f9a47a8d767b4f7aec871c60` — canonical HTML export expectation
+
+### Exact-head verification
+
+- `npm test`: 15 files, 121 tests passed.
+- `npm run typecheck`: passed.
+- `npx vite build`: renderer, main, and preload bundles built.
+- Linux x64 AppImage packaging: passed.
+- Windows x64 unpacked packaging: passed.
+
+No commits were amended and nothing was pushed.
+
+### Remaining concerns
+
+- Vite still reports its non-failing renderer chunk-size advisory (about 659 kB
+  minified).
+- electron-builder still reports duplicate dependency references while traversing
+  the unified/remark graph; package creation succeeds.
+- macOS DMG creation remains unavailable on this Linux agent.
