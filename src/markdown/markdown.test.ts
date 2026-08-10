@@ -181,4 +181,28 @@ describe('renderMarkdown', () => {
       expect(html).toContain(canonicalFootnoteId(reference.identifier))
     }
   })
+
+  it('leaves ordinary footnote-shaped fragments untouched beside semantic footnotes', async () => {
+    const hostile = '"><tag>'
+    const source = [
+      '[ordinary](#user-content-fn-manual)',
+      '[ordinary backlink](#user-content-fnref-manual)',
+      `Hostile[^${hostile}] and Unicode[^雪].`,
+      '',
+      `[^${hostile}]: Hostile note.`,
+      '[^雪]: Unicode note.',
+    ].join('\n')
+    const html = await renderMarkdown(source)
+    const hostileId = canonicalFootnoteId(hostile)
+    const unicodeId = canonicalFootnoteId('雪')
+
+    expect(html).toContain('href="#user-content-fn-manual"')
+    expect(html).toContain('href="#user-content-fnref-manual"')
+    expect(html).toContain(`href="#user-content-fn-${hostileId}"`)
+    expect(html).toContain(`id="user-content-fn-${hostileId}"`)
+    expect(html).toContain(`href="#user-content-fn-${unicodeId}"`)
+    expect(html).toContain(`id="user-content-fn-${unicodeId}"`)
+    expect(html).toContain(`href="#user-content-fnref-${hostileId}"`)
+    expect(html).toContain(`href="#user-content-fnref-${unicodeId}"`)
+  })
 })

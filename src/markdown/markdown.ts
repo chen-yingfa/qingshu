@@ -50,6 +50,13 @@ interface MarkdownRoot {
   children: PositionedNode[]
 }
 
+interface HastNode {
+  type: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: HastNode[]
+}
+
 const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 
 function sourceHash(source: string): string {
@@ -97,19 +104,6 @@ function frontMatterEnd(source: string): number {
   closing.lastIndex = opening[0].length
   const match = closing.exec(source)
   return match ? match.index + match[0].length : 0
-}
-
-const renderer = unified()
-  .use(remarkParse)
-  .use(remarkGfm)
-  .use(remarkMath)
-  .use(remarkRehype)
-  .use(rehypeSanitize, { ...defaultSchema, clobberPrefix: '' })
-  .use(rehypeKatex)
-  .use(rehypeStringify)
-
-async function processMarkdown(source: string): Promise<string> {
-  return String(await renderer.process(source))
 }
 
 function renderContextFromTree(
@@ -193,6 +187,65 @@ export function canonicalFootnoteId(identifier: string): string {
   ).join('-')}`
 }
 
+function canonicalizeMdastFootnotes() {
+  return (tree: PositionedNode) => {
+    const visit = (node: PositionedNode) => {
+      if (
+        (node.type === 'footnoteReference' ||
+          node.type === 'footnoteDefinition') &&
+        node.identifier
+      ) {
+        node.identifier = canonicalFootnoteId(node.identifier)
+        node.label = node.identifier
+      }
+      node.children?.forEach(visit)
+    }
+    visit(tree)
+  }
+}
+
+function canonicalizeHastFootnoteReferences(options?: {
+  references?: FootnoteReference[]
+}) {
+  return (tree: HastNode) => {
+    let index = 0
+    const visit = (node: HastNode) => {
+      if (
+        node.tagName === 'a' &&
+        node.properties &&
+        Object.hasOwn(node.properties, 'dataFootnoteRef')
+      ) {
+        const reference = options?.references?.[index++]
+        if (reference) {
+          const base = canonicalFootnoteId(reference.identifier)
+          const suffix = reference.ordinal === 1 ? '' : `-${reference.ordinal}`
+          node.properties.href = `#user-content-fn-${base}`
+          node.properties.id = `user-content-fnref-${base}${suffix}`
+        }
+      }
+      node.children?.forEach(visit)
+    }
+    visit(tree)
+  }
+}
+
+async function processMarkdown(
+  source: string,
+  references?: FootnoteReference[],
+): Promise<string> {
+  const renderer = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkMath)
+    .use(canonicalizeMdastFootnotes)
+    .use(remarkRehype)
+    .use(canonicalizeHastFootnoteReferences, { references })
+    .use(rehypeSanitize, { ...defaultSchema, clobberPrefix: '' })
+    .use(rehypeKatex)
+    .use(rehypeStringify)
+  return String(await renderer.process(source))
+}
+
 function withoutFootnoteSection(html: string): string {
   return html.replace(
     /(?:\n)?<section[^>]*data-footnotes(?:=""|="true")?[^>]*>[\s\S]*?<\/section>\s*$/u,
@@ -200,58 +253,9 @@ function withoutFootnoteSection(html: string): string {
   )
 }
 
-function canonicalizeFootnoteAttributes(
-  html: string,
-  references: FootnoteReference[],
-): string {
-  const definitionTargets = new Map<string, string>()
-  const referenceTargets = new Map<string, string>()
-  let referenceIndex = 0
-
-  let rewritten = html.replace(
-    /href="(#user-content-fn-(?!ref-)[^"]+)"/gu,
-    (attribute, originalTarget: string) => {
-      const reference = references[referenceIndex++]
-      if (!reference) return attribute
-      const canonicalTarget = `#user-content-fn-${canonicalFootnoteId(reference.identifier)}`
-      definitionTargets.set(originalTarget, canonicalTarget)
-      return `href="${canonicalTarget}"`
-    },
-  )
-
-  referenceIndex = 0
-  rewritten = rewritten.replace(
-    /id="(user-content-fnref-[^"]+)"/gu,
-    (attribute, originalId: string) => {
-      const reference = references[referenceIndex++]
-      if (!reference) return attribute
-      const suffix = reference.ordinal === 1 ? '' : `-${reference.ordinal}`
-      const canonicalId = `user-content-fnref-${canonicalFootnoteId(reference.identifier)}${suffix}`
-      referenceTargets.set(`#${originalId}`, `#${canonicalId}`)
-      return `id="${canonicalId}"`
-    },
-  )
-
-  rewritten = rewritten.replace(
-    /id="(user-content-fn-(?!ref-)[^"]+)"/gu,
-    (attribute, originalId: string) => {
-      const canonical = definitionTargets.get(`#${originalId}`)
-      return canonical ? `id="${canonical.slice(1)}"` : attribute
-    },
-  )
-  rewritten = rewritten.replace(
-    /href="(#user-content-fnref-[^"]+)"/gu,
-    (attribute, originalTarget: string) => {
-      const canonical = referenceTargets.get(originalTarget)
-      return canonical ? `href="${canonical}"` : attribute
-    },
-  )
-  return rewritten
-}
-
 export async function renderMarkdown(source: string): Promise<string> {
   const context = parseDocument(source).renderContext
-  return canonicalizeFootnoteAttributes(await processMarkdown(source), context.references)
+  return processMarkdown(source, context.references)
 }
 
 export async function renderMarkdownBlock(
@@ -261,11 +265,10 @@ export async function renderMarkdownBlock(
   const input = context.supportSource
     ? `${block.source}\n\n${context.supportSource}`
     : block.source
-  let html = await processMarkdown(input)
   const references = context.references.filter(
     (reference) => reference.start >= block.start && reference.end <= block.end,
   )
-  return withoutFootnoteSection(canonicalizeFootnoteAttributes(html, references))
+  return withoutFootnoteSection(await processMarkdown(input, references))
 }
 
 export async function renderDocumentFootnotes(
@@ -275,9 +278,10 @@ export async function renderDocumentFootnotes(
   const syntheticReferences = context.references
     .map(({ label }) => `[^${label}]`)
     .join(' ')
-  const html = canonicalizeFootnoteAttributes(await processMarkdown(
+  const html = await processMarkdown(
     `${syntheticReferences}\n\n${context.footnoteSource}`,
-  ), context.references)
+    context.references,
+  )
   return (
     html.match(
       /<section[^>]*data-footnotes(?:=""|="true")?[^>]*>[\s\S]*?<\/section>/u,
