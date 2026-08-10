@@ -108,20 +108,28 @@ describe('application safety controls', () => {
   })
 
   it('switches every block to rendered preview before PDF export', async () => {
-    api.exportPdf.mockImplementation(async () => {
-      expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
-      expect(document.querySelectorAll('.rendered-block')).toHaveLength(2)
-      expect(document.querySelector('.editor')?.textContent).toContain('First')
-      expect(document.querySelector('.editor')?.textContent).toContain('Second')
-      return { canceled: false, path: '/notes/export.pdf' }
-    })
+    let finishExport: (() => void) | undefined
+    api.exportPdf.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishExport = () =>
+            resolve({ canceled: false, path: '/notes/export.pdf' })
+        }),
+    )
     render(<App />)
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
       target: { value: '# First\n\nSecond' },
     })
-
     menuListener?.('export-pdf')
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledTimes(1))
+    expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
+    expect(document.querySelectorAll('.rendered-block')).toHaveLength(2)
+    expect(document.querySelector('.editor')?.textContent).toContain('First')
+    expect(document.querySelector('.editor')?.textContent).toContain('Second')
+    finishExport?.()
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull(),
+    )
   })
 })
