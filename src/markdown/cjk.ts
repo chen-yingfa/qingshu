@@ -1,105 +1,198 @@
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
+
 export interface DocumentStats {
   words: number
   characters: number
   readingMinutes: number
 }
 
-type TextTransform = (text: string) => string
+type TextTransform = (text: string, start: number, source: string) => string
 
-interface Fence {
-  marker: '`' | '~'
-  length: number
+interface SourceRange {
+  start: number
+  end: number
 }
 
-const fenceStartPattern = /^ {0,3}(`{3,}|~{3,})/
-const urlPattern = /^https?:\/\/[^\s<]+/iu
+interface MarkdownNode {
+  type: string
+  url?: string
+  children?: MarkdownNode[]
+  position?: {
+    start: { offset?: number }
+    end: { offset?: number }
+  }
+}
 
-function transformInlineText(source: string, transform: TextTransform): string {
-  let result = ''
-  let plainStart = 0
-  let index = 0
+const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
+const protectedNodeTypes = new Set(['code', 'inlineCode', 'math', 'inlineMath'])
 
-  const appendPlain = (end: number) => {
-    result += transform(source.slice(plainStart, end))
+function destinationRange(
+  source: string,
+  start: number,
+  end: number,
+  definition: boolean,
+): SourceRange | undefined {
+  const raw = source.slice(start, end)
+  let index: number
+
+  if (definition) {
+    const labelEnd = raw.indexOf(']:')
+    if (labelEnd === -1) return undefined
+    index = labelEnd + 2
+  } else {
+    const marker = raw.lastIndexOf('](')
+    if (marker === -1) return undefined
+    index = marker + 2
   }
 
-  while (index < source.length) {
-    if (source[index] === '`') {
-      let runEnd = index + 1
-      while (source[runEnd] === '`') runEnd += 1
+  while (index < raw.length && /[\t\n\r ]/.test(raw[index])) index += 1
+  if (index >= raw.length) return undefined
 
-      const delimiter = source.slice(index, runEnd)
-      const close = source.indexOf(delimiter, runEnd)
-      appendPlain(index)
+  if (raw[index] === '<') {
+    const destinationStart = index + 1
+    let destinationEnd = destinationStart
+    while (destinationEnd < raw.length && raw[destinationEnd] !== '>') {
+      destinationEnd += raw[destinationEnd] === '\\' ? 2 : 1
+    }
+    return { start: start + destinationStart, end: start + destinationEnd }
+  }
 
-      if (close === -1) {
-        result += source.slice(index)
-        return result
-      }
-
-      const protectedEnd = close + delimiter.length
-      result += source.slice(index, protectedEnd)
-      index = protectedEnd
-      plainStart = protectedEnd
+  const destinationStart = index
+  let depth = 0
+  while (index < raw.length) {
+    const character = raw[index]
+    if (character === '\\') {
+      index += 2
       continue
     }
-
-    const url = source.slice(index).match(urlPattern)?.[0]
-    if (url) {
-      appendPlain(index)
-      result += url
-      index += url.length
-      plainStart = index
-      continue
+    if (/[\t\n\r ]/.test(character)) break
+    if (character === '(') depth += 1
+    if (character === ')') {
+      if (depth === 0) break
+      depth -= 1
     }
-
     index += 1
   }
 
-  appendPlain(source.length)
-  return result
+  return { start: start + destinationStart, end: start + index }
+}
+
+function collectProtectedRanges(source: string): SourceRange[] {
+  const tree = markdownParser.parse(source) as MarkdownNode
+  const ranges: SourceRange[] = []
+
+  const visit = (node: MarkdownNode) => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+
+    if (start !== undefined && end !== undefined) {
+      if (protectedNodeTypes.has(node.type)) {
+        ranges.push({ start, end })
+        return
+      }
+
+      if (node.type === 'link' || node.type === 'image') {
+        const raw = source.slice(start, end)
+        if (!raw.startsWith('[') && !raw.startsWith('![')) {
+          ranges.push({ start, end })
+        } else {
+          const range = destinationRange(source, start, end, false)
+          if (range) ranges.push(range)
+        }
+      }
+
+      if (node.type === 'definition') {
+        const range = destinationRange(source, start, end, true)
+        if (range) ranges.push(range)
+      }
+    }
+
+    node.children?.forEach(visit)
+  }
+
+  visit(tree)
+
+  const sorted = ranges
+    .filter((range) => range.end > range.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+  const merged: SourceRange[] = []
+
+  for (const range of sorted) {
+    const previous = merged.at(-1)
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end)
+    } else {
+      merged.push({ ...range })
+    }
+  }
+
+  return merged
 }
 
 function transformMarkdownText(source: string, transform: TextTransform): string {
-  const lines = source.match(/[^\r\n]*(?:\r\n|\n|\r|$)/g)?.filter(Boolean) ?? []
-  let fence: Fence | undefined
+  const ranges = collectProtectedRanges(source)
+  let result = ''
+  let index = 0
 
-  return lines
-    .map((line) => {
-      const content = line.replace(/(?:\r\n|\n|\r)$/, '')
-      const ending = line.slice(content.length)
+  for (const range of ranges) {
+    result += transform(source.slice(index, range.start), index, source)
+    result += source.slice(range.start, range.end)
+    index = range.end
+  }
 
-      if (fence) {
-        const closingPattern = new RegExp(
-          `^ {0,3}\\${fence.marker}{${fence.length},}[ \\t]*$`,
-        )
-        if (closingPattern.test(content)) fence = undefined
-        return line
-      }
-
-      const opening = content.match(fenceStartPattern)?.[1]
-      if (opening) {
-        fence = {
-          marker: opening[0] as Fence['marker'],
-          length: opening.length,
-        }
-        return line
-      }
-
-      return transformInlineText(content, transform) + ending
-    })
-    .join('')
+  result += transform(source.slice(index), index, source)
+  return result
 }
 
-function normalizePlainText(source: string): string {
-  return source
-    .replace(/^》 /, '> ')
-    .replace(/￥([^￥\r\n]*)￥/gu, '$$$1$')
-    .replace(/·([^·\r\n]*)·/gu, '`$1`')
+function normalizeRegularText(text: string, start: number, source: string): string {
+  return text
     .replace(
       /"([^"\r\n]*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}][^"\r\n]*)"/gu,
       '“$1”',
     )
+    .replace(/》 /gu, (match, offset: number) => {
+      const absoluteOffset = start + offset
+      return absoluteOffset === 0 || /[\r\n]/.test(source[absoluteOffset - 1])
+        ? '> '
+        : match
+    })
+}
+
+function normalizePlainText(text: string, start: number, source: string): string {
+  let result = ''
+  let plainStart = 0
+  let index = 0
+
+  while (index < text.length) {
+    const delimiter = text[index]
+    if (delimiter !== '￥' && delimiter !== '·') {
+      index += 1
+      continue
+    }
+
+    const close = text.indexOf(delimiter, index + 1)
+    const newline = text.slice(index + 1, close === -1 ? undefined : close).search(/[\r\n]/)
+    if (close === -1 || newline !== -1) {
+      index += 1
+      continue
+    }
+
+    result += normalizeRegularText(
+      text.slice(plainStart, index),
+      start + plainStart,
+      source,
+    )
+    const markdownDelimiter = delimiter === '￥' ? '$' : '`'
+    result += markdownDelimiter + text.slice(index + 1, close) + markdownDelimiter
+    index = close + 1
+    plainStart = index
+  }
+
+  result += normalizeRegularText(text.slice(plainStart), start + plainStart, source)
+  return result
 }
 
 export function normalizeCjkInput(source: string): string {
@@ -107,9 +200,10 @@ export function normalizeCjkInput(source: string): string {
 }
 
 function spacePlainText(source: string): string {
+  const cjk = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}`
   return source
-    .replace(/(\p{Script=Han})([A-Za-z0-9])/gu, '$1 $2')
-    .replace(/([A-Za-z0-9])(\p{Script=Han})/gu, '$1 $2')
+    .replace(new RegExp(`([${cjk}])([A-Za-z0-9])`, 'gu'), '$1 $2')
+    .replace(new RegExp(`([A-Za-z0-9])([${cjk}])`, 'gu'), '$1 $2')
 }
 
 export function spaceCjkLatin(source: string): string {

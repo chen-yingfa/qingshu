@@ -44,6 +44,69 @@ describe('normalizeCjkInput', () => {
     expect(normalized).toContain('`》 inline ￥x￥ "中文"`')
     expect(normalized).toContain('https://example.com/￥x￥/中文')
   })
+
+  it('protects indented, container-fenced, and multiline CommonMark code', () => {
+    const source = [
+      '    》 indented ￥x￥ ·x· "中文"',
+      '',
+      '> ```md',
+      '> 》 quoted ￥x￥ "中文"',
+      '> ```',
+      '',
+      '- ~~~md',
+      '  》 listed ￥x￥ "中文"',
+      '  ~~~',
+      '',
+      '``multiline ￥x￥',
+      '"中文"`` and "正文"',
+    ].join('\n')
+
+    const normalized = normalizeCjkInput(source)
+
+    expect(normalized).toContain('    》 indented ￥x￥ ·x· "中文"')
+    expect(normalized).toContain('> 》 quoted ￥x￥ "中文"')
+    expect(normalized).toContain('  》 listed ￥x￥ "中文"')
+    expect(normalized).toContain('``multiline ￥x￥\n"中文"``')
+    expect(normalized).toContain('and “正文”')
+  })
+
+  it('does not treat unmatched backticks as code', () => {
+    expect(normalizeCjkInput('未闭合 ` marker 后 "中文"')).toBe(
+      '未闭合 ` marker 后 “中文”',
+    )
+  })
+
+  it('does not re-transform code or math emitted by shortcuts', () => {
+    const normalized = normalizeCjkInput('·"中文A"· ￥"中文A"￥ "中文A"')
+
+    expect(normalized).toBe('`"中文A"` $"中文A"$ “中文A”')
+    expect(spaceCjkLatin(normalized)).toBe('`"中文A"` $"中文A"$ “中文 A”')
+  })
+
+  it('protects Markdown destinations while transforming visible labels', () => {
+    const source = [
+      '[标签 "中文"](./路径/￥x￥)',
+      '![图片 "中文"](../资源/·x·.png)',
+      '[邮件 "中文"](mailto:用户￥x￥@example.com)',
+      '[引用 "中文"][id]',
+      '',
+      '[id]: ./定义/￥x￥',
+      '<mailto:用户￥x￥@example.com>',
+      '<https://example.com/路径/￥x￥>',
+      'www.example.com/路径/￥x￥',
+    ].join('\n')
+
+    const normalized = normalizeCjkInput(source)
+
+    expect(normalized).toContain('[标签 “中文”](./路径/￥x￥)')
+    expect(normalized).toContain('![图片 “中文”](../资源/·x·.png)')
+    expect(normalized).toContain('[邮件 “中文”](mailto:用户￥x￥@example.com)')
+    expect(normalized).toContain('[引用 “中文”][id]')
+    expect(normalized).toContain('[id]: ./定义/￥x￥')
+    expect(normalized).toContain('<mailto:用户￥x￥@example.com>')
+    expect(normalized).toContain('<https://example.com/路径/￥x￥>')
+    expect(normalized).toContain('www.example.com/路径/￥x￥')
+  })
 })
 
 describe('spaceCjkLatin', () => {
@@ -69,6 +132,66 @@ describe('spaceCjkLatin', () => {
     expect(spaced).toContain('`代码React19`')
     expect(spaced).toContain('https://example.com/中文React19')
     expect(spaced).toContain('const版本React19 = true')
+  })
+
+  it('spaces Han, Hiragana, Katakana, and Hangul next to Latin text', () => {
+    expect(spaceCjkLatin('中文A かなB カナC 한글D')).toBe(
+      '中文 A かな B カナ C 한글 D',
+    )
+  })
+
+  it('protects every CommonMark code form but transforms unmatched backticks', () => {
+    const source = [
+      '    中文A',
+      '',
+      '> ```',
+      '> 中文A',
+      '> ```',
+      '',
+      '- ~~~',
+      '  カナB',
+      '  ~~~',
+      '',
+      '``한글C',
+      '中文D`` outside中文E',
+      '',
+      'unmatched ` marker中文F',
+    ].join('\n')
+
+    const spaced = spaceCjkLatin(source)
+
+    expect(spaced).toContain('    中文A')
+    expect(spaced).toContain('> 中文A')
+    expect(spaced).toContain('  カナB')
+    expect(spaced).toContain('``한글C\n中文D`` outside 中文 E')
+    expect(spaced).toContain('unmatched ` marker 中文 F')
+  })
+
+  it('protects inline, image, reference, autolink, mailto, and www destinations', () => {
+    const source = [
+      '[标签A](./路径A)',
+      '![图片A](../资源A.png)',
+      '[邮件A](mailto:用户A@example.com)',
+      '[网站A](www.example.com/路径A)',
+      '[引用A][id]',
+      '',
+      '[id]: ./定义A',
+      '<mailto:用户A@example.com>',
+      '<https://example.com/路径A>',
+      'www.example.com/路径A',
+    ].join('\n')
+
+    const spaced = spaceCjkLatin(source)
+
+    expect(spaced).toContain('[标签 A](./路径A)')
+    expect(spaced).toContain('![图片 A](../资源A.png)')
+    expect(spaced).toContain('[邮件 A](mailto:用户A@example.com)')
+    expect(spaced).toContain('[网站 A](www.example.com/路径A)')
+    expect(spaced).toContain('[引用 A][id]')
+    expect(spaced).toContain('[id]: ./定义A')
+    expect(spaced).toContain('<mailto:用户A@example.com>')
+    expect(spaced).toContain('<https://example.com/路径A>')
+    expect(spaced).toContain('www.example.com/路径A')
   })
 })
 
