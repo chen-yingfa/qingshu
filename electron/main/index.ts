@@ -7,6 +7,7 @@ import {
   writeFile,
   type FileHandle,
 } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { release } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -129,7 +130,7 @@ function parseHtmlRequest(value: unknown, extra: unknown[]): ExportHtmlRequest {
   return { html: value.html }
 }
 
-function revisionOf(value: Awaited<ReturnType<typeof stat>>): FileRevision {
+function revisionOf(value: Stats): FileRevision {
   return {
     dev: Number(value.dev),
     ino: Number(value.ino),
