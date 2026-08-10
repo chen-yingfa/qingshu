@@ -1,4 +1,5 @@
 import {
+  memo,
   type KeyboardEvent,
   useEffect,
   useLayoutEffect,
@@ -8,7 +9,15 @@ import {
 } from 'react'
 
 import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
-import { parseBlocks, renderMarkdown, type MarkdownBlock } from '../markdown/markdown'
+import {
+  createDocumentRenderContext,
+  parseBlocks,
+  renderDocumentFootnotes,
+  renderMarkdown,
+  renderMarkdownBlock,
+  type DocumentRenderContext,
+  type MarkdownBlock,
+} from '../markdown/markdown'
 
 export type FormatCommand =
   | 'heading'
@@ -95,6 +104,7 @@ function editorBlocks(content: string): MarkdownBlock[] {
   const blocks = parseBlocks(content)
   if (blocks.length === 0 || /\n\s*\n$/u.test(content)) {
     blocks.push({
+      id: 'empty-tail',
       type: 'paragraph',
       source: '',
       start: content.length,
@@ -149,12 +159,23 @@ function FullDocumentPreview({
   )
 }
 
-function RenderedBlock({
+function deferWork(callback: () => void): () => void {
+  if ('requestIdleCallback' in globalThis) {
+    const id = globalThis.requestIdleCallback(callback)
+    return () => globalThis.cancelIdleCallback(id)
+  }
+  const id = setTimeout(callback, 0)
+  return () => clearTimeout(id)
+}
+
+const RenderedBlock = memo(function RenderedBlock({
   block,
+  context,
   onActivate,
   editable,
 }: {
   block: MarkdownBlock
+  context: DocumentRenderContext
   onActivate(): void
   editable: boolean
 }) {
@@ -162,16 +183,19 @@ function RenderedBlock({
 
   useEffect(() => {
     let current = true
-    void renderMarkdown(block.source).then((rendered) => {
-      if (current) setHtml(rendered)
+    const cancel = deferWork(() => {
+      void renderMarkdownBlock(block, context).then((rendered) => {
+        if (current) setHtml(rendered)
+      })
     })
     return () => {
       current = false
+      cancel()
     }
-  }, [block.source])
+  }, [block, context])
 
   return (
-    <div className="preview-block">
+    <div className="preview-block" data-block-id={block.id}>
       <div
         className="rendered-block"
         onClick={(event) => {
@@ -198,6 +222,36 @@ function RenderedBlock({
         </button>
       )}
     </div>
+  )
+}, (previous, next) =>
+  previous.block.id === next.block.id &&
+  previous.block.source === next.block.source &&
+  previous.context.signature === next.context.signature &&
+  previous.editable === next.editable,
+)
+
+function DocumentFootnotes({ context }: { context: DocumentRenderContext }) {
+  const [html, setHtml] = useState('')
+
+  useEffect(() => {
+    let current = true
+    const cancel = deferWork(() => {
+      void renderDocumentFootnotes(context).then((rendered) => {
+        if (current) setHtml(rendered)
+      })
+    })
+    return () => {
+      current = false
+      cancel()
+    }
+  }, [context])
+
+  if (!html) return null
+  return (
+    <div
+      className="preview-block document-footnotes"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 
@@ -269,6 +323,7 @@ export function LiveEditor({
   onActiveBlockChange,
 }: LiveEditorProps) {
   const blocks = useMemo(() => editorBlocks(content), [content])
+  const renderContext = useMemo(() => createDocumentRenderContext(content), [content])
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(active.source)
@@ -483,14 +538,16 @@ export function LiveEditor({
           />
           ) : (
             <RenderedBlock
-              key={`${block.start}-${block.end}-${index}`}
+              key={block.id}
               block={block}
+              context={renderContext}
               editable
               onActivate={() => onActiveBlockChange(index)}
             />
           ),
         )
       )}
+      {!previewAll && <DocumentFootnotes context={renderContext} />}
     </section>
   )
 }

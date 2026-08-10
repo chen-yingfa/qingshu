@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import * as markdown from '../markdown/markdown'
 import { LiveEditor } from './LiveEditor'
 
 afterEach(cleanup)
@@ -123,6 +124,67 @@ describe('LiveEditor state synchronization', () => {
     link.addEventListener('click', (event) => event.preventDefault())
     fireEvent.click(link)
     expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+  })
+
+  it('resolves cross-block reference links and appends one document footnote section', async () => {
+    renderEditor(
+      'Active\n\nRead [the guide][guide] and note this.[^tip]\n\n' +
+        '[guide]: https://example.com/guide\n\n[^tip]: Shared **tip**.',
+    )
+
+    const guide = await screen.findByRole('link', { name: 'the guide' })
+    const footnote = await screen.findByRole('link', { name: '1' })
+    expect(guide.getAttribute('href')).toBe('https://example.com/guide')
+    expect(footnote.getAttribute('href')).toBe('#user-content-fn-tip')
+    expect(document.querySelectorAll('[data-footnotes]')).toHaveLength(1)
+    expect(document.getElementById('user-content-fn-tip')?.textContent).toContain(
+      'Shared tip',
+    )
+  })
+
+  it('preserves an unchanged rendered block DOM node after a preceding edit', async () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const third = await screen.findByText('Third')
+    const thirdBlock = third.closest('.preview-block')
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'A much longer first block' },
+    })
+    result.rerender(
+      <LiveEditor
+        content={'A much longer first block\n\nSecond\n\nThird'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('Third').closest('.preview-block')).toBe(thirdBlock))
+  })
+
+  it('bounds render work for a large document when only the active block changes', async () => {
+    const renderBlock = vi.spyOn(markdown, 'renderMarkdownBlock')
+    const content = Array.from({ length: 160 }, (_, index) => `Block ${index}`).join(
+      '\n\n',
+    )
+    const result = renderEditor(content)
+    await waitFor(() => expect(renderBlock).toHaveBeenCalledTimes(159))
+
+    const changed = content.replace('Block 0', 'Changed active block zero')
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Changed active block zero' },
+    })
+    result.rerender(
+      <LiveEditor
+        content={changed}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await new Promise((resolve) => window.setTimeout(resolve, 20))
+    expect(renderBlock).toHaveBeenCalledTimes(159)
   })
 })
 

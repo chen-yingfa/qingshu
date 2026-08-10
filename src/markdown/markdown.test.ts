@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseBlocks, renderMarkdown } from './markdown'
+import {
+  createDocumentRenderContext,
+  parseBlocks,
+  renderDocumentFootnotes,
+  renderMarkdown,
+  renderMarkdownBlock,
+} from './markdown'
 
 describe('parseBlocks', () => {
   it('preserves exact source slices and offsets for top-level blocks', () => {
@@ -16,6 +22,14 @@ describe('parseBlocks', () => {
     for (const block of blocks) {
       expect(source.slice(block.start, block.end)).toBe(block.source)
     }
+  })
+
+  it('keeps an unchanged block identity stable when preceding text changes length', () => {
+    const before = parseBlocks('First\n\nSecond\n\nThird')
+    const after = parseBlocks('A much longer first block\n\nSecond\n\nThird')
+
+    expect(after[1].id).toBe(before[1].id)
+    expect(after[2].id).toBe(before[2].id)
   })
 })
 
@@ -61,5 +75,34 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<script')
     expect(html).not.toContain('javascript:')
     expect(html).toContain('src="https://example.com/x.png"')
+  })
+
+  it('resolves reference links from definitions in another block', async () => {
+    const source = '[Qingshu][site]\n\n[site]: https://example.com "Home"'
+    const block = parseBlocks(source)[0]
+    const context = createDocumentRenderContext(source)
+
+    await expect(renderMarkdownBlock(block, context)).resolves.toContain(
+      '<a href="https://example.com" title="Home">Qingshu</a>',
+    )
+  })
+
+  it('renders one document footnote section with globally unique reference IDs', async () => {
+    const source =
+      'First[^note]\n\nSecond[^note]\n\n[^note]: Shared **footnote**.'
+    const blocks = parseBlocks(source)
+    const context = createDocumentRenderContext(source)
+    const first = await renderMarkdownBlock(blocks[0], context)
+    const second = await renderMarkdownBlock(blocks[1], context)
+    const footnotes = await renderDocumentFootnotes(context)
+
+    expect(first).toContain('id="user-content-fnref-note"')
+    expect(second).toContain('id="user-content-fnref-note-2"')
+    expect(first).not.toContain('data-footnotes')
+    expect(second).not.toContain('data-footnotes')
+    expect(footnotes.match(/data-footnotes/g)).toHaveLength(1)
+    expect(footnotes).toContain('Shared <strong>footnote</strong>.')
+    expect(footnotes).toContain('href="#user-content-fnref-note"')
+    expect(footnotes).toContain('href="#user-content-fnref-note-2"')
   })
 })
