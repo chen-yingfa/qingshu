@@ -114,6 +114,11 @@ export default function App() {
           const result = await saveDocument()
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
+          } else if (result.status === 'warning') {
+            addToast(
+              'warning',
+              `Saved ${filename(result.path)} with warning: ${result.message}`,
+            )
           } else if (result.status === 'error') {
             addToast('error', result.message)
           }
@@ -123,6 +128,11 @@ export default function App() {
           const result = await saveDocument(true)
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
+          } else if (result.status === 'warning') {
+            addToast(
+              'warning',
+              `Saved ${filename(result.path)} with warning: ${result.message}`,
+            )
           } else if (result.status === 'error') {
             addToast('error', result.message)
           }

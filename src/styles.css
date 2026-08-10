@@ -572,6 +572,10 @@ kbd {
   background: #b64b4b;
 }
 
+.toast-warning .toast-mark {
+  background: #a2673f;
+}
+
 .toast-message {
   overflow: hidden;
   text-overflow: ellipsis;

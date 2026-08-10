@@ -307,6 +307,52 @@ describe('commands and operation feedback', () => {
     expect(errorToast?.textContent).toContain('Disk unavailable')
   })
 
+  it('does not announce Saved when an edit supersedes a pending Save As', async () => {
+    let finishSave!: (result: { canceled: false; path: string }) => void
+    api.saveFile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'first draft' },
+    })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(api.saveFile).toHaveBeenCalledOnce())
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'newest draft' },
+    })
+    finishSave({ canceled: false, path: '/notes/selected.md' })
+
+    await waitFor(() => expect(screen.getByText('/notes/selected.md')).not.toBeNull())
+    expect(screen.getByText('Unsaved')).not.toBeNull()
+    expect(screen.queryByText('Saved selected.md')).toBeNull()
+  })
+
+  it('reports a committed save with a durability warning accurately', async () => {
+    api.saveFile.mockResolvedValue({
+      canceled: false,
+      path: '/notes/warning.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'draft' },
+    })
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    expect(
+      await screen.findByText(
+        'Saved warning.md with warning: Saved, but directory sync failed.',
+      ),
+    ).not.toBeNull()
+    expect(screen.getByText('Saved')).not.toBeNull()
+  })
+
   it('sends a rendered standalone HTML document through the existing bridge', async () => {
     api.exportHtml.mockResolvedValue({ canceled: false, path: '/exports/note.html' })
     render(<App />)

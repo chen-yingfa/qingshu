@@ -37,6 +37,7 @@ describe('documentReducer', () => {
       content: 'new',
       dirty: true,
       latestSaveRequest: 2,
+      contentRevision: 1,
     }
 
     expect(
@@ -45,14 +46,16 @@ describe('documentReducer', () => {
         requestId: 2,
         content: 'stale',
         path: '/notes/stale.md',
+        contentRevision: 0,
       }),
-    ).toEqual(edited)
+    ).toMatchObject({ dirty: true, path: '/notes/stale.md' })
     expect(
       documentReducer(edited, {
         type: 'saved',
         requestId: 2,
         content: 'new',
         path: '/notes/new.md',
+        contentRevision: 1,
       }),
     ).toMatchObject({ dirty: false, path: '/notes/new.md' })
   })
@@ -76,6 +79,7 @@ describe('documentReducer', () => {
       requestId: 1,
       content: 'old',
       path: '/notes/note.md',
+      contentRevision: 0,
     })
     expect(staleResponse).toEqual(savingNewest)
 
@@ -85,6 +89,7 @@ describe('documentReducer', () => {
         requestId: 2,
         content: 'newest',
         path: '/notes/note.md',
+        contentRevision: 1,
       }),
     ).toMatchObject({
       content: 'newest',

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 export interface ToastMessage {
   id: number
-  tone: 'success' | 'error'
+  tone: 'success' | 'warning' | 'error'
   message: string
 }
 

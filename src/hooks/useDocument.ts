@@ -7,13 +7,20 @@ export interface DocumentState {
   activeBlock: number
   error: string | null
   latestSaveRequest: number
+  contentRevision: number
 }
 
 export type DocumentAction =
   | { type: 'edit'; content: string }
   | { type: 'load'; content: string; path?: string; requestId: number }
   | { type: 'save-started'; requestId: number }
-  | { type: 'saved'; content: string; path: string; requestId: number }
+  | {
+      type: 'saved'
+      content: string
+      path: string
+      requestId: number
+      contentRevision: number
+    }
   | { type: 'save-error'; message: string; requestId: number }
   | { type: 'activate'; index: number }
   | { type: 'error'; message: string | null }
@@ -24,6 +31,7 @@ export const initialDocumentState: DocumentState = {
   activeBlock: 0,
   error: null,
   latestSaveRequest: 0,
+  contentRevision: 0,
 }
 
 export function documentReducer(
@@ -32,7 +40,13 @@ export function documentReducer(
 ): DocumentState {
   switch (action.type) {
     case 'edit':
-      return { ...state, content: action.content, dirty: true, error: null }
+      return {
+        ...state,
+        content: action.content,
+        dirty: true,
+        error: null,
+        contentRevision: state.contentRevision + 1,
+      }
     case 'load':
       return {
         content: action.content,
@@ -41,14 +55,16 @@ export function documentReducer(
         activeBlock: 0,
         error: null,
         latestSaveRequest: action.requestId,
+        contentRevision: state.contentRevision + 1,
       }
     case 'save-started':
       return { ...state, latestSaveRequest: action.requestId }
     case 'saved':
-      return action.requestId === state.latestSaveRequest &&
+      if (action.requestId !== state.latestSaveRequest) return state
+      return action.contentRevision === state.contentRevision &&
         action.content === state.content
         ? { ...state, path: action.path, dirty: false, error: null }
-        : state
+        : { ...state, path: action.path }
     case 'save-error':
       return action.requestId === state.latestSaveRequest
         ? { ...state, error: action.message }
@@ -66,13 +82,21 @@ function errorMessage(error: unknown): string {
 
 export type DocumentOperationResult =
   | { status: 'success'; path: string }
+  | { status: 'warning'; path: string; message: string }
   | { status: 'canceled' }
   | { status: 'superseded' }
   | { status: 'error'; message: string }
 
 export function useDocument() {
-  const [state, dispatch] = useReducer(documentReducer, initialDocumentState)
+  const [state, baseDispatch] = useReducer(documentReducer, initialDocumentState)
   const requestId = useRef(0)
+  const contentRevision = useRef(0)
+  const dispatch = useCallback((action: DocumentAction) => {
+    if (action.type === 'edit' || action.type === 'load') {
+      contentRevision.current += 1
+    }
+    baseDispatch(action)
+  }, [])
 
   const newDocument = useCallback(() => {
     dispatch({ type: 'load', content: '', requestId: ++requestId.current })
@@ -99,6 +123,7 @@ export function useDocument() {
   const saveDocument = useCallback(
     async (saveAs = false) => {
       const content = state.content
+      const savedContentRevision = contentRevision.current
       const currentRequest = ++requestId.current
       dispatch({ type: 'save-started', requestId: currentRequest })
       try {
@@ -115,7 +140,18 @@ export function useDocument() {
           content,
           path: result.path,
           requestId: currentRequest,
+          contentRevision: savedContentRevision,
         })
+        if (savedContentRevision !== contentRevision.current) {
+          return { status: 'superseded' } as const
+        }
+        if (result.warning) {
+          return {
+            status: 'warning',
+            path: result.path,
+            message: result.warning,
+          } as const
+        }
         return { status: 'success', path: result.path } as const
       } catch (error) {
         const message = errorMessage(error)
