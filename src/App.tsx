@@ -114,6 +114,14 @@ export default function App() {
     runCommand,
   ])
 
+  useEffect(
+    () =>
+      window.qingshu.onCloseIntent(() => {
+        void window.qingshu.respondToClose(canDiscard())
+      }),
+    [canDiscard],
+  )
+
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape' && focus) {
@@ -169,9 +177,7 @@ export default function App() {
       <TitleBar
         path={state.path}
         dirty={state.dirty}
-        onClose={() => {
-          if (canDiscard()) void window.qingshu.windowAction('close')
-        }}
+        onClose={() => void window.qingshu.windowAction('close')}
       />
       <Toolbar
         dark={dark}
@@ -184,7 +190,7 @@ export default function App() {
         }
         onToggle={toggleOption}
       />
-      {focus && (
+      {focus && !printPreview && (
         <button
           type="button"
           className="exit-focus-button"

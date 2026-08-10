@@ -106,9 +106,11 @@ function editorBlocks(content: string): MarkdownBlock[] {
 function RenderedBlock({
   block,
   onActivate,
+  editable,
 }: {
   block: MarkdownBlock
   onActivate(): void
+  editable: boolean
 }) {
   const [html, setHtml] = useState('')
 
@@ -128,6 +130,7 @@ function RenderedBlock({
         className="rendered-block"
         onClick={(event) => {
           if (
+            editable &&
             !(event.target as HTMLElement).closest(
               'a, button, input, select, textarea, summary',
             )
@@ -137,15 +140,17 @@ function RenderedBlock({
         }}
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      <button
-        type="button"
-        className="edit-block-button"
-        aria-label="Edit Markdown block"
-        title="Edit Markdown block"
-        onClick={onActivate}
-      >
-        Edit
-      </button>
+      {editable && (
+        <button
+          type="button"
+          className="edit-block-button"
+          aria-label="Edit Markdown block"
+          title="Edit Markdown block"
+          onClick={onActivate}
+        >
+          Edit
+        </button>
+      )}
     </div>
   )
 }
@@ -225,13 +230,21 @@ export function LiveEditor({
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
-  const lastEmittedContentRef = useRef<string | undefined>(undefined)
+  const parentContentRef = useRef(content)
+  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
   contentRef.current = content
 
   useLayoutEffect(() => {
     const activeChanged = previousActiveRef.current !== safeActive
-    const externalChange = content !== lastEmittedContentRef.current
+    const parentChanged = content !== parentContentRef.current
+    const acknowledged =
+      parentChanged && pendingAcknowledgementRef.current === content
+    if (parentChanged) {
+      parentContentRef.current = content
+      pendingAcknowledgementRef.current = undefined
+    }
+    const externalChange = parentChanged && !acknowledged
     if (activeChanged || externalChange) {
       setDraft(active.source)
       rangeRef.current = { start: active.start, end: active.end }
@@ -260,7 +273,7 @@ export function LiveEditor({
       result.value,
     )
     contentRef.current = nextContent
-    lastEmittedContentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
     onChange(nextContent)
     rangeRef.current.end = rangeRef.current.start + result.value.length
     afterPaint(() => {
@@ -274,7 +287,7 @@ export function LiveEditor({
     const nextContent = replaceBlockSource(contentRef.current, rangeRef.current, value)
     rangeRef.current.end = rangeRef.current.start + value.length
     contentRef.current = nextContent
-    lastEmittedContentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
     onChange(nextContent)
   }
 
@@ -331,7 +344,7 @@ export function LiveEditor({
       const merged = mergeBlockAtStart(contentRef.current, rangeRef.current.start)
       const previousStart = blocks[safeActive - 1].start
       contentRef.current = merged.content
-      lastEmittedContentRef.current = merged.content
+      pendingAcknowledgementRef.current = merged.content
       onChange(merged.content)
       onActiveBlockChange(safeActive - 1)
       afterPaint(() => {
@@ -422,6 +435,7 @@ export function LiveEditor({
           <RenderedBlock
             key={`${block.start}-${block.end}-${index}`}
             block={block}
+            editable={!previewAll}
             onActivate={() => onActiveBlockChange(index)}
           />
         ),

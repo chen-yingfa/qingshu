@@ -16,6 +16,13 @@ const api: QingshuApi = {
     ipcRenderer.invoke('qingshu:export-pdf', request),
   windowAction: (action: WindowAction) =>
     ipcRenderer.invoke('qingshu:window-action', action),
+  respondToClose: confirmed =>
+    ipcRenderer.invoke('qingshu:close-response', confirmed),
+  onCloseIntent: listener => {
+    const handler = () => listener()
+    ipcRenderer.on('qingshu:close-intent', handler)
+    return () => ipcRenderer.removeListener('qingshu:close-intent', handler)
+  },
   onMenuCommand: listener => {
     const handler = (_event: Electron.IpcRendererEvent, command: MenuCommand) => {
       listener(command)

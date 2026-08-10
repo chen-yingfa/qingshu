@@ -7,12 +7,17 @@ import App from './App'
 import type { MenuCommand, QingshuApi } from './types/electron'
 
 let menuListener: ((command: MenuCommand) => void) | undefined
+let closeIntentListener: (() => void) | undefined
 let api: {
   [Key in keyof QingshuApi]: ReturnType<typeof vi.fn>
+} & {
+  respondToClose: ReturnType<typeof vi.fn>
+  onCloseIntent: ReturnType<typeof vi.fn>
 }
 
 beforeEach(() => {
   menuListener = undefined
+  closeIntentListener = undefined
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(() => ({ matches: false })),
@@ -23,6 +28,11 @@ beforeEach(() => {
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
     windowAction: vi.fn(),
+    respondToClose: vi.fn(),
+    onCloseIntent: vi.fn((listener: () => void) => {
+      closeIntentListener = listener
+      return vi.fn()
+    }),
     onMenuCommand: vi.fn((listener: (command: MenuCommand) => void) => {
       menuListener = listener
       return vi.fn()
@@ -91,7 +101,7 @@ describe('application safety controls', () => {
     )
   })
 
-  it('confirms dirty documents before a custom window close', () => {
+  it('routes a custom close through the native dirty handshake', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App />)
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
@@ -99,12 +109,28 @@ describe('application safety controls', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Close window' }))
+    expect(api.windowAction).toHaveBeenCalledWith('close')
+    expect(confirm).not.toHaveBeenCalled()
+
+    closeIntentListener?.()
     expect(confirm).toHaveBeenCalledTimes(1)
-    expect(api.windowAction).not.toHaveBeenCalled()
+    expect(api.respondToClose).toHaveBeenCalledWith(false)
+  })
+
+  it('distinguishes rejected and confirmed native close intents', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Unsaved' },
+    })
+
+    closeIntentListener?.()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(api.respondToClose).toHaveBeenCalledWith(false)
 
     confirm.mockReturnValue(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Close window' }))
-    expect(api.windowAction).toHaveBeenCalledWith('close')
+    closeIntentListener?.()
+    expect(api.respondToClose).toHaveBeenLastCalledWith(true)
   })
 
   it('switches every block to rendered preview before PDF export', async () => {
@@ -120,6 +146,7 @@ describe('application safety controls', () => {
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
       target: { value: '# First\n\nSecond' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle focus mode' }))
     menuListener?.('export-pdf')
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledTimes(1))
@@ -127,6 +154,7 @@ describe('application safety controls', () => {
     expect(document.querySelectorAll('.rendered-block')).toHaveLength(2)
     expect(document.querySelector('.editor')?.textContent).toContain('First')
     expect(document.querySelector('.editor')?.textContent).toContain('Second')
+    expect(screen.queryByRole('button', { name: 'Exit focus mode' })).toBeNull()
     finishExport?.()
     await waitFor(() =>
       expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull(),

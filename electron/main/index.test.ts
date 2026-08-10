@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
   browserWindows: [] as any[],
   browserWindowOptions: [] as any[],
+  appListeners: new Map<string, (...args: any[]) => unknown>(),
   webContentsListeners: new Map<string, (...args: any[]) => unknown>(),
   windowOpenHandler: undefined as undefined | ((details: { url: string }) => unknown),
   guardsInstalledAtLoad: [] as boolean[][],
@@ -25,7 +26,9 @@ vi.mock('electron', () => ({
     disableHardwareAcceleration: vi.fn(),
     getName: () => 'Qingshu',
     isPackaged: false,
-    on: vi.fn(),
+    on: vi.fn((name: string, listener: (...args: any[]) => unknown) => {
+      mocks.appListeners.set(name, listener)
+    }),
     quit: vi.fn(),
     requestSingleInstanceLock: () => true,
     setAppUserModelId: vi.fn(),
@@ -33,13 +36,14 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {
     static fromWebContents = mocks.fromWebContents
-    static getAllWindows = () => []
+    static getAllWindows = () => mocks.browserWindows
 
     webContents = {
       on: vi.fn((name: string, listener: (...args: any[]) => unknown) => {
         mocks.webContentsListeners.set(name, listener)
       }),
       printToPDF: vi.fn(),
+      send: vi.fn(),
       setWindowOpenHandler: vi.fn(
         (handler: (details: { url: string }) => unknown) => {
           mocks.windowOpenHandler = handler
@@ -53,6 +57,8 @@ vi.mock('electron', () => ({
       ])
     })
     loadURL = this.loadFile
+    close = vi.fn()
+    isDestroyed = vi.fn(() => false)
     on = vi.fn()
 
     constructor(options: any) {
@@ -94,6 +100,7 @@ describe('desktop IPC', () => {
 
   it('registers only the renderer bridge channels', () => {
     expect([...mocks.handlers.keys()].sort()).toEqual([
+      'qingshu:close-response',
       'qingshu:export-html',
       'qingshu:export-pdf',
       'qingshu:open-file',
@@ -255,45 +262,75 @@ describe('browser window security', () => {
   })
 })
 
-describe('close confirmation', () => {
+describe('renderer close handshake', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('destroys the window only after confirmation', async () => {
+  it('sends close intent and only permits a confirmed follow-up close', async () => {
     let closeListener: ((event: { preventDefault: () => void }) => void) | undefined
     const window = {
-      destroy: vi.fn(),
+      close: vi.fn(),
       isDestroyed: () => false,
+      webContents: { send: vi.fn() },
       on: vi.fn((name: string, listener: typeof closeListener) => {
         if (name === 'close') closeListener = listener
       }),
     }
-    const preventDefault = vi.fn()
-    mocks.showMessageBox.mockResolvedValue({ response: 1 })
+    mocks.fromWebContents.mockReturnValue(window)
 
-    main.installCloseConfirmation(window as never)
-    closeListener?.({ preventDefault })
-    await vi.waitFor(() => expect(window.destroy).toHaveBeenCalledOnce())
+    main.installCloseHandshake(window as never)
+    const intentEvent = { preventDefault: vi.fn() }
+    closeListener?.(intentEvent)
 
-    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(intentEvent.preventDefault).toHaveBeenCalledOnce()
+    expect(window.webContents.send).toHaveBeenCalledWith('qingshu:close-intent')
+    expect(window.close).not.toHaveBeenCalled()
+
+    await mocks.handlers.get('qingshu:close-response')?.(event, true)
+    expect(window.close).toHaveBeenCalledOnce()
+
+    const confirmedEvent = { preventDefault: vi.fn() }
+    closeListener?.(confirmedEvent)
+    expect(confirmedEvent.preventDefault).not.toHaveBeenCalled()
   })
 
-  it('keeps the window open when close confirmation is canceled', async () => {
+  it('clears close intent after rejection so a later native close asks again', async () => {
     let closeListener: ((event: { preventDefault: () => void }) => void) | undefined
     const window = {
-      destroy: vi.fn(),
+      close: vi.fn(),
       isDestroyed: () => false,
+      webContents: { send: vi.fn() },
       on: vi.fn((name: string, listener: typeof closeListener) => {
         if (name === 'close') closeListener = listener
       }),
     }
-    mocks.showMessageBox.mockResolvedValue({ response: 0 })
+    mocks.fromWebContents.mockReturnValue(window)
 
-    main.installCloseConfirmation(window as never)
+    main.installCloseHandshake(window as never)
     closeListener?.({ preventDefault: vi.fn() })
-    await vi.waitFor(() => expect(mocks.showMessageBox).toHaveBeenCalledOnce())
+    await mocks.handlers.get('qingshu:close-response')?.(event, false)
+    closeListener?.({ preventDefault: vi.fn() })
 
-    expect(window.destroy).not.toHaveBeenCalled()
+    expect(window.webContents.send).toHaveBeenCalledTimes(2)
+    expect(window.close).not.toHaveBeenCalled()
+  })
+
+  it('restarts an application quit only after the renderer confirms', async () => {
+    mocks.browserWindows.length = 0
+    await main.createWindow()
+    const window = mocks.browserWindows.at(-1)
+    mocks.fromWebContents.mockReturnValue(window)
+    const beforeQuit = mocks.appListeners.get('before-quit')
+    const quitEvent = { preventDefault: vi.fn() }
+
+    beforeQuit?.(quitEvent)
+
+    expect(quitEvent.preventDefault).toHaveBeenCalledOnce()
+    expect(window.webContents.send).toHaveBeenCalledWith('qingshu:close-intent')
+    expect(vi.mocked((await import('electron')).app.quit)).not.toHaveBeenCalled()
+
+    await mocks.handlers.get('qingshu:close-response')?.(event, true)
+    expect(vi.mocked((await import('electron')).app.quit)).toHaveBeenCalledOnce()
   })
 })

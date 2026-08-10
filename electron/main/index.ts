@@ -24,6 +24,20 @@ const rendererUrl = process.env.VITE_DEV_SERVER_URL
   : pathToFileURL(indexHtml)
 
 let win: BrowserWindow | null = null
+interface CloseState {
+  intentPending: boolean
+  allowNextClose: boolean
+  quitRequested: boolean
+  quitConfirmed: boolean
+}
+const closeStates = new Map<BrowserWindow, CloseState>()
+let allowAppQuit = false
+
+function requestCloseIntent(window: BrowserWindow, state: CloseState): void {
+  if (state.intentPending || window.isDestroyed()) return
+  state.intentPending = true
+  window.webContents.send('qingshu:close-intent')
+}
 
 function isTrustedRendererUrl(rawUrl: string): boolean {
   try {
@@ -166,6 +180,44 @@ ipcMain.handle(
   },
 )
 
+ipcMain.handle(
+  'qingshu:close-response',
+  (event: IpcMainInvokeEvent, confirmed: boolean): void => {
+    assertTrustedIpcSender(event)
+    const target = BrowserWindow.fromWebContents(event.sender)
+    if (!target) return
+    const state = closeStates.get(target)
+    if (!state?.intentPending) return
+
+    state.intentPending = false
+    if (confirmed !== true) {
+      if (state.quitRequested) {
+        for (const candidate of closeStates.values()) {
+          candidate.intentPending = false
+          candidate.quitRequested = false
+          candidate.quitConfirmed = false
+        }
+      }
+      return
+    }
+
+    if (state.quitRequested) {
+      state.quitConfirmed = true
+      const quitting = [...closeStates.entries()].filter(
+        ([window, candidate]) => candidate.quitRequested && !window.isDestroyed(),
+      )
+      if (quitting.length > 0 && quitting.every(([, candidate]) => candidate.quitConfirmed)) {
+        allowAppQuit = true
+        for (const [, candidate] of quitting) candidate.allowNextClose = true
+        app.quit()
+      }
+    } else if (!target.isDestroyed()) {
+      state.allowNextClose = true
+      target.close()
+    }
+  },
+)
+
 function installNavigationGuards(window: BrowserWindow): void {
   window.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
@@ -177,31 +229,27 @@ function installNavigationGuards(window: BrowserWindow): void {
   })
 }
 
-export function installCloseConfirmation(window: BrowserWindow): void {
-  let confirmationOpen = false
+export function installCloseHandshake(window: BrowserWindow): void {
+  const state: CloseState = {
+    intentPending: false,
+    allowNextClose: false,
+    quitRequested: false,
+    quitConfirmed: false,
+  }
+  closeStates.set(window, state)
 
   window.on('close', event => {
-    event.preventDefault()
-    if (confirmationOpen) return
-    confirmationOpen = true
+    if (state.allowNextClose) {
+      state.allowNextClose = false
+      return
+    }
 
-    void dialog
-      .showMessageBox(window, {
-        type: 'question',
-        title: 'Close Qingshu',
-        message: 'Are you sure you want to close Qingshu?',
-        buttons: ['Cancel', 'Close'],
-        defaultId: 0,
-        cancelId: 0,
-      })
-      .then(({ response }) => {
-        if (response === 1 && !window.isDestroyed()) {
-          window.destroy()
-        }
-      })
-      .finally(() => {
-        confirmationOpen = false
-      })
+    event.preventDefault()
+    requestCloseIntent(window, state)
+  })
+
+  window.on('closed', () => {
+    closeStates.delete(window)
   })
 }
 
@@ -221,7 +269,7 @@ export async function createWindow(): Promise<void> {
     },
   })
 
-  installCloseConfirmation(win)
+  installCloseHandshake(win)
   installNavigationGuards(win)
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -239,6 +287,21 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   void app.whenReady().then(createWindow)
+
+  app.on('before-quit', event => {
+    if (allowAppQuit) return
+    const windows = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed())
+    if (windows.length === 0) return
+
+    event.preventDefault()
+    for (const window of windows) {
+      const state = closeStates.get(window)
+      if (!state) continue
+      state.quitRequested = true
+      state.quitConfirmed = false
+      requestCloseIntent(window, state)
+    }
+  })
 
   app.on('window-all-closed', () => {
     win = null

@@ -466,7 +466,9 @@ button {
 @media print {
   .title-bar,
   .toolbar,
-  .status-bar {
+  .status-bar,
+  .exit-focus-button,
+  .edit-block-button {
     display: none;
   }
 

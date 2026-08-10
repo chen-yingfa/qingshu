@@ -63,10 +63,47 @@ describe('LiveEditor state synchronization', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('中文 text\n\nSecond!')
   })
 
+  it('consumes acknowledgements before resynchronizing to an older emitted source', () => {
+    const result = renderEditor('A')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+
+    fireEvent.change(editor(), { target: { value: 'B' } })
+    result.rerender(
+      <LiveEditor
+        content="B"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content="C"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content="B"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect(editor().value).toBe('B')
+    fireEvent.change(editor(), { target: { value: 'B!' } })
+    expect(result.onChange).toHaveBeenLastCalledWith('B!')
+  })
+
   it('renders all blocks as preview while printing', async () => {
     renderEditor('# Active\n\n[Link](https://example.com)', { previewAll: true })
 
     expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
+    expect(screen.queryByLabelText('Edit Markdown block')).toBeNull()
     await waitFor(() => expect(screen.getByRole('link', { name: 'Link' })).toBeTruthy())
   })
 
