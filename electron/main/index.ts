@@ -1,6 +1,5 @@
 import {
   open,
-  readFile,
   rename,
   stat,
   unlink,
@@ -35,12 +34,17 @@ let win: BrowserWindow | null = null
 interface FileRevision {
   dev: number
   ino: number
+  mode: number
   mtimeMs: number
   size: number
 }
+interface AuthorizedDocument {
+  revision: FileRevision | null
+  saveQueue: Promise<void>
+}
 const authorizedDocuments = new WeakMap<
   Electron.WebContents,
-  Map<string, FileRevision | null>
+  Map<string, AuthorizedDocument>
 >()
 let tempSequence = 0
 
@@ -134,6 +138,7 @@ function revisionOf(value: Stats): FileRevision {
   return {
     dev: Number(value.dev),
     ino: Number(value.ino),
+    mode: Number(value.mode),
     mtimeMs: value.mtimeMs,
     size: value.size,
   }
@@ -166,13 +171,23 @@ async function currentRevision(path: string): Promise<FileRevision | null> {
   }
 }
 
-function documentsFor(sender: Electron.WebContents): Map<string, FileRevision | null> {
+function documentsFor(sender: Electron.WebContents): Map<string, AuthorizedDocument> {
   let documents = authorizedDocuments.get(sender)
   if (!documents) {
     documents = new Map()
     authorizedDocuments.set(sender, documents)
   }
   return documents
+}
+
+function authorizeDocument(
+  documents: Map<string, AuthorizedDocument>,
+  path: string,
+  revision: FileRevision | null,
+): AuthorizedDocument {
+  const authorized = { revision, saveQueue: Promise.resolve() }
+  documents.set(path, authorized)
+  return authorized
 }
 
 async function assertUnchanged(
@@ -190,22 +205,55 @@ async function assertUnchanged(
   }
 }
 
-async function atomicWrite(path: string, content: string | Buffer): Promise<void> {
+function errorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : undefined
+}
+
+function isUnsupportedDirectorySync(error: unknown): boolean {
+  return ['EACCES', 'EBADF', 'EINVAL', 'EISDIR', 'ENOTSUP', 'EPERM'].includes(
+    errorCode(error) ?? '',
+  )
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(path, 'r')
+    await handle.sync()
+  } catch (error) {
+    if (!isUnsupportedDirectorySync(error)) throw error
+  } finally {
+    if (handle) await handle.close()
+  }
+}
+
+async function atomicWrite(
+  path: string,
+  content: string | Buffer,
+  mode: number,
+): Promise<FileRevision> {
   const tempPath = join(
     dirname(path),
     `.${basename(path)}.qingshu-${process.pid}-${++tempSequence}.tmp`,
   )
   let handle: FileHandle | undefined
   let renamed = false
+  let revision: FileRevision | undefined
   try {
-    handle = await open(tempPath, 'wx', 0o600)
+    handle = await open(tempPath, 'wx', mode)
+    await handle.chmod(mode)
     if (typeof content === 'string') await handle.writeFile(content, 'utf8')
     else await handle.writeFile(content)
     await handle.sync()
+    revision = revisionOf(await handle.stat())
     await handle.close()
     handle = undefined
     await rename(tempPath, path)
     renamed = true
+    await syncDirectory(dirname(path))
+    return revision
   } finally {
     if (handle) {
       await handle.close().catch(() => undefined)
@@ -216,6 +264,35 @@ async function atomicWrite(path: string, content: string | Buffer): Promise<void
       })
     }
   }
+}
+
+async function readStableDocument(
+  path: string,
+): Promise<{ content: string; revision: FileRevision }> {
+  const handle = await open(path, 'r')
+  try {
+    const before = revisionOf(await handle.stat())
+    const content = await handle.readFile('utf8')
+    const after = revisionOf(await handle.stat())
+    if (!sameRevision(before, after)) {
+      throw new Error('File changed while it was being opened. Please open it again.')
+    }
+    return { content, revision: after }
+  } finally {
+    await handle.close()
+  }
+}
+
+function enqueueSave<T>(
+  document: AuthorizedDocument,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = document.saveQueue.then(operation)
+  document.saveQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
 }
 
 async function selectSavePath(
@@ -247,8 +324,8 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
   const path = result.filePaths[0]
   if (result.canceled || !path) return { canceled: true }
   const documentPath = resolve(path)
-  const content = await readFile(documentPath, 'utf8')
-  documentsFor(event.sender).set(documentPath, await currentRevision(documentPath))
+  const { content, revision } = await readStableDocument(documentPath)
+  authorizeDocument(documentsFor(event.sender), documentPath, revision)
 
   return {
     canceled: false,
@@ -268,7 +345,8 @@ ipcMain.handle(
     const request = parseSaveRequest(rawRequest, extra)
     const documents = documentsFor(event.sender)
     const requestedPath = request.path ? resolve(request.path) : undefined
-    if (requestedPath && !documents.has(requestedPath)) {
+    let document = requestedPath ? documents.get(requestedPath) : undefined
+    if (requestedPath && !document) {
       throw new Error('Save path was not authorized by a file dialog')
     }
     const target = await selectSavePath(requestedPath, {
@@ -282,13 +360,21 @@ ipcMain.handle(
     if (target.canceled) return target
     const targetPath = resolve(target.path)
     if (!requestedPath) {
-      documents.set(targetPath, await currentRevision(targetPath))
+      document =
+        documents.get(targetPath) ??
+        authorizeDocument(documents, targetPath, await currentRevision(targetPath))
     }
+    if (!document) throw new Error('Save path authorization was lost')
 
-    await assertUnchanged(targetPath, documents.get(targetPath) ?? null)
-    await atomicWrite(targetPath, request.content)
-    documents.set(targetPath, await currentRevision(targetPath))
-    return { canceled: false, path: targetPath }
+    return enqueueSave(document, async () => {
+      await assertUnchanged(targetPath, document.revision)
+      document.revision = await atomicWrite(
+        targetPath,
+        request.content,
+        document.revision?.mode ? document.revision.mode & 0o777 : 0o600,
+      )
+      return { canceled: false, path: targetPath }
+    })
   },
 )
 

@@ -11,6 +11,17 @@ const mocks = vi.hoisted(() => ({
   tempHandle: {
     writeFile: vi.fn(),
     sync: vi.fn(),
+    stat: vi.fn(),
+    chmod: vi.fn(),
+    close: vi.fn(),
+  },
+  sourceHandle: {
+    readFile: vi.fn(),
+    stat: vi.fn(),
+    close: vi.fn(),
+  },
+  directoryHandle: {
+    sync: vi.fn(),
     close: vi.fn(),
   },
   showOpenDialog: vi.fn(),
@@ -115,10 +126,33 @@ describe('desktop IPC', () => {
       mtimeMs: 100,
       size: 6,
     })
-    mocks.open.mockResolvedValue(mocks.tempHandle)
+    mocks.open.mockImplementation(async (path: string, flags: string) => {
+      if (flags === 'wx') return mocks.tempHandle
+      if (path.includes('.md')) return mocks.sourceHandle
+      return mocks.directoryHandle
+    })
+    mocks.sourceHandle.readFile.mockResolvedValue('# Hello')
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
+    })
+    mocks.sourceHandle.close.mockResolvedValue(undefined)
     mocks.tempHandle.writeFile.mockResolvedValue(undefined)
     mocks.tempHandle.sync.mockResolvedValue(undefined)
+    mocks.tempHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 8,
+      mode: 0o100644,
+      mtimeMs: 300,
+      size: 5,
+    })
+    mocks.tempHandle.chmod.mockResolvedValue(undefined)
     mocks.tempHandle.close.mockResolvedValue(undefined)
+    mocks.directoryHandle.sync.mockResolvedValue(undefined)
+    mocks.directoryHandle.close.mockResolvedValue(undefined)
     mocks.rename.mockResolvedValue(undefined)
     mocks.unlink.mockResolvedValue(undefined)
   })
@@ -136,14 +170,44 @@ describe('desktop IPC', () => {
 
   it('opens a selected Markdown file as UTF-8', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/hello.md'] })
-    mocks.readFile.mockResolvedValue('# 你好')
+    mocks.sourceHandle.readFile.mockResolvedValue('# 你好')
 
     await expect(mocks.handlers.get('qingshu:open-file')?.(event)).resolves.toEqual({
       canceled: false,
       path: '/notes/hello.md',
       content: '# 你好',
     })
-    expect(mocks.readFile).toHaveBeenCalledWith('/notes/hello.md', 'utf8')
+    expect(mocks.open).toHaveBeenCalledWith('/notes/hello.md', 'r')
+    expect(mocks.sourceHandle.readFile).toHaveBeenCalledWith('utf8')
+    expect(mocks.sourceHandle.stat).toHaveBeenCalledTimes(2)
+    expect(mocks.sourceHandle.close).toHaveBeenCalledOnce()
+  })
+
+  it('rejects content that changes while the opened handle is being read', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/unstable.md'],
+    })
+    mocks.sourceHandle.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 7,
+        mode: 0o100640,
+        mtimeMs: 100,
+        size: 5,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 7,
+        mode: 0o100640,
+        mtimeMs: 200,
+        size: 9,
+      })
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).rejects.toThrow('File changed while it was being opened')
+    expect(mocks.sourceHandle.close).toHaveBeenCalledOnce()
   })
 
   it('returns a structured cancellation when opening is dismissed', async () => {
@@ -170,7 +234,6 @@ describe('desktop IPC', () => {
 
   it('writes Markdown to an existing path without showing a dialog', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/hello.md'] })
-    mocks.readFile.mockResolvedValue('# Hello')
     await mocks.handlers.get('qingshu:open-file')?.(event)
 
     await expect(
@@ -183,10 +246,64 @@ describe('desktop IPC', () => {
     expect(mocks.showSaveDialog).not.toHaveBeenCalled()
     expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith('# Updated', 'utf8')
     expect(mocks.tempHandle.sync).toHaveBeenCalledOnce()
+    expect(mocks.tempHandle.chmod).toHaveBeenCalledWith(0o644)
     expect(mocks.rename).toHaveBeenCalledWith(
       expect.stringMatching(/^\/notes\/\.hello\.md\.qingshu-\d+-\d+\.tmp$/),
       '/notes/hello.md',
     )
+    expect(mocks.directoryHandle.sync).toHaveBeenCalledOnce()
+    expect(mocks.directoryHandle.close).toHaveBeenCalledOnce()
+  })
+
+  it('serializes overlapping saves so the newest invocation remains on disk', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/ordered.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100644,
+        mtimeMs: 300,
+        size: 5,
+      })
+    let releaseFirst!: () => void
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const writes: string[] = []
+    mocks.tempHandle.writeFile.mockImplementation(async (content: string) => {
+      writes.push(content)
+      if (writes.length === 1) await firstWrite
+    })
+
+    const older = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/ordered.md',
+      content: 'older',
+    }) as Promise<unknown>
+    const newer = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/ordered.md',
+      content: 'newest',
+    }) as Promise<unknown>
+
+    await vi.waitFor(() => expect(writes).toEqual(['older']))
+    expect(mocks.rename).not.toHaveBeenCalled()
+    releaseFirst()
+    await expect(Promise.all([older, newer])).resolves.toEqual([
+      { canceled: false, path: '/notes/ordered.md' },
+      { canceled: false, path: '/notes/ordered.md' },
+    ])
+    expect(writes).toEqual(['older', 'newest'])
+    expect(mocks.rename).toHaveBeenCalledTimes(2)
   })
 
   it('rejects a renderer path that no dialog previously authorized', async () => {
@@ -197,16 +314,29 @@ describe('desktop IPC', () => {
       }),
     ).rejects.toThrow('Save path was not authorized by a file dialog')
 
-    expect(mocks.open).not.toHaveBeenCalled()
+    expect(
+      mocks.open.mock.calls.filter(([, flags]) => flags === 'wx'),
+    ).toHaveLength(0)
     expect(mocks.rename).not.toHaveBeenCalled()
   })
 
   it('rejects overwrite when the opened file changed externally', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/conflict.md'] })
-    mocks.readFile.mockResolvedValue('# First')
-    mocks.stat
-      .mockResolvedValueOnce({ dev: 1, ino: 4, mtimeMs: 100, size: 7 })
-      .mockResolvedValueOnce({ dev: 1, ino: 4, mtimeMs: 200, size: 12 })
+    mocks.sourceHandle.readFile.mockResolvedValue('# First')
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 4,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 7,
+    })
+    mocks.stat.mockResolvedValue({
+      dev: 1,
+      ino: 4,
+      mode: 0o100644,
+      mtimeMs: 200,
+      size: 12,
+    })
     await mocks.handlers.get('qingshu:open-file')?.(event)
 
     await expect(
@@ -216,7 +346,9 @@ describe('desktop IPC', () => {
       }),
     ).rejects.toThrow('File changed on disk')
 
-    expect(mocks.open).not.toHaveBeenCalled()
+    expect(
+      mocks.open.mock.calls.filter(([, flags]) => flags === 'wx'),
+    ).toHaveLength(0)
     expect(mocks.rename).not.toHaveBeenCalled()
   })
 
@@ -230,8 +362,21 @@ describe('desktop IPC', () => {
       .mockRejectedValueOnce(missing)
       .mockRejectedValueOnce(missing)
       .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 300, size: 5 })
-      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 300, size: 5 })
-      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 400, size: 6 })
+    mocks.tempHandle.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100600,
+        mtimeMs: 300,
+        size: 5,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100600,
+        mtimeMs: 400,
+        size: 6,
+      })
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, { content: '# New' }),
@@ -251,6 +396,25 @@ describe('desktop IPC', () => {
       }),
     ).resolves.toMatchObject({ canceled: false, path: '/notes/new.md' })
     expect(mocks.showSaveDialog).toHaveBeenCalledOnce()
+  })
+
+  it('falls back safely when Windows cannot fsync an opened directory', async () => {
+    const windowsDirectoryError = Object.assign(new Error('directory sync unsupported'), {
+      code: 'EINVAL',
+    })
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/notes/windows.md',
+    })
+    mocks.stat.mockRejectedValue(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    )
+    mocks.directoryHandle.sync.mockRejectedValue(windowsDirectoryError)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Windows' }),
+    ).resolves.toEqual({ canceled: false, path: '/notes/windows.md' })
+    expect(mocks.directoryHandle.close).toHaveBeenCalledOnce()
   })
 
   it('closes and removes an adjacent temp file after an atomic-save failure', async () => {

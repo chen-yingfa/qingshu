@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from 'react'
+import { useCallback, useReducer, useRef } from 'react'
 
 export interface DocumentState {
   content: string
@@ -6,12 +6,15 @@ export interface DocumentState {
   dirty: boolean
   activeBlock: number
   error: string | null
+  latestSaveRequest: number
 }
 
 export type DocumentAction =
   | { type: 'edit'; content: string }
-  | { type: 'load'; content: string; path?: string }
-  | { type: 'saved'; content: string; path: string }
+  | { type: 'load'; content: string; path?: string; requestId: number }
+  | { type: 'save-started'; requestId: number }
+  | { type: 'saved'; content: string; path: string; requestId: number }
+  | { type: 'save-error'; message: string; requestId: number }
   | { type: 'activate'; index: number }
   | { type: 'error'; message: string | null }
 
@@ -20,6 +23,7 @@ export const initialDocumentState: DocumentState = {
   dirty: false,
   activeBlock: 0,
   error: null,
+  latestSaveRequest: 0,
 }
 
 export function documentReducer(
@@ -36,10 +40,18 @@ export function documentReducer(
         dirty: false,
         activeBlock: 0,
         error: null,
+        latestSaveRequest: action.requestId,
       }
+    case 'save-started':
+      return { ...state, latestSaveRequest: action.requestId }
     case 'saved':
-      return action.content === state.content
+      return action.requestId === state.latestSaveRequest &&
+        action.content === state.content
         ? { ...state, path: action.path, dirty: false, error: null }
+        : state
+    case 'save-error':
+      return action.requestId === state.latestSaveRequest
+        ? { ...state, error: action.message }
         : state
     case 'activate':
       return { ...state, activeBlock: Math.max(0, action.index) }
@@ -55,13 +67,15 @@ function errorMessage(error: unknown): string {
 export type DocumentOperationResult =
   | { status: 'success'; path: string }
   | { status: 'canceled' }
+  | { status: 'superseded' }
   | { status: 'error'; message: string }
 
 export function useDocument() {
   const [state, dispatch] = useReducer(documentReducer, initialDocumentState)
+  const requestId = useRef(0)
 
   const newDocument = useCallback(() => {
-    dispatch({ type: 'load', content: '' })
+    dispatch({ type: 'load', content: '', requestId: ++requestId.current })
   }, [])
 
   const openDocument = useCallback(async () => {
@@ -72,6 +86,7 @@ export function useDocument() {
         type: 'load',
         content: result.content ?? '',
         path: result.path,
+        requestId: ++requestId.current,
       })
       return { status: 'success', path: result.path } as const
     } catch (error) {
@@ -84,17 +99,30 @@ export function useDocument() {
   const saveDocument = useCallback(
     async (saveAs = false) => {
       const content = state.content
+      const currentRequest = ++requestId.current
+      dispatch({ type: 'save-started', requestId: currentRequest })
       try {
         const result = await window.qingshu.saveFile({
           content,
           path: saveAs ? undefined : state.path,
         })
+        if (currentRequest !== requestId.current) {
+          return { status: 'superseded' } as const
+        }
         if (result.canceled) return { status: 'canceled' } as const
-        dispatch({ type: 'saved', content, path: result.path })
+        dispatch({
+          type: 'saved',
+          content,
+          path: result.path,
+          requestId: currentRequest,
+        })
         return { status: 'success', path: result.path } as const
       } catch (error) {
         const message = errorMessage(error)
-        dispatch({ type: 'error', message })
+        if (currentRequest !== requestId.current) {
+          return { status: 'superseded' } as const
+        }
+        dispatch({ type: 'save-error', message, requestId: currentRequest })
         return { status: 'error', message } as const
       }
     },
