@@ -1,147 +1,218 @@
-// The built directory structure
-//
-// ├─┬ dist-electron
-// │ ├─┬ main
-// │ │ └── index.js    > Electron-Main
-// │ └─┬ preload
-// │   └── index.js    > Preload-Scripts
-// ├─┬ dist
-// │ └── index.html    > Electron-Renderer
-//
-process.env.DIST_ELECTRON = join(__dirname, '..')
-process.env.DIST = join(process.env.DIST_ELECTRON, '../dist')
-process.env.PUBLIC = app.isPackaged ? process.env.DIST : join(process.env.DIST_ELECTRON, '../public')
+import { readFile, writeFile } from 'node:fs/promises'
+import { release } from 'node:os'
+import { join } from 'node:path'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMainInvokeEvent,
+} from 'electron'
+import type {
+  ExportHtmlRequest,
+  ExportPdfRequest,
+  FileResult,
+  WindowAction,
+} from '../../src/types/electron'
 
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
-import { release } from 'os'
-import { join } from 'path'
-
-// Disable GPU Acceleration for Windows 7
-if (release().startsWith('6.1')) app.disableHardwareAcceleration()
-
-// Set application name for Windows 10+ notifications
-if (process.platform === 'win32') app.setAppUserModelId(app.getName())
-
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-  process.exit(0)
-}
-
-// Remove electron security warnings
-// This warning only shows in development mode
-// Read more on https://www.electronjs.org/docs/latest/tutorial/security
-// process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
+const preload = join(__dirname, '../preload/index.js')
+const indexHtml = join(__dirname, '../../dist/index.html')
 
 let win: BrowserWindow | null = null
-// Here, you can also use other preload
-const preload = join(__dirname, '../preload/index.js')
-const url = process.env.VITE_DEV_SERVER_URL
-const indexHtml = join(process.env.DIST, 'index.html')
 
-async function createWindow() {
+async function selectSavePath(
+  path: string | undefined,
+  options: Electron.SaveDialogOptions,
+): Promise<FileResult | { canceled: false; path: string }> {
+  if (path) return { canceled: false, path }
+
+  const result = win
+    ? await dialog.showSaveDialog(win, options)
+    : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return { canceled: true }
+  return { canceled: false, path: result.filePath }
+}
+
+ipcMain.handle('qingshu:open-file', async (): Promise<FileResult> => {
+  const options: Electron.OpenDialogOptions = {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Markdown', extensions: ['md', 'markdown'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  }
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options)
+  const path = result.filePaths[0]
+  if (result.canceled || !path) return { canceled: true }
+
+  return {
+    canceled: false,
+    path,
+    content: await readFile(path, 'utf8'),
+  }
+})
+
+ipcMain.handle(
+  'qingshu:save-file',
+  async (
+    _event: IpcMainInvokeEvent,
+    request: { path?: string; content: string },
+  ): Promise<FileResult> => {
+    const target = await selectSavePath(request.path, {
+      title: 'Save Markdown',
+      defaultPath: 'Untitled.md',
+      filters: [
+        { name: 'Markdown', extensions: ['md'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+    if (target.canceled) return target
+
+    await writeFile(target.path, request.content, 'utf8')
+    return target
+  },
+)
+
+ipcMain.handle(
+  'qingshu:export-html',
+  async (_event: IpcMainInvokeEvent, request: ExportHtmlRequest): Promise<FileResult> => {
+    const target = await selectSavePath(request.path, {
+      title: 'Export HTML',
+      defaultPath: 'Untitled.html',
+      filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+    })
+    if (target.canceled) return target
+
+    await writeFile(target.path, request.html, 'utf8')
+    return target
+  },
+)
+
+ipcMain.handle(
+  'qingshu:export-pdf',
+  async (event: IpcMainInvokeEvent, request: ExportPdfRequest = {}): Promise<FileResult> => {
+    const target = await selectSavePath(request.path, {
+      title: 'Export PDF',
+      defaultPath: 'Untitled.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (target.canceled) return target
+
+    const pdf = await event.sender.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+    })
+    await writeFile(target.path, pdf)
+    return target
+  },
+)
+
+ipcMain.handle(
+  'qingshu:window-action',
+  (event: IpcMainInvokeEvent, action: WindowAction): void => {
+    const target = BrowserWindow.fromWebContents(event.sender)
+    if (!target) return
+
+    switch (action) {
+      case 'minimize':
+        target.minimize()
+        break
+      case 'toggle-maximize':
+        target.isMaximized() ? target.unmaximize() : target.maximize()
+        break
+      case 'close':
+        target.close()
+        break
+    }
+  },
+)
+
+export function installCloseConfirmation(window: BrowserWindow): void {
+  let confirmationOpen = false
+
+  window.on('close', event => {
+    event.preventDefault()
+    if (confirmationOpen) return
+    confirmationOpen = true
+
+    void dialog
+      .showMessageBox(window, {
+        type: 'question',
+        title: 'Close Qingshu',
+        message: 'Are you sure you want to close Qingshu?',
+        buttons: ['Cancel', 'Close'],
+        defaultId: 0,
+        cancelId: 0,
+      })
+      .then(({ response }) => {
+        if (response === 1 && !window.isDestroyed()) {
+          window.destroy()
+        }
+      })
+      .finally(() => {
+        confirmationOpen = false
+      })
+  })
+}
+
+async function createWindow(): Promise<void> {
   win = new BrowserWindow({
-    width: 800,
-    height: 600,
-    frame: false,
-    minWidth: 600,
-    minHeight: 450,
+    width: 1000,
+    height: 720,
+    minWidth: 640,
+    minHeight: 480,
+    frame: process.platform === 'darwin',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     webPreferences: {
       preload,
-      // Warning: Enable nodeIntegration and disable contextIsolation is not secure in production
-      // Consider using contextBridge.exposeInMainWorld
-      // Read more on https://www.electronjs.org/docs/latest/tutorial/context-isolation
-      nodeIntegration: true,
-      contextIsolation: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
   })
 
-  if (app.isPackaged) {
-    win.loadFile(indexHtml)
+  installCloseConfirmation(win)
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    await win.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
-    win.loadURL(url as string)
-    // Open devTool if the app is not packaged
-    win.webContents.openDevTools()
+    await win.loadFile(indexHtml)
   }
 
-  // Test actively push message to the Electron-Renderer
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', new Date().toLocaleString())
-  })
-
-  // Make all links open with the browser, not with the application
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:')) shell.openExternal(url)
+    if (url.startsWith('https:')) void shell.openExternal(url)
     return { action: 'deny' }
   })
 }
 
-app.whenReady().then(createWindow)
+if (release().startsWith('6.1')) app.disableHardwareAcceleration()
+if (process.platform === 'win32') app.setAppUserModelId(app.getName())
 
-app.on('window-all-closed', () => {
-  win = null
-  if (process.platform !== 'darwin') app.quit()
-})
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  void app.whenReady().then(createWindow)
 
-app.on('second-instance', () => {
-  if (win) {
-    // Focus on the main window if the user tried to open another
+  app.on('window-all-closed', () => {
+    win = null
+    if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('second-instance', () => {
+    if (!win) return
     if (win.isMinimized()) win.restore()
     win.focus()
-  }
-})
-
-app.on('activate', () => {
-  const allWindows = BrowserWindow.getAllWindows()
-  if (allWindows.length) {
-    allWindows[0].focus()
-  } else {
-    createWindow()
-  }
-})
-
-// new window example arg: new windows url
-ipcMain.handle('open-win', (event, arg) => {
-  const childWindow = new BrowserWindow({
-    webPreferences: {
-      preload,
-    },
   })
 
-  if (app.isPackaged) {
-    childWindow.loadFile(indexHtml, { hash: arg })
-  } else {
-    childWindow.loadURL(`${url}/#${arg}`)
-    // childWindow.webContents.openDevTools({ mode: "undocked", activate: true })
-  }
-})
-
-ipcMain.handle('close-window', (event, arg) => {
-  console.error('close-window', arg)
-  win?.close()
-})
-
-
-ipcMain.handle('open-file', (event, arg) => {
-  console.error('open-file', arg)
-  const { dialog } = require('electron')
-  const path = dialog.showOpenDialogSync({
-      properties: ['openFile'],
-      filters: [
-          { name: 'Markdown', extensions: ['md'] },
-          { name: 'All Files', extensions: ['*'] }
-      ]
+  app.on('activate', () => {
+    const windows = BrowserWindow.getAllWindows()
+    if (windows.length > 0) {
+      windows[0].focus()
+    } else {
+      void createWindow()
+    }
   })
-  return path
-})
-
-ipcMain.handle('save-file', (event, arg) => {
-  console.error('save-file', arg)
-  const { dialog } = require('electron')
-  const path = dialog.showSaveDialogSync({
-      filters: [
-          { name: 'Markdown', extensions: ['md'] },
-          { name: 'All Files', extensions: ['*'] }
-      ]
-  })
-  return path
-})
+}
