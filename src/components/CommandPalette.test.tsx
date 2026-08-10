@@ -78,4 +78,13 @@ describe('CommandPalette keyboard interaction', () => {
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(onDismiss).toHaveBeenCalledOnce()
   })
+
+  it('dismisses with Escape after focus moves to a command option', () => {
+    const onDismiss = vi.fn()
+    render(<CommandPalette commands={commands()} onDismiss={onDismiss} />)
+
+    fireEvent.keyDown(screen.getAllByRole('option')[0], { key: 'Escape' })
+
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
 })

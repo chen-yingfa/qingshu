@@ -89,7 +89,7 @@ Create production renderer/main/preload bundles and a platform package:
 npm run build
 ```
 
-Artifacts are written under `release/2.1.0/`. The checked-in builder configuration
+Artifacts are written under `release/<version>/`. The checked-in builder configuration
 defines a Windows x64 NSIS installer and macOS DMG; electron-builder uses its platform
 default where no explicit target is configured.
 

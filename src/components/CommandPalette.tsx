@@ -103,6 +103,12 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onDismiss()
+          }
+        }}
       >
         <div className="palette-search">
           <span className="palette-search-icon" aria-hidden="true">
