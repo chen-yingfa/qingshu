@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   showSaveDialog: vi.fn(),
   showMessageBox: vi.fn(),
   fromWebContents: vi.fn(),
+  browserWindows: [] as any[],
+  browserWindowOptions: [] as any[],
+  webContentsListeners: new Map<string, (...args: any[]) => unknown>(),
+  windowOpenHandler: undefined as undefined | ((details: { url: string }) => unknown),
+  guardsInstalledAtLoad: [] as boolean[][],
 }))
 
 vi.mock('node:fs/promises', () => ({
@@ -29,6 +34,31 @@ vi.mock('electron', () => ({
   BrowserWindow: class {
     static fromWebContents = mocks.fromWebContents
     static getAllWindows = () => []
+
+    webContents = {
+      on: vi.fn((name: string, listener: (...args: any[]) => unknown) => {
+        mocks.webContentsListeners.set(name, listener)
+      }),
+      printToPDF: vi.fn(),
+      setWindowOpenHandler: vi.fn(
+        (handler: (details: { url: string }) => unknown) => {
+          mocks.windowOpenHandler = handler
+        },
+      ),
+    }
+    loadFile = vi.fn(async () => {
+      mocks.guardsInstalledAtLoad.push([
+        mocks.webContentsListeners.has('will-navigate'),
+        Boolean(mocks.windowOpenHandler),
+      ])
+    })
+    loadURL = this.loadFile
+    on = vi.fn()
+
+    constructor(options: any) {
+      mocks.browserWindowOptions.push(options)
+      mocks.browserWindows.push(this)
+    }
   },
   dialog: {
     showMessageBox: mocks.showMessageBox,
@@ -45,8 +75,14 @@ vi.mock('electron', () => ({
 
 const main = await import('./index')
 
+const senderFrame = {
+  url: 'file:///workspace/dist/index.html',
+}
+
 const event = {
+  senderFrame,
   sender: {
+    mainFrame: senderFrame,
     printToPDF: vi.fn(),
   },
 }
@@ -87,6 +123,19 @@ describe('desktop IPC', () => {
     expect(mocks.readFile).not.toHaveBeenCalled()
   })
 
+  it('rejects bridge calls from an unexpected sender URL', async () => {
+    const untrustedEvent = {
+      ...event,
+      senderFrame: { url: 'https://evil.example/editor' },
+    }
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(untrustedEvent),
+    ).rejects.toThrow('Untrusted IPC sender')
+    expect(mocks.showOpenDialog).not.toHaveBeenCalled()
+    expect(mocks.readFile).not.toHaveBeenCalled()
+  })
+
   it('writes Markdown to an existing path without showing a dialog', async () => {
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
@@ -97,6 +146,15 @@ describe('desktop IPC', () => {
 
     expect(mocks.showSaveDialog).not.toHaveBeenCalled()
     expect(mocks.writeFile).toHaveBeenCalledWith('/notes/hello.md', '# Updated', 'utf8')
+  })
+
+  it('does not write when the save dialog is canceled', async () => {
+    mocks.showSaveDialog.mockResolvedValue({ canceled: true })
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Unsaved' }),
+    ).resolves.toEqual({ canceled: true })
+    expect(mocks.writeFile).not.toHaveBeenCalled()
   })
 
   it('exports HTML through a save dialog', async () => {
@@ -110,6 +168,15 @@ describe('desktop IPC', () => {
       '<h1>Hello</h1>',
       'utf8',
     )
+  })
+
+  it('does not write when HTML export is canceled', async () => {
+    mocks.showSaveDialog.mockResolvedValue({ canceled: true })
+
+    await expect(
+      mocks.handlers.get('qingshu:export-html')?.(event, { html: '<h1>Unsaved</h1>' }),
+    ).resolves.toEqual({ canceled: true })
+    expect(mocks.writeFile).not.toHaveBeenCalled()
   })
 
   it('prints and writes a PDF through a save dialog', async () => {
@@ -126,6 +193,16 @@ describe('desktop IPC', () => {
       printBackground: true,
     })
     expect(mocks.writeFile).toHaveBeenCalledWith('/exports/hello.pdf', pdf)
+  })
+
+  it('does not print or write when PDF export is canceled', async () => {
+    mocks.showSaveDialog.mockResolvedValue({ canceled: true })
+
+    await expect(
+      mocks.handlers.get('qingshu:export-pdf')?.(event, {}),
+    ).resolves.toEqual({ canceled: true })
+    expect(event.sender.printToPDF).not.toHaveBeenCalled()
+    expect(mocks.writeFile).not.toHaveBeenCalled()
   })
 
   it('dispatches supported platform window controls', async () => {
@@ -149,7 +226,40 @@ describe('desktop IPC', () => {
   })
 })
 
+describe('browser window security', () => {
+  it('installs secure preferences and navigation guards before loading content', async () => {
+    mocks.webContentsListeners.clear()
+    mocks.windowOpenHandler = undefined
+
+    await main.createWindow()
+
+    expect(mocks.browserWindowOptions.at(-1).webPreferences).toMatchObject({
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    })
+    expect(mocks.guardsInstalledAtLoad.at(-1)).toEqual([true, true])
+
+    const preventDefault = vi.fn()
+    mocks.webContentsListeners.get('will-navigate')?.(
+      { preventDefault },
+      'https://evil.example/editor',
+    )
+    expect(preventDefault).toHaveBeenCalledOnce()
+    const openHandler = mocks.windowOpenHandler as unknown as (details: {
+      url: string
+    }) => unknown
+    expect(openHandler({ url: 'https://evil.example/popup' })).toEqual({
+      action: 'deny',
+    })
+  })
+})
+
 describe('close confirmation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('destroys the window only after confirmation', async () => {
     let closeListener: ((event: { preventDefault: () => void }) => void) | undefined
     const window = {
@@ -167,5 +277,23 @@ describe('close confirmation', () => {
     await vi.waitFor(() => expect(window.destroy).toHaveBeenCalledOnce())
 
     expect(preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the window open when close confirmation is canceled', async () => {
+    let closeListener: ((event: { preventDefault: () => void }) => void) | undefined
+    const window = {
+      destroy: vi.fn(),
+      isDestroyed: () => false,
+      on: vi.fn((name: string, listener: typeof closeListener) => {
+        if (name === 'close') closeListener = listener
+      }),
+    }
+    mocks.showMessageBox.mockResolvedValue({ response: 0 })
+
+    main.installCloseConfirmation(window as never)
+    closeListener?.({ preventDefault: vi.fn() })
+    await vi.waitFor(() => expect(mocks.showMessageBox).toHaveBeenCalledOnce())
+
+    expect(window.destroy).not.toHaveBeenCalled()
   })
 })

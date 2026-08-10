@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { release } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   app,
   BrowserWindow,
@@ -18,8 +19,38 @@ import type {
 
 const preload = join(__dirname, '../preload/index.js')
 const indexHtml = join(__dirname, '../../dist/index.html')
+const rendererUrl = process.env.VITE_DEV_SERVER_URL
+  ? new URL(process.env.VITE_DEV_SERVER_URL)
+  : pathToFileURL(indexHtml)
 
 let win: BrowserWindow | null = null
+
+function isTrustedRendererUrl(rawUrl: string): boolean {
+  try {
+    const candidate = new URL(rawUrl)
+    if (rendererUrl.protocol === 'file:') {
+      return (
+        candidate.protocol === 'file:' &&
+        candidate.host === rendererUrl.host &&
+        candidate.pathname === rendererUrl.pathname
+      )
+    }
+    return candidate.origin === rendererUrl.origin
+  } catch {
+    return false
+  }
+}
+
+function assertTrustedIpcSender(event: IpcMainInvokeEvent): void {
+  const frame = event.senderFrame
+  if (
+    !frame ||
+    frame !== event.sender.mainFrame ||
+    !isTrustedRendererUrl(frame.url)
+  ) {
+    throw new Error('Untrusted IPC sender')
+  }
+}
 
 async function selectSavePath(
   path: string | undefined,
@@ -34,7 +65,8 @@ async function selectSavePath(
   return { canceled: false, path: result.filePath }
 }
 
-ipcMain.handle('qingshu:open-file', async (): Promise<FileResult> => {
+ipcMain.handle('qingshu:open-file', async (event): Promise<FileResult> => {
+  assertTrustedIpcSender(event)
   const options: Electron.OpenDialogOptions = {
     properties: ['openFile'],
     filters: [
@@ -58,9 +90,10 @@ ipcMain.handle('qingshu:open-file', async (): Promise<FileResult> => {
 ipcMain.handle(
   'qingshu:save-file',
   async (
-    _event: IpcMainInvokeEvent,
+    event: IpcMainInvokeEvent,
     request: { path?: string; content: string },
   ): Promise<FileResult> => {
+    assertTrustedIpcSender(event)
     const target = await selectSavePath(request.path, {
       title: 'Save Markdown',
       defaultPath: 'Untitled.md',
@@ -78,7 +111,8 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:export-html',
-  async (_event: IpcMainInvokeEvent, request: ExportHtmlRequest): Promise<FileResult> => {
+  async (event: IpcMainInvokeEvent, request: ExportHtmlRequest): Promise<FileResult> => {
+    assertTrustedIpcSender(event)
     const target = await selectSavePath(request.path, {
       title: 'Export HTML',
       defaultPath: 'Untitled.html',
@@ -94,6 +128,7 @@ ipcMain.handle(
 ipcMain.handle(
   'qingshu:export-pdf',
   async (event: IpcMainInvokeEvent, request: ExportPdfRequest = {}): Promise<FileResult> => {
+    assertTrustedIpcSender(event)
     const target = await selectSavePath(request.path, {
       title: 'Export PDF',
       defaultPath: 'Untitled.pdf',
@@ -113,6 +148,7 @@ ipcMain.handle(
 ipcMain.handle(
   'qingshu:window-action',
   (event: IpcMainInvokeEvent, action: WindowAction): void => {
+    assertTrustedIpcSender(event)
     const target = BrowserWindow.fromWebContents(event.sender)
     if (!target) return
 
@@ -129,6 +165,17 @@ ipcMain.handle(
     }
   },
 )
+
+function installNavigationGuards(window: BrowserWindow): void {
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https:')) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+}
 
 export function installCloseConfirmation(window: BrowserWindow): void {
   let confirmationOpen = false
@@ -158,7 +205,7 @@ export function installCloseConfirmation(window: BrowserWindow): void {
   })
 }
 
-async function createWindow(): Promise<void> {
+export async function createWindow(): Promise<void> {
   win = new BrowserWindow({
     width: 1000,
     height: 720,
@@ -175,6 +222,7 @@ async function createWindow(): Promise<void> {
   })
 
   installCloseConfirmation(win)
+  installNavigationGuards(win)
 
   if (process.env.VITE_DEV_SERVER_URL) {
     await win.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -182,10 +230,6 @@ async function createWindow(): Promise<void> {
     await win.loadFile(indexHtml)
   }
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:')) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
 }
 
 if (release().startsWith('6.1')) app.disableHardwareAcceleration()

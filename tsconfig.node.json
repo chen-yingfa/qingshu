@@ -4,11 +4,13 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
   "include": [
     "package.json",
-    "electron"
+    "electron",
+    "vite.config.mts"
   ]
 }
