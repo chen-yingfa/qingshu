@@ -370,6 +370,51 @@ describe('commands and operation feedback', () => {
     expect(screen.queryByText('Saved selected.md')).toBeNull()
   })
 
+  it('shows an older save warning after a newer Save As is canceled', async () => {
+    let finishOlder!: (result: {
+      canceled: false
+      path: string
+      warning: string
+    }) => void
+    let finishNewer!: (result: { canceled: true }) => void
+    api.saveFile
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOlder = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishNewer = resolve
+          }),
+      )
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'draft' },
+    })
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(api.saveFile).toHaveBeenCalledTimes(2))
+    finishNewer({ canceled: true })
+    finishOlder({
+      canceled: false,
+      path: '/notes/older.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+
+    expect(
+      await screen.findByText(
+        'Durability warning for older.md: Saved, but directory sync failed.',
+      ),
+    ).not.toBeNull()
+    expect(screen.getByText('Unsaved')).not.toBeNull()
+    expect(screen.queryByText('Saved')).toBeNull()
+    expect(screen.queryByText('Saved older.md')).toBeNull()
+  })
+
   it('reports a committed save with a durability warning accurately', async () => {
     api.saveFile.mockResolvedValue({
       canceled: false,

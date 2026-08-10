@@ -132,6 +132,13 @@ export function useDocument() {
           path: saveAs ? undefined : state.path,
         })
         if (currentRequest !== requestId.current) {
+          if (!result.canceled && result.warning) {
+            return {
+              status: 'superseded',
+              path: result.path,
+              warning: result.warning,
+            } as const
+          }
           return { status: 'superseded' } as const
         }
         if (result.canceled) return { status: 'canceled' } as const

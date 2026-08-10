@@ -149,4 +149,61 @@ describe('useDocument save lifecycle', () => {
       dirty: true,
     })
   })
+
+  it('preserves an older save warning after a newer request is canceled', async () => {
+    let finishOlder!: (result: {
+      canceled: false
+      path: string
+      warning: string
+    }) => void
+    let finishNewer!: (result: { canceled: true }) => void
+    window.qingshu = {
+      saveFile: vi.fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishOlder = resolve
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishNewer = resolve
+            }),
+        ),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: 'draft' }))
+
+    let older!: ReturnType<typeof result.current.saveDocument>
+    let newer!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      older = result.current.saveDocument(true)
+      newer = result.current.saveDocument(true)
+    })
+    finishNewer({ canceled: true })
+    await act(async () => {
+      await newer
+    })
+    finishOlder({
+      canceled: false,
+      path: '/notes/older.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+
+    let operation: Awaited<typeof older>
+    await act(async () => {
+      operation = await older
+    })
+
+    expect(operation!).toEqual({
+      status: 'superseded',
+      path: '/notes/older.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+    expect(result.current.state).toMatchObject({
+      content: 'draft',
+      dirty: true,
+    })
+  })
 })
