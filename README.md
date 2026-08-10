@@ -92,8 +92,8 @@ npm run build
 ```
 
 Artifacts are written under `release/<version>/`. The checked-in builder configuration
-defines a Windows x64 NSIS installer and macOS DMG; electron-builder uses its platform
-default where no explicit target is configured.
+defines a Windows x64 NSIS installer, macOS DMG, and Linux AppImage with Qingshu
+application identity, desktop metadata, and local platform icons.
 
 ## Current limitations
 

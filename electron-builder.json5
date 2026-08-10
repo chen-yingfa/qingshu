@@ -2,7 +2,9 @@
  * @see https://www.electron.build/configuration/configuration
  */
 {
-  "appId": "YourAppID",
+  "appId": "com.qingshu.editor",
+  "productName": "Qingshu",
+  "copyright": "Copyright © 2026 Qingshu contributors",
   "asar": true,
   "directories": {
     "output": "release/${version}"
@@ -12,12 +14,15 @@
     "dist"
   ],
   "mac": {
+    "icon": "build/icon.png",
+    "category": "public.app-category.productivity",
     "artifactName": "${productName}_${version}.${ext}",
     "target": [
       "dmg"
     ]
   },
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -27,6 +32,22 @@
       }
     ],
     "artifactName": "${productName}_${version}.${ext}"
+  },
+  "linux": {
+    "icon": "build/icon.png",
+    "category": "Office",
+    "synopsis": "A lightweight desktop Markdown editor",
+    "description": "Qingshu is a lightweight desktop Markdown editor focused on clean writing, live preview, and practical CJK input.",
+    "target": [
+      "AppImage"
+    ],
+    "desktop": {
+      "entry": {
+        "Name": "Qingshu",
+        "Comment": "Write and preview Markdown",
+        "Categories": "Office;"
+      }
+    }
   },
   "nsis": {
     "oneClick": false,
