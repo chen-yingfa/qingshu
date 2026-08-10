@@ -31,8 +31,9 @@ Normalization waits until IME composition ends and preserves the caret.
 
 Automatic CJK spacing is opt-in from the toolbar or command palette. When enabled,
 it inserts spaces at CJK/Latin-letter or CJK/digit boundaries as editing continues.
-Normalization and spacing deliberately leave fenced/inline code, math, and link/image
-destinations unchanged.
+Normalization and spacing deliberately leave fenced/inline code, math, link/image
+destinations, YAML/TOML front matter, HTML/comments, and Marp/Slidev presentation
+directives and component blocks unchanged.
 
 ## Keyboard shortcuts
 

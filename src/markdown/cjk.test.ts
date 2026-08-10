@@ -107,6 +107,51 @@ describe('normalizeCjkInput', () => {
     expect(normalized).toContain('<https://example.com/路径/￥x￥>')
     expect(normalized).toContain('www.example.com/路径/￥x￥')
   })
+
+  it('preserves realistic Marp front matter, directives, and HTML', () => {
+    const source = [
+      '---',
+      'marp: true',
+      'theme: 中文Theme',
+      'title: "中文A"',
+      '---',
+      '<!-- _class: 中文Lead -->',
+      '<!-- paginate: true中文 -->',
+      '<div class="中文Card">组件React19</div>',
+      '',
+      '# 正文React19 "中文"',
+    ].join('\n')
+
+    expect(normalizeCjkInput(source)).toBe(
+      source.replace('# 正文React19 "中文"', '# 正文React19 “中文”'),
+    )
+    expect(spaceCjkLatin(source)).toBe(
+      source.replace('# 正文React19 "中文"', '# 正文 React19 "中文"'),
+    )
+  })
+
+  it('preserves realistic Slidev TOML front matter, directives, and components', () => {
+    const source = [
+      '+++',
+      'theme = "中文Theme"',
+      'layout = "中文Layout"',
+      '+++',
+      '::right::',
+      '<Tweet id="中文A" />',
+      '<My组件 title="中文A">',
+      '组件React19',
+      '</My组件>',
+      '',
+      '正文Vue3 "中文"',
+    ].join('\n')
+
+    expect(normalizeCjkInput(source)).toBe(
+      source.replace('正文Vue3 "中文"', '正文Vue3 “中文”'),
+    )
+    expect(spaceCjkLatin(source)).toBe(
+      source.replace('正文Vue3 "中文"', '正文 Vue3 "中文"'),
+    )
+  })
 })
 
 describe('spaceCjkLatin', () => {

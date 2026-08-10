@@ -27,7 +27,49 @@ interface MarkdownNode {
 }
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
-const protectedNodeTypes = new Set(['code', 'inlineCode', 'math', 'inlineMath'])
+const protectedNodeTypes = new Set([
+  'code',
+  'html',
+  'inlineCode',
+  'math',
+  'inlineMath',
+])
+
+function collectPresentationRanges(source: string): SourceRange[] {
+  const ranges: SourceRange[] = []
+  const frontMatterStart = source.match(/^(?:\uFEFF)?(---|\+\+\+)[ \t]*\r?\n/u)
+  if (frontMatterStart) {
+    const delimiter = frontMatterStart[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+    const closing = new RegExp(`^${delimiter}[ \\t]*(?:\\r?\\n|$)`, 'gmu')
+    closing.lastIndex = frontMatterStart[0].length
+    const match = closing.exec(source)
+    if (match) ranges.push({ start: 0, end: match.index + match[0].length })
+  }
+
+  for (const match of source.matchAll(/^[ \t]*::[^\r\n]*::[ \t]*(?:\r?\n|$)/gmu)) {
+    ranges.push({ start: match.index, end: match.index + match[0].length })
+  }
+
+  const componentStart =
+    /^[ \t]*<([A-Z][\p{L}\p{N}_.:-]*)(?=[\s/>])[^\r\n>]*(?:\/>|>)[ \t]*(?:\r?\n|$)/gmu
+  for (const match of source.matchAll(componentStart)) {
+    if (match[0].includes('/>')) {
+      ranges.push({ start: match.index, end: match.index + match[0].length })
+      continue
+    }
+    const closing = new RegExp(
+      `^[ \\t]*</${match[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}>[ \\t]*(?:\\r?\\n|$)`,
+      'gmu',
+    )
+    closing.lastIndex = match.index + match[0].length
+    const end = closing.exec(source)
+    ranges.push({
+      start: match.index,
+      end: end ? end.index + end[0].length : match.index + match[0].length,
+    })
+  }
+  return ranges
+}
 
 function destinationRange(
   source: string,
@@ -82,7 +124,7 @@ function destinationRange(
 
 function collectProtectedRanges(source: string): SourceRange[] {
   const tree = markdownParser.parse(source) as MarkdownNode
-  const ranges: SourceRange[] = []
+  const ranges: SourceRange[] = collectPresentationRanges(source)
 
   const visit = (node: MarkdownNode) => {
     const start = node.position?.start.offset
