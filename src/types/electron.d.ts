@@ -1,6 +1,6 @@
 export type FileResult =
   | { canceled: true }
-  | { canceled: false; path: string; content?: string }
+  | { canceled: false; path: string; content?: string; warning?: string }
 
 export type ExportHtmlRequest = {
   html: string

@@ -123,6 +123,7 @@ describe('desktop IPC', () => {
     mocks.stat.mockResolvedValue({
       dev: 1,
       ino: 2,
+      mode: 0o100644,
       mtimeMs: 100,
       size: 6,
     })
@@ -271,6 +272,20 @@ describe('desktop IPC', () => {
       })
       .mockResolvedValueOnce({
         dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100644,
+        mtimeMs: 300,
+        size: 5,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
         ino: 8,
         mode: 0o100644,
         mtimeMs: 300,
@@ -352,6 +367,119 @@ describe('desktop IPC', () => {
     expect(mocks.rename).not.toHaveBeenCalled()
   })
 
+  it('rechecks the target after temp fsync and aborts if an external edit interleaves', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/interleaved.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 200,
+        size: 14,
+      })
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/interleaved.md',
+        content: '# Mine',
+      }),
+    ).rejects.toThrow('File changed on disk')
+
+    expect(mocks.tempHandle.sync).toHaveBeenCalledOnce()
+    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(mocks.unlink).toHaveBeenCalledOnce()
+  })
+
+  it('treats a chmod between verification and rename as a conflict', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/mode.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100600,
+        mtimeMs: 100,
+        size: 6,
+      })
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/mode.md',
+        content: '# Mine',
+      }),
+    ).rejects.toThrow('File changed on disk')
+    expect(mocks.tempHandle.chmod).toHaveBeenCalledWith(0o644)
+    expect(mocks.rename).not.toHaveBeenCalled()
+  })
+
+  it('atomically installs one queue before concurrent Save As initialization', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/notes/shared-save-as.md',
+    })
+    let releaseInitialStat!: () => void
+    const initialStat = new Promise<void>((resolve) => {
+      releaseInitialStat = resolve
+    })
+    let statCall = 0
+    const committed = {
+      dev: 1,
+      ino: 8,
+      mode: 0o100600,
+      mtimeMs: 300,
+      size: 5,
+    }
+    mocks.stat.mockImplementation(async () => {
+      statCall += 1
+      if (statCall === 1) await initialStat
+      if (statCall <= 3) throw missing
+      return committed
+    })
+    mocks.tempHandle.stat.mockResolvedValue(committed)
+    const writes: string[] = []
+    mocks.tempHandle.writeFile.mockImplementation(async (content: string) => {
+      writes.push(content)
+    })
+
+    const first = mocks.handlers.get('qingshu:save-file')?.(event, {
+      content: 'first',
+    }) as Promise<unknown>
+    const second = mocks.handlers.get('qingshu:save-file')?.(event, {
+      content: 'second',
+    }) as Promise<unknown>
+    await vi.waitFor(() => expect(mocks.stat).toHaveBeenCalledTimes(1))
+    expect(writes).toEqual([])
+
+    releaseInitialStat()
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { canceled: false, path: '/notes/shared-save-as.md' },
+      { canceled: false, path: '/notes/shared-save-as.md' },
+    ])
+    expect(writes).toEqual(['first', 'second'])
+  })
+
   it('authorizes Save As, writes exclusively, and records the new revision', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
     mocks.showSaveDialog.mockResolvedValue({
@@ -361,7 +489,21 @@ describe('desktop IPC', () => {
     mocks.stat
       .mockRejectedValueOnce(missing)
       .mockRejectedValueOnce(missing)
-      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 300, size: 5 })
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100600,
+        mtimeMs: 300,
+        size: 5,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 8,
+        mode: 0o100600,
+        mtimeMs: 300,
+        size: 5,
+      })
     mocks.tempHandle.stat
       .mockResolvedValueOnce({
         dev: 1,
@@ -398,7 +540,7 @@ describe('desktop IPC', () => {
     expect(mocks.showSaveDialog).toHaveBeenCalledOnce()
   })
 
-  it('falls back safely when Windows cannot fsync an opened directory', async () => {
+  it('returns a warning when Windows cannot fsync an opened directory', async () => {
     const windowsDirectoryError = Object.assign(new Error('directory sync unsupported'), {
       code: 'EINVAL',
     })
@@ -413,8 +555,56 @@ describe('desktop IPC', () => {
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Windows' }),
-    ).resolves.toEqual({ canceled: false, path: '/notes/windows.md' })
+    ).resolves.toEqual({
+      canceled: false,
+      path: '/notes/windows.md',
+      warning: 'Saved, but directory sync failed: directory sync unsupported',
+    })
     expect(mocks.directoryHandle.close).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the committed revision after directory sync failure for the next save', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    const syncFailure = Object.assign(new Error('I/O failure'), { code: 'EIO' })
+    const committed = {
+      dev: 1,
+      ino: 8,
+      mode: 0o100600,
+      mtimeMs: 300,
+      size: 5,
+    }
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/notes/durable-warning.md',
+    })
+    mocks.stat
+      .mockRejectedValueOnce(missing)
+      .mockRejectedValueOnce(missing)
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce(committed)
+      .mockResolvedValueOnce(committed)
+    mocks.tempHandle.stat.mockResolvedValue(committed)
+    mocks.directoryHandle.sync
+      .mockRejectedValueOnce(syncFailure)
+      .mockResolvedValueOnce(undefined)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: 'first' }),
+    ).resolves.toEqual({
+      canceled: false,
+      path: '/notes/durable-warning.md',
+      warning: 'Saved, but directory sync failed: I/O failure',
+    })
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/durable-warning.md',
+        content: 'second',
+      }),
+    ).resolves.toEqual({
+      canceled: false,
+      path: '/notes/durable-warning.md',
+    })
+    expect(mocks.rename).toHaveBeenCalledTimes(2)
   })
 
   it('closes and removes an adjacent temp file after an atomic-save failure', async () => {

@@ -40,6 +40,7 @@ interface FileRevision {
 }
 interface AuthorizedDocument {
   revision: FileRevision | null
+  initialized: boolean
   saveQueue: Promise<void>
 }
 const authorizedDocuments = new WeakMap<
@@ -148,6 +149,7 @@ function sameRevision(left: FileRevision, right: FileRevision): boolean {
   return (
     left.dev === right.dev &&
     left.ino === right.ino &&
+    (left.mode & 0o777) === (right.mode & 0o777) &&
     left.mtimeMs === right.mtimeMs &&
     left.size === right.size
   )
@@ -185,9 +187,28 @@ function authorizeDocument(
   path: string,
   revision: FileRevision | null,
 ): AuthorizedDocument {
-  const authorized = { revision, saveQueue: Promise.resolve() }
+  const authorized = {
+    revision,
+    initialized: true,
+    saveQueue: Promise.resolve(),
+  }
   documents.set(path, authorized)
   return authorized
+}
+
+function installDocumentQueue(
+  documents: Map<string, AuthorizedDocument>,
+  path: string,
+): AuthorizedDocument {
+  const existing = documents.get(path)
+  if (existing) return existing
+  const document = {
+    revision: null,
+    initialized: false,
+    saveQueue: Promise.resolve(),
+  }
+  documents.set(path, document)
+  return document
 }
 
 async function assertUnchanged(
@@ -205,35 +226,36 @@ async function assertUnchanged(
   }
 }
 
-function errorCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? String(error.code)
-    : undefined
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
-function isUnsupportedDirectorySync(error: unknown): boolean {
-  return ['EACCES', 'EBADF', 'EINVAL', 'EISDIR', 'ENOTSUP', 'EPERM'].includes(
-    errorCode(error) ?? '',
-  )
-}
-
-async function syncDirectory(path: string): Promise<void> {
+async function syncDirectory(path: string): Promise<string | undefined> {
   let handle: FileHandle | undefined
+  let failure: unknown
   try {
     handle = await open(path, 'r')
     await handle.sync()
   } catch (error) {
-    if (!isUnsupportedDirectorySync(error)) throw error
-  } finally {
-    if (handle) await handle.close()
+    failure = error
   }
+  if (handle) {
+    try {
+      await handle.close()
+    } catch (error) {
+      failure ??= error
+    }
+  }
+  return failure
+    ? `Saved, but directory sync failed: ${messageOf(failure)}`
+    : undefined
 }
 
 async function atomicWrite(
   path: string,
   content: string | Buffer,
-  mode: number,
-): Promise<FileRevision> {
+  expected: FileRevision | null,
+): Promise<{ revision: FileRevision; warning?: string }> {
   const tempPath = join(
     dirname(path),
     `.${basename(path)}.qingshu-${process.pid}-${++tempSequence}.tmp`,
@@ -242,6 +264,7 @@ async function atomicWrite(
   let renamed = false
   let revision: FileRevision | undefined
   try {
+    const mode = expected?.mode ? expected.mode & 0o777 : 0o600
     handle = await open(tempPath, 'wx', mode)
     await handle.chmod(mode)
     if (typeof content === 'string') await handle.writeFile(content, 'utf8')
@@ -250,10 +273,11 @@ async function atomicWrite(
     revision = revisionOf(await handle.stat())
     await handle.close()
     handle = undefined
+    await assertUnchanged(path, expected)
     await rename(tempPath, path)
     renamed = true
-    await syncDirectory(dirname(path))
-    return revision
+    const warning = await syncDirectory(dirname(path))
+    return { revision, ...(warning ? { warning } : {}) }
   } finally {
     if (handle) {
       await handle.close().catch(() => undefined)
@@ -346,7 +370,7 @@ ipcMain.handle(
     const documents = documentsFor(event.sender)
     const requestedPath = request.path ? resolve(request.path) : undefined
     let document = requestedPath ? documents.get(requestedPath) : undefined
-    if (requestedPath && !document) {
+    if (requestedPath && (!document || !document.initialized)) {
       throw new Error('Save path was not authorized by a file dialog')
     }
     const target = await selectSavePath(requestedPath, {
@@ -360,20 +384,27 @@ ipcMain.handle(
     if (target.canceled) return target
     const targetPath = resolve(target.path)
     if (!requestedPath) {
-      document =
-        documents.get(targetPath) ??
-        authorizeDocument(documents, targetPath, await currentRevision(targetPath))
+      document = installDocumentQueue(documents, targetPath)
     }
     if (!document) throw new Error('Save path authorization was lost')
 
     return enqueueSave(document, async () => {
+      if (!document.initialized) {
+        document.revision = await currentRevision(targetPath)
+        document.initialized = true
+      }
       await assertUnchanged(targetPath, document.revision)
-      document.revision = await atomicWrite(
+      const committed = await atomicWrite(
         targetPath,
         request.content,
-        document.revision?.mode ? document.revision.mode & 0o777 : 0o600,
+        document.revision,
       )
-      return { canceled: false, path: targetPath }
+      document.revision = committed.revision
+      return {
+        canceled: false,
+        path: targetPath,
+        ...(committed.warning ? { warning: committed.warning } : {}),
+      }
     })
   },
 )
