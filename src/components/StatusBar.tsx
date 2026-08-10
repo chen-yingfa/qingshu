@@ -10,8 +10,11 @@ export function StatusBar({ content, error, path }: StatusBarProps) {
   const stats = documentStats(content)
 
   return (
-    <footer className="status-bar" aria-live="polite">
-      <span className={error ? 'status-message is-error' : 'status-message'}>
+    <footer className="status-bar">
+      <span
+        className={error ? 'status-message is-error' : 'status-message'}
+        role={error ? 'alert' : undefined}
+      >
         {error ?? path ?? 'Local Markdown document'}
       </span>
       <div className="document-stats">

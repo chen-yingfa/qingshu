@@ -34,12 +34,14 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
+    "jsdom": "^29.1.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vite-plugin-electron": "^1.1.1",

@@ -3,9 +3,10 @@ import { Icon } from './Icons'
 interface TitleBarProps {
   path?: string
   dirty: boolean
+  onClose(): void
 }
 
-export function TitleBar({ path, dirty }: TitleBarProps) {
+export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
   const name = path?.split(/[\\/]/u).at(-1) ?? 'Untitled'
   const windowAction = (action: 'minimize' | 'toggle-maximize' | 'close') => {
     void window.qingshu.windowAction(action)
@@ -42,7 +43,7 @@ export function TitleBar({ path, dirty }: TitleBarProps) {
           className="close-button"
           title="Close"
           aria-label="Close window"
-          onClick={() => windowAction('close')}
+          onClick={onClose}
         >
           <Icon name="close" />
         </button>

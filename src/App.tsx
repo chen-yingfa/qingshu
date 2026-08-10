@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { LiveEditor, type FormatCommand } from './components/LiveEditor'
+import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
 import { TitleBar } from './components/TitleBar'
 import { Toolbar } from './components/Toolbar'
@@ -22,6 +23,16 @@ function htmlDocument(body: string): string {
 </html>`
 }
 
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
+}
+
 export default function App() {
   const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
   const [dark, setDark] = useState(
@@ -30,6 +41,7 @@ export default function App() {
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(false)
   const [autoSpacing, setAutoSpacing] = useState(false)
+  const [printPreview, setPrintPreview] = useState(false)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
@@ -72,13 +84,17 @@ export default function App() {
           break
         }
         case 'export-pdf':
+          setPrintPreview(true)
           try {
+            await waitForPaint()
             await window.qingshu.exportPdf(state.path ? { path: state.path } : undefined)
           } catch (error) {
             dispatch({
               type: 'error',
               message: error instanceof Error ? error.message : String(error),
             })
+          } finally {
+            setPrintPreview(false)
           }
           break
       }
@@ -100,6 +116,11 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && focus) {
+        event.preventDefault()
+        setFocus(false)
+        return
+      }
       if (!(event.ctrlKey || event.metaKey)) return
       const command =
         event.key.toLowerCase() === 's'
@@ -118,7 +139,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [runCommand])
+  }, [focus, runCommand])
 
   const toggleOption = (option: 'dark' | 'focus' | 'a4' | 'spacing') => {
     if (option === 'dark') setDark((value) => !value)
@@ -145,7 +166,13 @@ export default function App() {
         a4 ? 'a4-mode' : '',
       ].join(' ')}
     >
-      <TitleBar path={state.path} dirty={state.dirty} />
+      <TitleBar
+        path={state.path}
+        dirty={state.dirty}
+        onClose={() => {
+          if (canDiscard()) void window.qingshu.windowAction('close')
+        }}
+      />
       <Toolbar
         dark={dark}
         focus={focus}
@@ -157,12 +184,25 @@ export default function App() {
         }
         onToggle={toggleOption}
       />
+      {focus && (
+        <button
+          type="button"
+          className="exit-focus-button"
+          aria-label="Exit focus mode"
+          title="Exit focus mode (Escape)"
+          onClick={() => setFocus(false)}
+        >
+          <Icon name="close" />
+        </button>
+      )}
       <main className="workspace">
         <div className="paper">
           <LiveEditor
             content={state.content}
             activeBlock={state.activeBlock}
             formatRequest={formatRequest}
+            autoSpacing={autoSpacing}
+            previewAll={printPreview}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
           />

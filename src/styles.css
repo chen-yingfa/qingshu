@@ -40,6 +40,7 @@ button {
   --hover: #e8e3dc;
   --code: #f4f1eb;
   display: grid;
+  position: relative;
   grid-template-rows: 38px 46px minmax(0, 1fr) 30px;
   height: 100%;
   color: var(--text);
@@ -223,6 +224,10 @@ button {
   overflow-wrap: anywhere;
 }
 
+.preview-block {
+  position: relative;
+}
+
 .rendered-block {
   min-height: 1.85em;
   margin: 0;
@@ -242,10 +247,28 @@ button {
   margin-bottom: 0;
 }
 
-.rendered-block + .rendered-block,
-.source-block + .rendered-block,
-.rendered-block + .source-block {
+.preview-block + .preview-block,
+.source-block + .preview-block,
+.preview-block + .source-block {
   margin-top: 1.15em;
+}
+
+.edit-block-button {
+  position: absolute;
+  top: 2px;
+  right: -42px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--hover);
+  font: 10px/1.2 ui-sans-serif, sans-serif;
+  opacity: 0;
+}
+
+.preview-block:hover .edit-block-button,
+.edit-block-button:focus-visible {
+  opacity: 1;
 }
 
 .rendered-block h1,
@@ -375,6 +398,32 @@ button {
   border: 0;
 }
 
+.exit-focus-button {
+  position: fixed;
+  z-index: 5;
+  top: 12px;
+  right: 14px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--chrome);
+  box-shadow: 0 4px 16px rgba(20, 18, 16, 0.12);
+  place-items: center;
+}
+
+.exit-focus-button:hover {
+  color: var(--text);
+}
+
+.exit-focus-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     grid-template-rows: 38px auto minmax(0, 1fr) 30px;
@@ -403,6 +452,10 @@ button {
   .editor {
     padding: 36px 24px 64px;
     font-size: 16px;
+  }
+
+  .edit-block-button {
+    right: 2px;
   }
 
   .document-stats span:nth-child(2) {

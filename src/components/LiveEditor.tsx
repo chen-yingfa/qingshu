@@ -1,6 +1,5 @@
 import {
   type KeyboardEvent,
-  type RefObject,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -8,7 +7,7 @@ import {
   useState,
 } from 'react'
 
-import { normalizeCjkInput } from '../markdown/cjk'
+import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
 import { parseBlocks, renderMarkdown, type MarkdownBlock } from '../markdown/markdown'
 
 export type FormatCommand =
@@ -34,6 +33,8 @@ interface LiveEditorProps {
   content: string
   activeBlock: number
   formatRequest?: FormatRequest
+  autoSpacing?: boolean
+  previewAll?: boolean
   onChange(content: string): void
   onActiveBlockChange(index: number): void
 }
@@ -122,18 +123,30 @@ function RenderedBlock({
   }, [block.source])
 
   return (
-    <div
-      className="rendered-block"
-      role="button"
-      tabIndex={0}
-      aria-label="Edit Markdown block"
-      onClick={onActivate}
-      onFocus={onActivate}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') onActivate()
-      }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="preview-block">
+      <div
+        className="rendered-block"
+        onClick={(event) => {
+          if (
+            !(event.target as HTMLElement).closest(
+              'a, button, input, select, textarea, summary',
+            )
+          ) {
+            onActivate()
+          }
+        }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <button
+        type="button"
+        className="edit-block-button"
+        aria-label="Edit Markdown block"
+        title="Edit Markdown block"
+        onClick={onActivate}
+      >
+        Edit
+      </button>
+    </div>
   )
 }
 
@@ -141,6 +154,14 @@ function resizeTextarea(textarea: HTMLTextAreaElement | null) {
   if (!textarea) return
   textarea.style.height = '0'
   textarea.style.height = `${Math.max(textarea.scrollHeight, 32)}px`
+}
+
+function afterPaint(callback: () => void) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(callback)
+  } else {
+    setTimeout(callback, 0)
+  }
 }
 
 function prefixLines(
@@ -190,6 +211,8 @@ export function LiveEditor({
   content,
   activeBlock,
   formatRequest,
+  autoSpacing = false,
+  previewAll = false,
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
@@ -202,16 +225,19 @@ export function LiveEditor({
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
+  const lastEmittedContentRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
   contentRef.current = content
 
-  useEffect(() => {
-    if (previousActiveRef.current !== safeActive) {
-      previousActiveRef.current = safeActive
+  useLayoutEffect(() => {
+    const activeChanged = previousActiveRef.current !== safeActive
+    const externalChange = content !== lastEmittedContentRef.current
+    if (activeChanged || externalChange) {
       setDraft(active.source)
       rangeRef.current = { start: active.start, end: active.end }
     }
-  }, [active.end, active.source, active.start, safeActive])
+    previousActiveRef.current = safeActive
+  }, [active.end, active.source, active.start, content, safeActive])
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current)
@@ -234,9 +260,10 @@ export function LiveEditor({
       result.value,
     )
     contentRef.current = nextContent
+    lastEmittedContentRef.current = nextContent
     onChange(nextContent)
     rangeRef.current.end = rangeRef.current.start + result.value.length
-    requestAnimationFrame(() => {
+    afterPaint(() => {
       textarea.focus()
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
     })
@@ -247,13 +274,29 @@ export function LiveEditor({
     const nextContent = replaceBlockSource(contentRef.current, rangeRef.current, value)
     rangeRef.current.end = rangeRef.current.start + value.length
     contentRef.current = nextContent
+    lastEmittedContentRef.current = nextContent
     onChange(nextContent)
   }
 
-  const normalize = (value: string) => {
+  const normalize = (
+    value: string,
+    selectionStart = value.length,
+    selectionEnd = selectionStart,
+  ) => {
     if (composingRef.current) return
-    const normalized = normalizeCjkInput(value)
-    if (normalized !== value) commitDraft(normalized)
+    const transform = (source: string) => {
+      const normalized = normalizeCjkInput(source)
+      return autoSpacing ? spaceCjkLatin(normalized) : normalized
+    }
+    const normalized = transform(value)
+    if (normalized !== value) {
+      const nextStart = transform(value.slice(0, selectionStart)).length
+      const nextEnd = transform(value.slice(0, selectionEnd)).length
+      commitDraft(normalized)
+      afterPaint(() => {
+        textareaRef.current?.setSelectionRange(nextStart, nextEnd)
+      })
+    }
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -267,8 +310,19 @@ export function LiveEditor({
     ) {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
-      const next = moveByCjkWord(draft, textarea.selectionStart, direction)
-      textarea.setSelectionRange(next, next)
+      const backwardSelection = textarea.selectionDirection === 'backward'
+      const focus = backwardSelection ? textarea.selectionStart : textarea.selectionEnd
+      const anchor = backwardSelection ? textarea.selectionEnd : textarea.selectionStart
+      const next = moveByCjkWord(draft, focus, direction)
+      if (event.shiftKey) {
+        textarea.setSelectionRange(
+          Math.min(anchor, next),
+          Math.max(anchor, next),
+          next < anchor ? 'backward' : 'forward',
+        )
+      } else {
+        textarea.setSelectionRange(next, next)
+      }
       return
     }
 
@@ -277,9 +331,10 @@ export function LiveEditor({
       const merged = mergeBlockAtStart(contentRef.current, rangeRef.current.start)
       const previousStart = blocks[safeActive - 1].start
       contentRef.current = merged.content
+      lastEmittedContentRef.current = merged.content
       onChange(merged.content)
       onActiveBlockChange(safeActive - 1)
-      requestAnimationFrame(() => {
+      afterPaint(() => {
         const input = textareaRef.current
         const localCaret = Math.max(0, merged.caret - previousStart)
         input?.setSelectionRange(localCaret, localCaret)
@@ -323,7 +378,7 @@ export function LiveEditor({
   return (
     <section className="editor" aria-label="Markdown document">
       {blocks.map((block, index) =>
-        index === safeActive ? (
+        index === safeActive && !previewAll ? (
           <textarea
             key={`active-${safeActive}`}
             ref={textareaRef}
@@ -332,14 +387,34 @@ export function LiveEditor({
             autoFocus
             spellCheck
             value={draft}
-            onChange={(event) => commitDraft(event.currentTarget.value)}
-            onBlur={(event) => normalize(event.currentTarget.value)}
+            onChange={(event) => {
+              const textarea = event.currentTarget
+              commitDraft(textarea.value)
+              if (!composingRef.current && autoSpacing) {
+                normalize(
+                  textarea.value,
+                  textarea.selectionStart,
+                  textarea.selectionEnd,
+                )
+              }
+            }}
+            onBlur={(event) =>
+              normalize(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart,
+                event.currentTarget.selectionEnd,
+              )
+            }
             onCompositionStart={() => {
               composingRef.current = true
             }}
             onCompositionEnd={(event) => {
               composingRef.current = false
-              normalize(event.currentTarget.value)
+              normalize(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart,
+                event.currentTarget.selectionEnd,
+              )
             }}
             onKeyDown={handleKeyDown}
           />
