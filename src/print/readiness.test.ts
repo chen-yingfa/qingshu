@@ -14,6 +14,7 @@ function deferred() {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('waitForPrintReadiness', () => {
@@ -66,5 +67,47 @@ describe('waitForPrintReadiness', () => {
     })
 
     await expect(waitForPrintReadiness(Promise.resolve(), root)).resolves.toBeUndefined()
+  })
+
+  it('rejects after a bounded timeout when an image never settles', async () => {
+    vi.useFakeTimers()
+    const root = document.createElement('div')
+    const pending = document.createElement('img')
+    Object.defineProperty(pending, 'complete', { configurable: true, value: false })
+    root.append(pending)
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: undefined,
+    })
+
+    const waiting = waitForPrintReadiness(Promise.resolve(), root, {
+      imageTimeoutMs: 500,
+    })
+    const rejected = expect(waiting).rejects.toThrow(
+      'Timed out waiting for 1 image before PDF export',
+    )
+    await vi.advanceTimersByTimeAsync(500)
+
+    await rejected
+  })
+
+  it('cancels pending readiness and removes image listeners', async () => {
+    const root = document.createElement('div')
+    const pending = document.createElement('img')
+    Object.defineProperty(pending, 'complete', { configurable: true, value: false })
+    root.append(pending)
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: undefined,
+    })
+    const controller = new AbortController()
+
+    const waiting = waitForPrintReadiness(Promise.resolve(), root, {
+      signal: controller.signal,
+    })
+    await Promise.resolve()
+    controller.abort()
+
+    await expect(waiting).rejects.toThrow('PDF export readiness was canceled')
   })
 })

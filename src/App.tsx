@@ -42,6 +42,10 @@ function createPreviewBarrier() {
   return { promise, resolve, reject }
 }
 
+type ActivePdfExport = ReturnType<typeof createPreviewBarrier> & {
+  controller: AbortController
+}
+
 export default function App() {
   const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
   const [dark, setDark] = useState(
@@ -54,7 +58,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const toastId = useRef(0)
-  const previewBarrier = useRef<ReturnType<typeof createPreviewBarrier> | null>(null)
+  const activePdfExport = useRef<ActivePdfExport | null>(null)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
@@ -67,6 +71,18 @@ export default function App() {
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
+
+  const handlePreviewReady = useCallback((error?: Error) => {
+    if (error) activePdfExport.current?.reject(error)
+    else activePdfExport.current?.resolve()
+  }, [])
+
+  useEffect(
+    () => () => {
+      activePdfExport.current?.controller.abort()
+    },
+    [],
+  )
 
   const canDiscard = useCallback(
     () =>
@@ -131,11 +147,21 @@ export default function App() {
           }
           break
         }
-        case 'export-pdf':
-          previewBarrier.current = createPreviewBarrier()
+        case 'export-pdf': {
+          if (activePdfExport.current) {
+            addToast('error', 'PDF export is already in progress.')
+            break
+          }
+          const active = {
+            ...createPreviewBarrier(),
+            controller: new AbortController(),
+          }
+          activePdfExport.current = active
           setPrintPreview(true)
           try {
-            await waitForPrintReadiness(previewBarrier.current.promise)
+            await waitForPrintReadiness(active.promise, document, {
+              signal: active.controller.signal,
+            })
             const result = await window.qingshu.exportPdf()
             if (!result.canceled) {
               dispatch({ type: 'error', message: null })
@@ -149,10 +175,12 @@ export default function App() {
             })
             addToast('error', message)
           } finally {
-            previewBarrier.current = null
+            active.controller.abort()
+            if (activePdfExport.current === active) activePdfExport.current = null
             setPrintPreview(false)
           }
           break
+        }
       }
     },
     [
@@ -344,10 +372,7 @@ export default function App() {
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
             previewAll={printPreview}
-            onPreviewReady={(error) => {
-              if (error) previewBarrier.current?.reject(error)
-              else previewBarrier.current?.resolve()
-            }}
+            onPreviewReady={handlePreviewReady}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
           />

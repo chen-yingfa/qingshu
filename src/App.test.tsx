@@ -205,6 +205,31 @@ describe('application safety controls', () => {
       }
     }
   })
+
+  it('rejects a rapid duplicate PDF command without replacing the active export', async () => {
+    let finishExport!: () => void
+    api.exportPdf.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishExport = () => resolve({ canceled: true })
+        }),
+    )
+    render(<App />)
+
+    menuListener?.('export-pdf')
+    await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
+    menuListener?.('export-pdf')
+
+    const feedback = await screen.findByText('PDF export is already in progress.')
+    expect(feedback.closest('.toast-error')).not.toBeNull()
+    expect(api.exportPdf).toHaveBeenCalledOnce()
+
+    finishExport()
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull(),
+    )
+    expect(api.exportPdf).toHaveBeenCalledOnce()
+  })
 })
 
 describe('commands and operation feedback', () => {
