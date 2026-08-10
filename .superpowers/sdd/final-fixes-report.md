@@ -396,3 +396,59 @@ No commits were amended and nothing was pushed.
 - electron-builder still reports duplicate dependency references while traversing
   the unified/remark graph; package creation succeeds.
 - macOS DMG creation remains unavailable on this Linux agent.
+
+---
+
+## Remaining Minor Save-lifecycle Findings
+
+Both minor findings were reproduced and fixed with focused tests.
+
+### Warnings from request-superseded saves
+
+The save hook previously returned a bare `superseded` result as soon as it saw a
+newer request generation. This discarded durability metadata even though the
+older main-process save had committed and returned a warning.
+
+A stale request now retains `path` and `warning` when its completed result
+contains a durability warning. It still does not dispatch `saved`, adopt stale
+state, or clear the dirty flag. App's existing superseded-warning branch
+therefore shows `Durability warning …` without a clean `Saved` status or success
+toast. Hook and App tests deterministically start an older Save As, start and
+cancel a newer Save As, then resolve the older operation with a warning.
+
+### Cross-platform directory-fsync capability policy
+
+`EINVAL` and `ENOTSUP` now represent unsupported directory-fsync capability on
+Linux, macOS, and Windows, so they do not create user warnings after an otherwise
+successful atomic save. Windows additionally suppresses `EPERM` and `EACCES`,
+where directory handles can expose permission-style unsupported-operation
+failures. Linux and macOS retain `EPERM`/`EACCES` warnings, and every tested
+platform retains unexpected `EIO` warnings.
+
+### TDD evidence
+
+- RED: the focused hook and App tests both failed because the older warned save
+  returned only `{ status: 'superseded' }` and no warning toast appeared.
+- GREEN: reducer/hook/App save lifecycle suites passed 27/27.
+- RED: Linux and macOS `EINVAL`/`ENOTSUP` produced four expected focused
+  failures. Permission and `EIO` controls passed at red.
+- GREEN: all 46 main-process tests passed, including the IPC-level unsupported
+  fsync case and retained committed-revision behavior for `EIO`.
+
+### Commits
+
+- `44d1cdd` — retain durability warnings from stale save requests
+- `4fbc1be` — apply cross-platform directory-fsync capability policy
+
+### Verification
+
+- `npm test`: 15 files, 144 tests passed.
+- `npm run typecheck`: both TypeScript projects passed.
+- `npx vite build`: renderer, main, and preload production bundles built.
+
+No commit was amended and nothing was pushed.
+
+### Remaining concern
+
+Vite continues to report its non-failing renderer chunk-size advisory (about
+659 kB minified).
