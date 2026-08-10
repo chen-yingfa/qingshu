@@ -378,7 +378,13 @@ export default function App() {
           />
         </div>
       </main>
-      <StatusBar content={state.content} error={state.error} path={state.path} />
+      <StatusBar
+        content={state.content}
+        error={state.error}
+        path={state.path}
+        activeBlock={state.activeBlock}
+        dirty={state.dirty}
+      />
       {paletteOpen && (
         <CommandPalette commands={commands} onDismiss={() => setPaletteOpen(false)} />
       )}

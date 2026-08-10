@@ -8,6 +8,8 @@ interface TitleBarProps {
 
 export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
   const name = path?.split(/[\\/]/u).at(-1) ?? 'Untitled'
+  const usesNativeControls =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform)
   const windowAction = (action: 'minimize' | 'toggle-maximize' | 'close') => {
     void window.qingshu.windowAction(action)
   }
@@ -21,7 +23,7 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
         {name}
         {dirty && <span className="dirty-indicator" aria-label="Unsaved changes" />}
       </div>
-      <div className="window-controls">
+      {!usesNativeControls && <div className="window-controls">
         <button
           type="button"
           title="Minimize"
@@ -47,7 +49,7 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
         >
           <Icon name="close" />
         </button>
-      </div>
+      </div>}
     </header>
   )
 }

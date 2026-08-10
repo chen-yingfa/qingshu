@@ -302,6 +302,7 @@ describe('commands and operation feedback', () => {
     menuListener?.('export-html')
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
     const alerts = await screen.findAllByRole('alert')
+    expect(alerts).toHaveLength(1)
     const errorToast = alerts.find((alert) => alert.classList.contains('toast-error'))
     expect(errorToast?.textContent).toContain('Disk unavailable')
   })
