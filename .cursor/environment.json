@@ -1,0 +1,14 @@
+{
+  "name": "Qingshu (Vue + Electron + Vite Markdown editor)",
+  "install": "npm ci",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "DISPLAY=:1 npm run dev",
+      "description": "Runs the Qingshu dev flow (`npm run dev`). Vite serves the renderer on http://localhost:5173 and vite-electron-plugin builds the Electron main/preload and launches the Electron window on the computer-use display (:1). Watch this terminal for Vite/Electron logs; restart it to relaunch the app."
+    }
+  ],
+  "ports": [
+    { "name": "vite dev server", "port": 5173 }
+  ]
+}
