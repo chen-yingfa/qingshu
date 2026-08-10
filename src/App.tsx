@@ -119,6 +119,15 @@ export default function App() {
               'warning',
               `Saved ${filename(result.path)} with warning: ${result.message}`,
             )
+          } else if (
+            result.status === 'superseded' &&
+            result.path &&
+            result.warning
+          ) {
+            addToast(
+              'warning',
+              `Durability warning for ${filename(result.path)}: ${result.warning}`,
+            )
           } else if (result.status === 'error') {
             addToast('error', result.message)
           }
@@ -132,6 +141,15 @@ export default function App() {
             addToast(
               'warning',
               `Saved ${filename(result.path)} with warning: ${result.message}`,
+            )
+          } else if (
+            result.status === 'superseded' &&
+            result.path &&
+            result.warning
+          ) {
+            addToast(
+              'warning',
+              `Durability warning for ${filename(result.path)}: ${result.warning}`,
             )
           } else if (result.status === 'error') {
             addToast('error', result.message)

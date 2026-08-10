@@ -332,6 +332,44 @@ describe('commands and operation feedback', () => {
     expect(screen.queryByText('Saved selected.md')).toBeNull()
   })
 
+  it('shows a durability warning without marking a superseded save clean', async () => {
+    let finishSave!: (result: {
+      canceled: false
+      path: string
+      warning: string
+    }) => void
+    api.saveFile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve
+        }),
+    )
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'first draft' },
+    })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(api.saveFile).toHaveBeenCalledOnce())
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'newest draft' },
+    })
+    finishSave({
+      canceled: false,
+      path: '/notes/selected.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+
+    expect(
+      await screen.findByText(
+        'Durability warning for selected.md: Saved, but directory sync failed.',
+      ),
+    ).not.toBeNull()
+    expect(screen.getByText('Unsaved')).not.toBeNull()
+    expect(screen.queryByText('Saved')).toBeNull()
+    expect(screen.queryByText('Saved selected.md')).toBeNull()
+  })
+
   it('reports a committed save with a durability warning accurately', async () => {
     api.saveFile.mockResolvedValue({
       canceled: false,

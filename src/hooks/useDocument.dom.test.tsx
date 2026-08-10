@@ -105,4 +105,48 @@ describe('useDocument save lifecycle', () => {
       dirty: false,
     })
   })
+
+  it('preserves a durability warning when an edit supersedes the save', async () => {
+    let finishSave!: (result: {
+      canceled: false
+      path: string
+      warning: string
+    }) => void
+    window.qingshu = {
+      saveFile: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve
+          }),
+      ),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: 'first draft' }))
+    let save!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      save = result.current.saveDocument(true)
+    })
+    act(() => result.current.dispatch({ type: 'edit', content: 'newest draft' }))
+    finishSave({
+      canceled: false,
+      path: '/notes/warning.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+
+    let operation: Awaited<typeof save>
+    await act(async () => {
+      operation = await save
+    })
+
+    expect(operation!).toEqual({
+      status: 'superseded',
+      path: '/notes/warning.md',
+      warning: 'Saved, but directory sync failed.',
+    })
+    expect(result.current.state).toMatchObject({
+      content: 'newest draft',
+      path: '/notes/warning.md',
+      dirty: true,
+    })
+  })
 })

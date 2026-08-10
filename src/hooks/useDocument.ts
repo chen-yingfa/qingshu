@@ -84,7 +84,7 @@ export type DocumentOperationResult =
   | { status: 'success'; path: string }
   | { status: 'warning'; path: string; message: string }
   | { status: 'canceled' }
-  | { status: 'superseded' }
+  | { status: 'superseded'; path?: string; warning?: string }
   | { status: 'error'; message: string }
 
 export function useDocument() {
@@ -143,7 +143,12 @@ export function useDocument() {
           contentRevision: savedContentRevision,
         })
         if (savedContentRevision !== contentRevision.current) {
-          return { status: 'superseded' } as const
+          return {
+            status: 'superseded',
+            ...(result.warning
+              ? { path: result.path, warning: result.warning }
+              : {}),
+          } as const
         }
         if (result.warning) {
           return {
