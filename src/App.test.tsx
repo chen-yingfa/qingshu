@@ -161,3 +161,83 @@ describe('application safety controls', () => {
     )
   })
 })
+
+describe('commands and operation feedback', () => {
+  it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {
+    const { container } = render(<App />)
+
+    for (const [query, className] of [
+      ['theme', 'theme-dark'],
+      ['focus', 'focus-mode'],
+      ['a4', 'a4-mode'],
+    ]) {
+      fireEvent.keyDown(window, { key: 'p', ctrlKey: true })
+      const input = screen.getByRole('combobox', { name: 'Search commands' })
+      fireEvent.change(input, { target: { value: query } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(container.querySelector('.app-shell')?.classList.contains(className)).toBe(true)
+    }
+  })
+
+  it('wires Ctrl+O, Ctrl+S, and Ctrl+Shift+S to the existing document bridge', async () => {
+    api.openFile.mockResolvedValue({ canceled: true })
+    api.saveFile.mockResolvedValue({ canceled: true })
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
+
+    await waitFor(() => expect(api.openFile).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.saveFile).toHaveBeenCalledTimes(2))
+    expect(api.saveFile.mock.calls[0][0]).toMatchObject({ path: undefined })
+    expect(api.saveFile.mock.calls[1][0]).toMatchObject({ path: undefined })
+  })
+
+  it('exposes file, HTML, and PDF actions in the palette', () => {
+    render(<App />)
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true })
+
+    for (const name of [
+      'New document',
+      'Open file',
+      'Save',
+      'Save as',
+      'Export HTML',
+      'Export PDF',
+    ]) {
+      expect(
+        screen.getByRole('option', { name: new RegExp(`^${name}(?:\\s+Ctrl.*)?$`) }),
+      ).not.toBeNull()
+    }
+  })
+
+  it('shows success and error toasts for bridge operations', async () => {
+    api.saveFile.mockResolvedValue({ canceled: false, path: '/notes/saved.md' })
+    render(<App />)
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    expect((await screen.findByRole('status')).textContent).toContain('Saved saved.md')
+
+    api.exportHtml.mockRejectedValue(new Error('Disk unavailable'))
+    menuListener?.('export-html')
+    expect((await screen.findByRole('alert')).textContent).toContain('Disk unavailable')
+  })
+
+  it('sends a rendered standalone HTML document through the existing bridge', async () => {
+    api.exportHtml.mockResolvedValue({ canceled: false, path: '/exports/note.html' })
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '| A | B |\n| - | - |\n| 1 | 2 |\n\n$E=mc^2$' },
+    })
+
+    menuListener?.('export-html')
+
+    await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    const request = api.exportHtml.mock.calls[0][0] as { html: string }
+    expect(request.html).toContain('<table>')
+    expect(request.html).toContain('class="katex"')
+    expect(request.html).toContain('<meta charset="utf-8">')
+    expect(request.html).toContain('<style>')
+  })
+})

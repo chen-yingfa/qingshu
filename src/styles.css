@@ -386,6 +386,203 @@ button {
   white-space: nowrap;
 }
 
+.palette-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: min(16vh, 120px) 20px 20px;
+  background: rgba(28, 25, 22, 0.38);
+  backdrop-filter: blur(5px);
+  animation: palette-fade 120ms ease-out;
+}
+
+.command-palette {
+  width: min(620px, 100%);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--text));
+  border-radius: 15px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  box-shadow:
+    0 24px 70px rgba(20, 17, 14, 0.28),
+    0 4px 16px rgba(20, 17, 14, 0.14);
+  animation: palette-rise 150ms ease-out;
+}
+
+.palette-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.palette-search-icon {
+  color: var(--accent);
+  font: 24px/1 Georgia, serif;
+  transform: rotate(-18deg);
+}
+
+.palette-search input {
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 16px;
+}
+
+.palette-search input::placeholder {
+  color: var(--muted);
+}
+
+kbd {
+  min-width: 25px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--code);
+  font: 10px/1.25 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.palette-divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.command-list {
+  max-height: min(410px, 56vh);
+  overflow-y: auto;
+  padding: 7px;
+  scrollbar-color: var(--line) transparent;
+}
+
+.command-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.command-item.is-selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.command-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 34px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.palette-hint {
+  display: flex;
+  gap: 16px;
+  padding: 8px 17px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.toast-region {
+  position: fixed;
+  z-index: 40;
+  right: 18px;
+  bottom: 42px;
+  display: flex;
+  width: min(360px, calc(100vw - 36px));
+  flex-direction: column;
+  gap: 9px;
+  pointer-events: none;
+}
+
+.toast {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 10px 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  box-shadow: 0 12px 30px rgba(25, 21, 18, 0.2);
+  font-size: 13px;
+  pointer-events: auto;
+  animation: toast-enter 180ms ease-out;
+}
+
+.toast-mark {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  color: white;
+  background: #57815e;
+  font-weight: 700;
+  place-items: center;
+}
+
+.toast-error .toast-mark {
+  background: #b64b4b;
+}
+
+.toast-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toast button:hover,
+.toast button:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+}
+
+@keyframes palette-fade {
+  from { opacity: 0; }
+}
+
+@keyframes palette-rise {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
 .focus-mode {
   grid-template-rows: 0 0 minmax(0, 1fr) 0;
 }
@@ -461,6 +658,18 @@ button {
   .document-stats span:nth-child(2) {
     display: none;
   }
+
+  .palette-backdrop {
+    padding: 56px 10px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-backdrop,
+  .command-palette,
+  .toast {
+    animation: none;
+  }
 }
 
 @media print {
@@ -468,7 +677,9 @@ button {
   .toolbar,
   .status-bar,
   .exit-focus-button,
-  .edit-block-button {
+  .edit-block-button,
+  .palette-backdrop,
+  .toast-region {
     display: none;
   }
 

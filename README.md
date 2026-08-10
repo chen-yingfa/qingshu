@@ -1,89 +1,107 @@
 # 轻书 Qingshu
 
-一个现代的，简约的 Markdown 编辑器给 Windows，基于 Vue + Electron + TypeScript。
+Qingshu is a lightweight desktop Markdown editor focused on clean writing, live
+preview, and practical CJK input. It is built with React, TypeScript, Vite, and
+Electron. The active application does not use the legacy Vue sources still retained
+in the repository.
 
-## How to Run?
+## Features
 
-Install node and electron, then execute:
+- Source-backed block editing with sanitized live preview.
+- GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks, and
+  footnotes.
+- Inline and display mathematics rendered with KaTeX.
+- Light/dark themes, distraction-free focus mode, and an A4 page preview.
+- Markdown open/save/save-as through a sandboxed Electron preload bridge.
+- Attractive A4 PDF export through Chromium.
+- Complete UTF-8 HTML export with rendered GFM/KaTeX and all document styling
+  inlined; it has no stylesheet or font-network dependency.
+- Fuzzy, keyboard-accessible command palette and dismissible success/error toasts.
+- Dirty-document confirmation for New, Open, native window close, and application
+  quit.
+- Local-only UI assets and no UI framework.
 
-```shell
+## CJK behavior
+
+Qingshu understands Han, Hiragana, Katakana, and Hangul text. It uses
+`Intl.Segmenter` where available for document statistics and Ctrl+Arrow word
+movement. Input normalization converts paired `￥…￥` to `$…$`, paired `·…·` to
+inline code, line-leading `》 ` to `> `, and straight quoted CJK text to curly quotes.
+Normalization waits until IME composition ends and preserves the caret.
+
+Automatic CJK spacing is opt-in from the toolbar or command palette. When enabled,
+it inserts spaces at CJK/Latin-letter or CJK/digit boundaries as editing continues.
+Normalization and spacing deliberately leave fenced/inline code, math, and link/image
+destinations unchanged.
+
+## Keyboard shortcuts
+
+`Cmd` may replace `Ctrl` for file and palette shortcuts on macOS.
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+P` | Open the command palette |
+| `Ctrl+N` | New document |
+| `Ctrl+O` | Open Markdown |
+| `Ctrl+S` | Save |
+| `Ctrl+Shift+S` | Save as |
+| `Escape` | Close the command palette or leave focus mode |
+| `↑` / `↓`, `Enter`, `Escape` | Navigate, run, or dismiss the palette |
+| `Ctrl+←` / `Ctrl+→` | Move by CJK-aware word boundaries in the editor |
+
+Theme, focus mode, A4 preview, automatic CJK spacing, HTML export, and PDF export are
+available in the command palette. Formatting controls are also available in the
+toolbar.
+
+## Architecture
+
+- `src/App.tsx` owns application commands, shortcuts, view state, notifications,
+  exports, and the renderer side of the close handshake.
+- `src/components/LiveEditor.tsx` maintains exact Markdown source while rendering
+  inactive blocks through the shared sanitized Markdown pipeline.
+- `src/hooks/useDocument.ts` owns the document reducer and open/save workflows.
+- `src/markdown/` contains GFM/KaTeX rendering and CJK transforms/statistics.
+- `electron/preload/` exposes the narrow typed `window.qingshu` API.
+- `electron/main/` validates IPC senders, performs native file/print operations, and
+  retains sole authority over window/application closing.
+
+Rendered HTML is never used as document state. The Markdown source remains canonical.
+
+## Setup and development
+
+Requirements: Node.js 22.12 or newer and npm.
+
+```sh
+npm ci
 npm run dev
 ```
 
-## 为何再一个 Markdown 编辑器？
+Useful checks:
 
-因为现有编辑器没有一个符合一下所有要求：
+```sh
+npm test
+npm run typecheck
+```
 
-- 简约：不要知识库、zettelkasten 等无法导出纯 Markdown 的功能。
-- 支持 Windows。
-- 开源。
-- 现代且简约的用户界面。
-- 支持 GitHub Flavored Markdown + LaTeX（包括行内公式）。
-- 导出（好看的）PDF。
-  - 代码高亮、脚注等。
-  - VSCode 的 Markdown PDF 插件太丑了。
-- bug 少（MarkText 太多 bug 了）
-- 中文友好。
-  - 自动转换 Markdown 语句对应的「中文字符」：
-    - 比如，输入 `》[space]`、`￥{something}￥`、`·{something}·`，应自动转换成 `>[space]`, `${something}$`、`` `{something}` ``.
-  - 自动判断是否用全角引号。
-  - 具有中文分词能力，按下 CTRL 时移动光标和双击文字时应该能正确选中一个中文词。
-  - 可以自动在汉字和拉丁文字之间添加空格。
-  - 等宽字符中，中文英文可以对齐。
-- 支持 Marp/Slidev。
-- 所见即所得。
+Create production renderer/main/preload bundles and a platform package:
 
-### 跟主流编辑器的比较
+```sh
+npm run build
+```
 
-要求：支持 Windows，是免费。
+Artifacts are written under `release/2.1.0/`. The checked-in builder configuration
+defines a Windows x64 NSIS installer and macOS DMG; electron-builder uses its platform
+default where no explicit target is configured.
 
-| 软件      | 开源 | 中文友好 | 导出 PDF | 轻  | Bug 少 | A4 预览 | 代码友好 | GFM |
-| ----      | ---- | -------- | -------- | --- | ------ | ------- | -------- | --- |
-| Typora    | ❌   |    ❌    |          |     |        |  ❌     |          |   |
-| Obsidian  | ❌   |    ❌    |          |     |        |  ❌     |          | ❌ |
-| MarkText  |      |    ❌    |          |     | ❌     |  ❌     |          | ❌ |
-| VSCode    |      |    ❌    |  插件    | ❌  |        |  ❌     |          | 插件 |
-| Notion    | ❌   |    ❌    |    ❌    | ❌  |        |  ❌     |     ❌   | ❌ |
-| Zettlr    |      |    ❌    |          |     |  ❌    |  ❌     |          |    |
+## Current limitations
 
-> 值得注意的是，很多导出的 PDF 都巨丑，而且没有 A4 预览的话，其实严格来说都不算是所见即所得。
-
-
-### 关于主流编辑器的更多细节
-
-- Typora:
-  - Not open-source.
-  - Not free of charge.
-  - Poor support of CJK characters.
-  - No command palette.
-- Obsidian
-  - Not open-source.
-  - Not minimalistic.
-  - Use knowledge base (with software-custom syntax).
-  - Notes must exist inside specified folders.
-- MarkText
-  - Too buggy and large.
-  - Poor support for CJK characters.
-  - No longer maintained.
-- Notion (and most Notion-like software):
-  - Not a markdown editor.
-  - Not open-source.
-  - Support too much non-markdown features.
-  - Poor support of code, CJK characters, etc.
-  - No custom styling.
-  - PDF export is ugly.
-- VSCode: 
-  - Not all features are supported (eg. inline math, pasting image, table manipulation, etc. although you can install extensions to support it).
-  - Not really WYSIWYG.
-  - Poor support for CJK characters (word segmentation and alignment of half-width and full-width monospace characters)
-  - Too large if you only want to edit a markdown file.
-
-## Roadmap
-
-- [x] 实时渲染，所见即所得。
-- [x] 支持 GFM 和 KaTeX。
-- [ ] Block editing/editing.
-- [ ] Acrylic/Mica material 和 Fluent 设计.
-- [ ] 导出 HTML
-- [ ] 导出 PDF
-- [ ] 命令面板
+- Qingshu edits one document/window at a time and has no autosave, tabs, workspace,
+  plugin, or knowledge-base layer.
+- Syntax highlighting, table manipulation, image importing/embedding, and
+  Marp/Slidev-specific tooling are not implemented.
+- HTML styling and math rendering are self-contained, but images referenced by the
+  Markdown remain referenced URLs or file paths rather than embedded data.
+- PDF appearance relies on the host Chromium print engine and installed fallback CJK
+  fonts.
+- Native dialogs, printing, IME ordering, and window chrome can vary by operating
+  system and benefit from packaged-app smoke testing.

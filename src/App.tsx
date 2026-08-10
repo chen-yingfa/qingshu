@@ -1,26 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  CommandPalette,
+  type PaletteCommand,
+} from './components/CommandPalette'
 import { LiveEditor, type FormatCommand } from './components/LiveEditor'
 import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
 import { TitleBar } from './components/TitleBar'
+import { ToastRegion, type ToastMessage } from './components/Toast'
 import { Toolbar } from './components/Toolbar'
+import { createHtmlDocument } from './export/html'
 import { useDocument } from './hooks/useDocument'
 import { spaceCjkLatin } from './markdown/cjk'
-import { renderMarkdown } from './markdown/markdown'
 import type { MenuCommand } from './types/electron'
 
-function htmlDocument(body: string): string {
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Qingshu export</title>
-<style>body{max-width:760px;margin:48px auto;padding:0 28px;color:#24221f;font:17px/1.85 ui-serif,"Noto Serif CJK SC","Songti SC",serif}img{max-width:100%}pre{overflow:auto;padding:1em;background:#f5f3ef;border-radius:8px}code{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace}blockquote{border-left:3px solid #a49379;margin-left:0;padding-left:1.2em;color:#67615a}</style>
-</head>
-<body>${body}</body>
-</html>`
+function filename(path: string): string {
+  return path.split(/[\\/]/).at(-1) || path
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function waitForPaint(): Promise<void> {
@@ -42,9 +42,21 @@ export default function App() {
   const [a4, setA4] = useState(false)
   const [autoSpacing, setAutoSpacing] = useState(false)
   const [printPreview, setPrintPreview] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [toasts, setToasts] = useState<ToastMessage[]>([])
+  const toastId = useRef(0)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
+
+  const addToast = useCallback((tone: ToastMessage['tone'], message: string) => {
+    const id = ++toastId.current
+    setToasts((current) => [...current.slice(-2), { id, tone, message }])
+  }, [])
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id))
+  }, [])
 
   const canDiscard = useCallback(
     () =>
@@ -57,29 +69,55 @@ export default function App() {
     async (command: MenuCommand) => {
       switch (command) {
         case 'new':
-          if (canDiscard()) newDocument()
+          if (canDiscard()) {
+            newDocument()
+            addToast('success', 'Created a new document')
+          }
           break
-        case 'open':
-          if (canDiscard()) await openDocument()
+        case 'open': {
+          if (!canDiscard()) break
+          const result = await openDocument()
+          if (result.status === 'success') {
+            addToast('success', `Opened ${filename(result.path)}`)
+          } else if (result.status === 'error') {
+            addToast('error', result.message)
+          }
           break
-        case 'save':
-          await saveDocument()
+        }
+        case 'save': {
+          const result = await saveDocument()
+          if (result.status === 'success') {
+            addToast('success', `Saved ${filename(result.path)}`)
+          } else if (result.status === 'error') {
+            addToast('error', result.message)
+          }
           break
-        case 'save-as':
-          await saveDocument(true)
+        }
+        case 'save-as': {
+          const result = await saveDocument(true)
+          if (result.status === 'success') {
+            addToast('success', `Saved ${filename(result.path)}`)
+          } else if (result.status === 'error') {
+            addToast('error', result.message)
+          }
           break
+        }
         case 'export-html': {
           try {
-            const body = await renderMarkdown(state.content)
-            await window.qingshu.exportHtml({
-              path: state.path,
-              html: htmlDocument(body),
+            const result = await window.qingshu.exportHtml({
+              html: await createHtmlDocument(state.content, state.path),
             })
+            if (!result.canceled) {
+              dispatch({ type: 'error', message: null })
+              addToast('success', `Exported ${filename(result.path)}`)
+            }
           } catch (error) {
+            const message = errorMessage(error)
             dispatch({
               type: 'error',
-              message: error instanceof Error ? error.message : String(error),
+              message,
             })
+            addToast('error', message)
           }
           break
         }
@@ -87,12 +125,18 @@ export default function App() {
           setPrintPreview(true)
           try {
             await waitForPaint()
-            await window.qingshu.exportPdf(state.path ? { path: state.path } : undefined)
+            const result = await window.qingshu.exportPdf()
+            if (!result.canceled) {
+              dispatch({ type: 'error', message: null })
+              addToast('success', `Exported ${filename(result.path)}`)
+            }
           } catch (error) {
+            const message = errorMessage(error)
             dispatch({
               type: 'error',
-              message: error instanceof Error ? error.message : String(error),
+              message,
             })
+            addToast('error', message)
           } finally {
             setPrintPreview(false)
           }
@@ -100,6 +144,7 @@ export default function App() {
       }
     },
     [
+      addToast,
       canDiscard,
       dispatch,
       newDocument,
@@ -108,6 +153,95 @@ export default function App() {
       state.content,
       state.path,
     ],
+  )
+
+  const toggleOption = useCallback(
+    (option: 'dark' | 'focus' | 'a4' | 'spacing') => {
+      if (option === 'dark') setDark((value) => !value)
+      if (option === 'focus') setFocus((value) => !value)
+      if (option === 'a4') setA4((value) => !value)
+      if (option === 'spacing') {
+        setAutoSpacing((value) => {
+          const enabled = !value
+          if (enabled) {
+            const spaced = spaceCjkLatin(state.content)
+            if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
+          }
+          return enabled
+        })
+      }
+    },
+    [dispatch, state.content],
+  )
+
+  const commands = useMemo<PaletteCommand[]>(
+    () => [
+      {
+        id: 'new',
+        label: 'New document',
+        shortcut: 'Ctrl+N',
+        keywords: ['blank', 'file'],
+        run: () => runCommand('new'),
+      },
+      {
+        id: 'open',
+        label: 'Open file',
+        shortcut: 'Ctrl+O',
+        keywords: ['load', 'document'],
+        run: () => runCommand('open'),
+      },
+      {
+        id: 'save',
+        label: 'Save',
+        shortcut: 'Ctrl+S',
+        keywords: ['write', 'document'],
+        run: () => runCommand('save'),
+      },
+      {
+        id: 'save-as',
+        label: 'Save as',
+        shortcut: 'Ctrl+Shift+S',
+        keywords: ['copy', 'rename', 'document'],
+        run: () => runCommand('save-as'),
+      },
+      {
+        id: 'export-html',
+        label: 'Export HTML',
+        keywords: ['web', 'standalone', 'document'],
+        run: () => runCommand('export-html'),
+      },
+      {
+        id: 'export-pdf',
+        label: 'Export PDF',
+        keywords: ['print', 'a4', 'document'],
+        run: () => runCommand('export-pdf'),
+      },
+      {
+        id: 'theme',
+        label: 'Toggle color theme',
+        keywords: ['dark', 'light', 'appearance'],
+        run: () => toggleOption('dark'),
+      },
+      {
+        id: 'focus',
+        label: 'Toggle focus mode',
+        keywords: ['distraction', 'zen', 'view'],
+        run: () => toggleOption('focus'),
+      },
+      {
+        id: 'a4',
+        label: 'Toggle A4 preview',
+        keywords: ['page', 'paper', 'view'],
+        run: () => toggleOption('a4'),
+      },
+      {
+        id: 'spacing',
+        label: 'Toggle automatic CJK spacing',
+        keywords: ['chinese', 'latin', 'space', '中文'],
+        run: () => toggleOption('spacing'),
+      },
+    ],
+    [runCommand, toggleOption],
   )
 
   useEffect(() => window.qingshu.onMenuCommand((command) => void runCommand(command)), [
@@ -124,12 +258,17 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && focus) {
+      if (event.key === 'Escape' && focus && !paletteOpen) {
         event.preventDefault()
         setFocus(false)
         return
       }
       if (!(event.ctrlKey || event.metaKey)) return
+      if (event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
       const command =
         event.key.toLowerCase() === 's'
           ? event.shiftKey
@@ -147,23 +286,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [focus, runCommand])
-
-  const toggleOption = (option: 'dark' | 'focus' | 'a4' | 'spacing') => {
-    if (option === 'dark') setDark((value) => !value)
-    if (option === 'focus') setFocus((value) => !value)
-    if (option === 'a4') setA4((value) => !value)
-    if (option === 'spacing') {
-      setAutoSpacing((value) => {
-        const enabled = !value
-        if (enabled) {
-          const spaced = spaceCjkLatin(state.content)
-          if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
-        }
-        return enabled
-      })
-    }
-  }
+  }, [focus, paletteOpen, runCommand])
 
   return (
     <div
@@ -215,6 +338,10 @@ export default function App() {
         </div>
       </main>
       <StatusBar content={state.content} error={state.error} path={state.path} />
+      {paletteOpen && (
+        <CommandPalette commands={commands} onDismiss={() => setPaletteOpen(false)} />
+      )}
+      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </div>
   )
 }

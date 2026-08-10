@@ -52,6 +52,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export type DocumentOperationResult =
+  | { status: 'success'; path: string }
+  | { status: 'canceled' }
+  | { status: 'error'; message: string }
+
 export function useDocument() {
   const [state, dispatch] = useReducer(documentReducer, initialDocumentState)
 
@@ -62,15 +67,17 @@ export function useDocument() {
   const openDocument = useCallback(async () => {
     try {
       const result = await window.qingshu.openFile()
-      if (!result.canceled) {
-        dispatch({
-          type: 'load',
-          content: result.content ?? '',
-          path: result.path,
-        })
-      }
+      if (result.canceled) return { status: 'canceled' } as const
+      dispatch({
+        type: 'load',
+        content: result.content ?? '',
+        path: result.path,
+      })
+      return { status: 'success', path: result.path } as const
     } catch (error) {
-      dispatch({ type: 'error', message: errorMessage(error) })
+      const message = errorMessage(error)
+      dispatch({ type: 'error', message })
+      return { status: 'error', message } as const
     }
   }, [])
 
@@ -82,11 +89,13 @@ export function useDocument() {
           content,
           path: saveAs ? undefined : state.path,
         })
-        if (!result.canceled) {
-          dispatch({ type: 'saved', content, path: result.path })
-        }
+        if (result.canceled) return { status: 'canceled' } as const
+        dispatch({ type: 'saved', content, path: result.path })
+        return { status: 'success', path: result.path } as const
       } catch (error) {
-        dispatch({ type: 'error', message: errorMessage(error) })
+        const message = errorMessage(error)
+        dispatch({ type: 'error', message })
+        return { status: 'error', message } as const
       }
     },
     [state.content, state.path],
