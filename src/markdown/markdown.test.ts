@@ -143,15 +143,15 @@ describe('renderMarkdown', () => {
 
   it('uses collision-resistant HTML-safe IDs for hostile footnote labels', async () => {
     const source = [
-      'Quote[^"><img src=x onerror=alert(1)>].',
+      'Quote[^"><svg/onload=alert(1)>].',
       'Unicode[^雪].',
       'Dash[^a-b].',
-      'Space[^a b].',
+      'Underscore[^a_b].',
       '',
-      '[^"><img src=x onerror=alert(1)>]: Hostile.',
+      '[^"><svg/onload=alert(1)>]: Hostile.',
       '[^雪]: Snow.',
       '[^a-b]: Dash.',
-      '[^a b]: Space.',
+      '[^a_b]: Underscore.',
     ].join('\n')
     const model = parseDocument(source)
     const body = (
@@ -164,10 +164,11 @@ describe('renderMarkdown', () => {
     const footnotes = await renderDocumentFootnotes(model.renderContext)
     const html = body + footnotes
 
+    expect(model.renderContext.references).toHaveLength(4)
     expect(canonicalFootnoteId('雪')).toBe('cp-96ea')
-    expect(canonicalFootnoteId('a-b')).not.toBe(canonicalFootnoteId('a b'))
-    expect(html).not.toContain('<img')
-    expect(html).not.toContain('onerror')
+    expect(canonicalFootnoteId('a-b')).not.toBe(canonicalFootnoteId('a_b'))
+    expect(html).not.toContain('<svg')
+    expect(html).not.toContain('onload')
     expect(html).not.toContain('id="user-content-fnref-&quot;')
 
     const targets = [...html.matchAll(/data-footnote-ref=""[^>]*|<a href="(#[^"]+)"/gu)]
