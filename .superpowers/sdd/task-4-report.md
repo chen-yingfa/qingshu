@@ -191,3 +191,169 @@ The report is committed separately after these implementation commits.
   downloaded or converted to data URIs.
 - Native dialogs, packaged printing, IME event ordering, and custom chrome were
   covered by automated boundaries but not manually smoke-tested on each desktop OS.
+
+## Important finding remediation
+
+### Scope
+
+- `src/components/LiveEditor.tsx` now renders print mode from the entire canonical
+  Markdown source in one sanitized render. Footnote definitions and references are no
+  longer separated by editor block boundaries.
+- `src/markdown/markdown.ts` preserves the renderer's generated footnote IDs through
+  sanitization, so sanitized reference targets resolve.
+- `src/export/html.ts` exports KaTeX-generated standards-based MathML, hides the
+  font-dependent visual span, and contains no KaTeX font CSS or asset references.
+  The application uses the same MathML presentation and no longer bundles KaTeX font
+  files.
+- `src/print/readiness.ts` waits for the committed full-document render,
+  `document.fonts.ready` when available, and the load/error completion of every
+  current image before renderer IPC requests PDF generation.
+- `src/components/CommandPalette.tsx` centralizes arrows, Enter, Escape, and Tab
+  handling at the dialog boundary, traps forward/reverse focus, and restores the
+  element that opened the palette.
+- `src/types/electron.d.ts`, `electron/preload/index.ts`, and
+  `electron/main/index.ts` remove HTML/PDF export paths from the renderer contract.
+  Export handlers always display native save dialogs and every IPC handler validates
+  the arity, type, allowed values, and object keys of its payload at runtime.
+- Command shortcuts display `⌘`/`⇧` labels on Apple platforms and Ctrl labels
+  elsewhere. Toast close buttons include their notification message in the accessible
+  name.
+- `README.md` now describes the MathML and font-independent export behavior.
+
+### TDD red evidence
+
+Command:
+
+```text
+npm test -- src/components/LiveEditor.dom.test.tsx src/export/html.test.ts src/print/readiness.test.ts src/components/CommandPalette.test.tsx src/components/Toast.test.tsx src/App.test.tsx electron/main/index.test.ts
+```
+
+Observed before remediation:
+
+```text
+FAIL  src/components/CommandPalette.test.tsx (8 tests | 3 failed)
+  traps Tab and Shift+Tab within every dialog control
+  handles arrows from an option and returns focus to the combobox
+  restores focus to the opener after dismissal
+
+FAIL  src/print/readiness.test.ts
+  Failed to resolve import "./readiness"
+
+FAIL  src/App.test.tsx (13 tests | 2 failed)
+  expected 3 rendered blocks to have a length of 1
+  TypeError: formatShortcut is not a function
+
+FAIL  src/export/html.test.ts (4 tests | 2 failed)
+  cross-block footnote target ID did not resolve
+  standalone MathML CSS/font-independence assertion failed
+
+FAIL  electron/main/index.test.ts (17 tests | 2 failed)
+  renderer HTML path bypassed the native dialog
+  malformed IPC payloads resolved instead of rejecting
+
+FAIL  src/components/LiveEditor.dom.test.tsx (7 tests | 1 failed)
+  full-source footnote reference was rendered as literal Markdown
+
+FAIL  src/components/Toast.test.tsx (2 tests | 2 failed)
+  notification dismissal controls had indistinguishable names
+
+Test Files  7 failed (7)
+Tests  12 failed | 39 passed (51)
+Exit code: 1
+```
+
+This red run also exposed a pre-existing sanitization mismatch: generated footnote
+references linked to `#user-content-fn-*`, while sanitization prefixed the definition
+ID a second time. The remediation keeps generated IDs intact; raw HTML remains
+disabled before sanitization.
+
+### Targeted green evidence
+
+The same command after implementation:
+
+```text
+Test Files  7 passed (7)
+Tests  53 passed (53)
+Duration  2.00s
+Exit code: 0
+```
+
+Added coverage includes full-document footnotes in print and HTML, complex MathML,
+font-asset exclusion, render/font/image readiness ordering, image error completion,
+focus wrap/restoration, dialog-wide arrows/Escape, platform labels, distinct toast
+controls, export-path rejection, and malformed payload rejection for every IPC
+channel.
+
+### Exact final verification
+
+Command:
+
+```text
+npm test && npm run typecheck && npx vite build && npx electron-builder
+```
+
+Result:
+
+```text
+> qingshu@2.1.0 test
+> vitest run
+
+Test Files  11 passed (11)
+Tests  80 passed (80)
+Duration  2.34s
+
+> qingshu@2.1.0 typecheck
+> tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false
+
+Renderer: 325 modules transformed; built in 177ms
+  dist/assets/index-Cp1jcHVS.css  10.24 kB (gzip 3.15 kB)
+  dist/assets/index-kTBsCkhN.js  652.05 kB (gzip 199.76 kB)
+Main: 2 modules transformed; built in 9ms
+Preload: 2 modules transformed; built in 6ms
+Packaged Linux x64:
+  release/2.1.0/linux-unpacked
+  release/2.1.0/qingshu_2.1.0_amd64.snap
+  release/2.1.0/qingshu-2.1.0.AppImage
+
+Exit code: 0
+```
+
+No KaTeX `.woff`, `.woff2`, or `.ttf` assets are emitted after switching visual math
+to MathML.
+
+### Commit
+
+- `b0b475c` — `Harden document exports and palette accessibility`
+
+This appended evidence is committed separately without amending prior commits.
+
+### Self-review
+
+- Print readiness cannot resolve until the full-source renderer's post-commit layout
+  effect signals success. Render failures reject the barrier and follow the existing
+  error-toast/finally restoration path.
+- Font readiness is feature-detected. Images already complete are accepted; pending
+  images resolve on either load or error, preventing broken images from hanging an
+  export after their terminal state.
+- PDF IPC is invoked only after readiness; the main process still owns native path
+  selection and `printToPDF`.
+- Sanitized full-document rendering is used for print and the existing full-source
+  sanitized pipeline is used for HTML, preserving one source of rendering semantics.
+- MathML remains exposed to accessibility APIs. Only KaTeX's duplicate
+  `aria-hidden` visual HTML is hidden with standalone CSS.
+- Export payloads reject unknown keys, wrong types, extra arguments, invalid actions,
+  and non-boolean close responses before side effects.
+- The dirty-close handshake itself is unchanged and all main/renderer lifecycle tests
+  remain green.
+
+### Remaining concerns
+
+- Vite still reports the renderer JavaScript chunk at 652.05 kB minified, above its
+  500 kB advisory, although removing KaTeX font styling reduced JavaScript and CSS
+  output and eliminated dozens of font files.
+- electron-builder still reports duplicate transitive dependency references and
+  missing Linux desktop name/category/icon metadata. Packaging completes.
+- Referenced Markdown images remain external in HTML exports; styling and equations
+  are self-contained.
+- Native printing, MathML presentation, IME ordering, and custom chrome were not
+  manually smoke-tested across all target operating systems.
