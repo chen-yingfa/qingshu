@@ -198,10 +198,12 @@ export function LiveEditor({
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(active.source)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
   const handledFormatRef = useRef(0)
+  contentRef.current = content
 
   useEffect(() => {
     if (previousActiveRef.current !== safeActive) {
@@ -226,7 +228,13 @@ export function LiveEditor({
       textarea.selectionEnd,
     )
     setDraft(result.value)
-    onChange(replaceBlockSource(content, rangeRef.current, result.value))
+    const nextContent = replaceBlockSource(
+      contentRef.current,
+      rangeRef.current,
+      result.value,
+    )
+    contentRef.current = nextContent
+    onChange(nextContent)
     rangeRef.current.end = rangeRef.current.start + result.value.length
     requestAnimationFrame(() => {
       textarea.focus()
@@ -236,8 +244,9 @@ export function LiveEditor({
 
   const commitDraft = (value: string) => {
     setDraft(value)
-    const nextContent = replaceBlockSource(content, rangeRef.current, value)
+    const nextContent = replaceBlockSource(contentRef.current, rangeRef.current, value)
     rangeRef.current.end = rangeRef.current.start + value.length
+    contentRef.current = nextContent
     onChange(nextContent)
   }
 
@@ -265,12 +274,15 @@ export function LiveEditor({
 
     if (event.key === 'Backspace' && textarea.selectionStart === 0 && safeActive > 0) {
       event.preventDefault()
-      const merged = mergeBlockAtStart(content, rangeRef.current.start)
+      const merged = mergeBlockAtStart(contentRef.current, rangeRef.current.start)
+      const previousStart = blocks[safeActive - 1].start
+      contentRef.current = merged.content
       onChange(merged.content)
       onActiveBlockChange(safeActive - 1)
       requestAnimationFrame(() => {
         const input = textareaRef.current
-        input?.setSelectionRange(merged.caret, merged.caret)
+        const localCaret = Math.max(0, merged.caret - previousStart)
+        input?.setSelectionRange(localCaret, localCaret)
       })
       return
     }
