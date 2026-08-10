@@ -17,7 +17,7 @@ Task 4 is implemented without pushing the branch.
   accessible semantics, manual dismissal, and automatic expiry.
 - `src/components/Toast.test.tsx` — toast semantics and lifecycle coverage.
 - `src/export/html.ts` — complete UTF-8 document generation with sanitized rendered
-  GFM/KaTeX, escaped title, embedded KaTeX layout rules, and editorial/print CSS.
+  GFM, accessible MathML, an escaped title, and standalone editorial/print CSS.
 - `src/export/html.test.ts` — standalone-document, no-remote-style, GFM, and KaTeX
   export assertions.
 - `src/App.tsx` — shared command routing, Ctrl/Cmd shortcuts, palette command list,
@@ -167,8 +167,8 @@ The report is committed separately after these implementation commits.
 - HTML has doctype, language, UTF-8 metadata, escaped source-derived title, viewport,
   rendered sanitized body, and one inline style block. Tests reject stylesheet links,
   imports, font URLs, and raw math Markdown.
-- KaTeX styling is bundled locally for the app. Export strips font-face URLs while
-  preserving KaTeX layout CSS and fallback font families.
+- KaTeX produces standards-based MathML for the app and export. The duplicate visual
+  span is hidden, and neither path bundles or references KaTeX font assets.
 - Fuzzy label matches outrank keyword-only matches, so `a4` selects the view command,
   while keyword searches such as `web` still find HTML export.
 - Palette focus starts in the combobox. Arrow selection wraps, Enter runs, Escape
@@ -181,9 +181,9 @@ The report is committed separately after these implementation commits.
 
 ## Concerns
 
-- Vite reports the renderer chunk at 681.71 kB minified, above its 500 kB advisory.
-  The Markdown/KaTeX stack is the main contributor; code splitting remains future
-  optimization work.
+- Vite reports the current renderer chunk at 653.21 kB minified, above its 500 kB
+  advisory. The Markdown/KaTeX runtime remains the main contributor; code splitting
+  remains future optimization work.
 - electron-builder reports duplicate transitive dependency references and missing
   Linux `desktopName`, category, and custom icon metadata. Packaging still completes,
   but Linux shell integration/branding should be configured separately.
@@ -357,3 +357,110 @@ This appended evidence is committed separately without amending prior commits.
   are self-contained.
 - Native printing, MathML presentation, IME ordering, and custom chrome were not
   manually smoke-tested across all target operating systems.
+
+## Final review closure
+
+### Changes
+
+- `src/print/readiness.ts` applies one 15-second bound to pending image readiness.
+  Load and error both count as terminal states. Timeout and abort paths remove every
+  image and signal listener before rejecting with a user-facing error message.
+- Render and font readiness are abortable as well. Image readiness starts immediately
+  after the committed full-document render and runs alongside font readiness, so no
+  image terminal event is missed while fonts settle.
+- `src/App.tsx` owns exactly one active PDF operation. A rapid duplicate command
+  cannot replace its barrier or controller and produces the existing error toast:
+  `PDF export is already in progress.`
+- Component teardown aborts pending readiness. Normal completion aborts only after
+  readiness/native export is finished and clears the active operation by identity.
+- `src/print/readiness.test.ts` covers a never-settling image timeout and explicit
+  cancellation. `src/App.test.tsx` covers a duplicate command while native PDF export
+  is pending and verifies only one bridge invocation.
+
+### TDD red evidence
+
+Command:
+
+```text
+npm test -- src/print/readiness.test.ts src/App.test.tsx
+```
+
+Observed before implementation:
+
+```text
+FAIL  src/App.test.tsx
+  rejects a rapid duplicate PDF command without replacing the active export
+  Unable to find: PDF export is already in progress.
+
+FAIL  src/print/readiness.test.ts
+  rejects after a bounded timeout when an image never settles
+  Test timed out in 5000ms
+
+FAIL  src/print/readiness.test.ts
+  cancels pending readiness and removes image listeners
+  Test timed out in 5000ms
+
+Test Files  2 failed (2)
+Tests  3 failed | 15 passed (18)
+Exit code: 1
+```
+
+### Focused green evidence
+
+The same focused command after implementation:
+
+```text
+Test Files  2 passed (2)
+Tests  18 passed (18)
+Duration  1.36s
+Exit code: 0
+```
+
+### Exact final verification
+
+Command:
+
+```text
+npm test && npm run typecheck && npx vite build
+```
+
+Result:
+
+```text
+> qingshu@2.1.0 test
+> vitest run
+
+Test Files  11 passed (11)
+Tests  83 passed (83)
+Duration  2.23s
+
+> qingshu@2.1.0 typecheck
+> tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false
+
+Renderer: 325 modules transformed; built in 184ms
+  dist/assets/index-Cp1jcHVS.css  10.24 kB (gzip 3.15 kB)
+  dist/assets/index-DuOR99A8.js  653.21 kB (gzip 200.18 kB)
+Main: 2 modules transformed; built in 9ms
+Preload: 2 modules transformed; built in 6ms
+
+Exit code: 0
+```
+
+### Commit
+
+- `65915bc` — `Bound and serialize PDF export readiness`
+
+This report correction and final evidence are committed separately without amending
+prior commits.
+
+### Final self-review and concerns
+
+- A pending image can no longer strand PDF export indefinitely. Its timeout rejection
+  follows the same `runCommand` catch path that updates the status error and adds an
+  error toast, while `finally` restores edit mode.
+- A duplicate command is rejected synchronously before changing preview state or
+  creating a second barrier.
+- The prior report's claims about bundled KaTeX CSS/fonts and 681.71 kB current output
+  were stale and are corrected above.
+- The remaining build concern is Vite's renderer chunk-size advisory. Native PDF
+  printing was not manually smoke-tested on every target OS in this environment.
