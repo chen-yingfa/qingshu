@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   stat: vi.fn(),
+  realpath: vi.fn(),
   open: vi.fn(),
   rename: vi.fn(),
   unlink: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('node:fs/promises', () => ({
   readFile: mocks.readFile,
   writeFile: mocks.writeFile,
   stat: mocks.stat,
+  realpath: mocks.realpath,
   open: mocks.open,
   rename: mocks.rename,
   unlink: mocks.unlink,
@@ -127,6 +129,7 @@ describe('desktop IPC', () => {
       mtimeMs: 100,
       size: 6,
     })
+    mocks.realpath.mockImplementation(async (path: string) => path)
     mocks.open.mockImplementation(async (path: string, flags: string) => {
       if (flags === 'wx') return mocks.tempHandle
       if (path.includes('.md')) return mocks.sourceHandle
@@ -169,6 +172,28 @@ describe('desktop IPC', () => {
     ])
   })
 
+  it.each(['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'])(
+    'suppresses Windows directory-sync %s as an unsupported operation',
+    (code) => {
+      const error = Object.assign(new Error(`unsupported ${code}`), { code })
+      expect(main.directorySyncWarning(error, 'win32')).toBeUndefined()
+    },
+  )
+
+  it('keeps unexpected Windows directory-sync failures as warnings', () => {
+    const error = Object.assign(new Error('I/O failure'), { code: 'EIO' })
+    expect(main.directorySyncWarning(error, 'win32')).toBe(
+      'Saved, but directory sync failed: I/O failure',
+    )
+  })
+
+  it('does not suppress unsupported-operation codes on other platforms', () => {
+    const error = Object.assign(new Error('invalid operation'), { code: 'EINVAL' })
+    expect(main.directorySyncWarning(error, 'linux')).toBe(
+      'Saved, but directory sync failed: invalid operation',
+    )
+  })
+
   it('opens a selected Markdown file as UTF-8', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/hello.md'] })
     mocks.sourceHandle.readFile.mockResolvedValue('# 你好')
@@ -182,6 +207,21 @@ describe('desktop IPC', () => {
     expect(mocks.sourceHandle.readFile).toHaveBeenCalledWith('utf8')
     expect(mocks.sourceHandle.stat).toHaveBeenCalledTimes(2)
     expect(mocks.sourceHandle.close).toHaveBeenCalledOnce()
+  })
+
+  it('opens and authorizes a symlink selection by its physical target', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/links/note.md'],
+    })
+    mocks.realpath.mockResolvedValueOnce('/real/note.md')
+
+    await expect(mocks.handlers.get('qingshu:open-file')?.(event)).resolves.toEqual({
+      canceled: false,
+      path: '/real/note.md',
+      content: '# Hello',
+    })
+    expect(mocks.open).toHaveBeenCalledWith('/real/note.md', 'r')
   })
 
   it('rejects content that changes while the opened handle is being read', async () => {
@@ -433,12 +473,20 @@ describe('desktop IPC', () => {
     expect(mocks.rename).not.toHaveBeenCalled()
   })
 
-  it('atomically installs one queue before concurrent Save As initialization', async () => {
+  it('unifies concurrent Save As aliases under one physical-path queue', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
-    mocks.showSaveDialog.mockResolvedValue({
-      canceled: false,
-      filePath: '/notes/shared-save-as.md',
-    })
+    mocks.showSaveDialog
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePath: '/links-a/shared-save-as.md',
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePath: '/links-b/shared-save-as.md',
+      })
+    mocks.realpath
+      .mockResolvedValueOnce('/real/shared-save-as.md')
+      .mockResolvedValueOnce('/real/shared-save-as.md')
     let releaseInitialStat!: () => void
     const initialStat = new Promise<void>((resolve) => {
       releaseInitialStat = resolve
@@ -474,10 +522,48 @@ describe('desktop IPC', () => {
 
     releaseInitialStat()
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { canceled: false, path: '/notes/shared-save-as.md' },
-      { canceled: false, path: '/notes/shared-save-as.md' },
+      { canceled: false, path: '/real/shared-save-as.md' },
+      { canceled: false, path: '/real/shared-save-as.md' },
     ])
     expect(writes).toEqual(['first', 'second'])
+  })
+
+  it('saves an existing symlink selection through its physical target', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/links/note.md',
+    })
+    mocks.realpath.mockResolvedValueOnce('/real/note.md')
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Updated' }),
+    ).resolves.toEqual({ canceled: false, path: '/real/note.md' })
+
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/real\/\.note\.md\.qingshu-\d+-\d+\.tmp$/),
+      '/real/note.md',
+    )
+    expect(mocks.rename).not.toHaveBeenCalledWith(expect.anything(), '/links/note.md')
+  })
+
+  it('canonicalizes the existing parent of a new Save As path', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/alias/new.md',
+    })
+    mocks.realpath
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce('/real-parent')
+    mocks.stat.mockRejectedValue(missing)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# New' }),
+    ).resolves.toEqual({ canceled: false, path: '/real-parent/new.md' })
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/real-parent\/\.new\.md\.qingshu-\d+-\d+\.tmp$/),
+      '/real-parent/new.md',
+    )
   })
 
   it('authorizes Save As, writes exclusively, and records the new revision', async () => {

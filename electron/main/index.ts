@@ -1,5 +1,6 @@
 import {
   open,
+  realpath,
   rename,
   stat,
   unlink,
@@ -173,6 +174,17 @@ async function currentRevision(path: string): Promise<FileRevision | null> {
   }
 }
 
+async function canonicalDocumentPath(path: string): Promise<string> {
+  const absolutePath = resolve(path)
+  try {
+    return await realpath(absolutePath)
+  } catch (error) {
+    if (!isMissingFile(error)) throw error
+    const physicalParent = await realpath(dirname(absolutePath))
+    return join(physicalParent, basename(absolutePath))
+  }
+}
+
 function documentsFor(sender: Electron.WebContents): Map<string, AuthorizedDocument> {
   let documents = authorizedDocuments.get(sender)
   if (!documents) {
@@ -230,25 +242,41 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export function directorySyncWarning(
+  error: unknown,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? error.code
+      : undefined
+  if (
+    platform === 'win32' &&
+    typeof code === 'string' &&
+    ['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(code)
+  ) {
+    return undefined
+  }
+  return `Saved, but directory sync failed: ${messageOf(error)}`
+}
+
 async function syncDirectory(path: string): Promise<string | undefined> {
   let handle: FileHandle | undefined
-  let failure: unknown
+  let warning: string | undefined
   try {
     handle = await open(path, 'r')
     await handle.sync()
   } catch (error) {
-    failure = error
+    warning = directorySyncWarning(error)
   }
   if (handle) {
     try {
       await handle.close()
     } catch (error) {
-      failure ??= error
+      warning ??= directorySyncWarning(error)
     }
   }
-  return failure
-    ? `Saved, but directory sync failed: ${messageOf(failure)}`
-    : undefined
+  return warning
 }
 
 async function atomicWrite(
@@ -347,7 +375,7 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
     : await dialog.showOpenDialog(options)
   const path = result.filePaths[0]
   if (result.canceled || !path) return { canceled: true }
-  const documentPath = resolve(path)
+  const documentPath = await canonicalDocumentPath(path)
   const { content, revision } = await readStableDocument(documentPath)
   authorizeDocument(documentsFor(event.sender), documentPath, revision)
 
@@ -368,7 +396,9 @@ ipcMain.handle(
     assertTrustedIpcSender(event)
     const request = parseSaveRequest(rawRequest, extra)
     const documents = documentsFor(event.sender)
-    const requestedPath = request.path ? resolve(request.path) : undefined
+    const requestedPath = request.path
+      ? await canonicalDocumentPath(request.path)
+      : undefined
     let document = requestedPath ? documents.get(requestedPath) : undefined
     if (requestedPath && (!document || !document.initialized)) {
       throw new Error('Save path was not authorized by a file dialog')
@@ -382,7 +412,7 @@ ipcMain.handle(
       ],
     })
     if (target.canceled) return target
-    const targetPath = resolve(target.path)
+    const targetPath = requestedPath ?? await canonicalDocumentPath(target.path)
     if (!requestedPath) {
       document = installDocumentQueue(documents, targetPath)
     }
