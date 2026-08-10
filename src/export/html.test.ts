@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { canonicalFootnoteId } from '../markdown/markdown'
 import { createHtmlDocument } from './html'
 
 describe('createHtmlDocument', () => {
@@ -36,8 +37,9 @@ describe('createHtmlDocument', () => {
       'First block references a note.[^shared]\n\nSecond block.\n\n[^shared]: Shared footnote.',
     )
 
-    expect(html).toContain('href="#user-content-fn-shared"')
-    expect(html).toContain('id="user-content-fn-shared"')
+    const id = canonicalFootnoteId('shared')
+    expect(html).toContain(`href="#user-content-fn-${id}"`)
+    expect(html).toContain(`id="user-content-fn-${id}"`)
     expect(html).toContain('Shared footnote.')
   })
 
