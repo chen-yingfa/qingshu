@@ -212,3 +212,147 @@ Review remediation commit: `64412cb` (`Fix stateful live editor review findings`
 ### Remaining concerns
 
 - Browser DOM regressions now cover the stateful paths. Native Electron print timing, OS-level IME event ordering, and custom window controls still benefit from a manual packaged-app smoke test on each supported desktop OS.
+
+## Final Task 3 review remediation
+
+### Scope and files
+
+- `src/components/LiveEditor.tsx` replaces string-history provenance with an explicit pending-parent-acknowledgement protocol. Each changed parent value is consumed exactly once; unmatched values always reset draft and source offsets.
+- `src/components/LiveEditor.dom.test.tsx` adds the exact `emit B → external C → external B → edit` regression and verifies print preview has no edit controls.
+- `src/types/electron.d.ts` and `electron/preload/index.ts` expose only close-intent subscription and close-response IPC.
+- `electron/main/index.ts` owns native closure. It intercepts window and application quit intents, asks the renderer about dirty state, rejects unsolicited responses, and permits exactly one confirmed close without recursion.
+- `electron/main/index.test.ts` distinguishes intent, rejection/retry, confirmed close, and application quit confirmation.
+- `src/App.tsx` answers native close intents through `canDiscard`, routes the custom control into the same main-owned flow, and suppresses the focus exit during PDF rendering.
+- `src/App.test.tsx` covers rejected/confirmed renderer responses, custom-close routing, and hidden print controls.
+- `src/styles.css` also hides focus and block-edit controls in native print media.
+
+### TDD red evidence
+
+Command:
+
+```text
+npm test -- src/components/LiveEditor.dom.test.tsx src/App.test.tsx electron/main/index.test.ts
+```
+
+Exact summary before implementation:
+
+```text
+FAIL  electron/main/index.test.ts (14 tests | 3 failed)
+FAIL  src/components/LiveEditor.dom.test.tsx (7 tests | 2 failed)
+FAIL  src/App.test.tsx (6 tests | 3 failed)
+
+Test Files  3 failed (3)
+     Tests  8 failed | 19 passed (27)
+  Duration  1.11s (transform 141ms, setup 0ms, import 555ms, tests 519ms, environment 857ms)
+```
+
+The failures specifically showed:
+
+```text
+expected 'C' to be 'B'
+Found multiple elements with the text of: Edit Markdown block
+expected "vi.fn()" to be called with arguments: [ 'close' ]
+expected native confirm to be called 1 times, but got 0 times
+expected Exit focus mode control to be null during PDF preview
+expected qingshu:close-response among registered channels
+TypeError: main.installCloseHandshake is not a function
+```
+
+An additional app-shutdown regression was added and observed red:
+
+```text
+Command: npm test -- electron/main/index.test.ts
+
+FAIL  electron/main/index.test.ts (15 tests | 1 failed)
+AssertionError: expected before-quit preventDefault to be called once, but got 0 times
+
+Test Files  1 failed (1)
+     Tests  1 failed | 14 passed (15)
+  Duration  176ms (transform 55ms, setup 0ms, import 69ms, tests 16ms, environment 0ms)
+```
+
+### Focused green evidence
+
+Command:
+
+```text
+npm test -- electron/main/index.test.ts src/components/LiveEditor.dom.test.tsx src/App.test.tsx
+```
+
+Exact result:
+
+```text
+> qingshu@2.1.0 test
+> vitest run electron/main/index.test.ts src/components/LiveEditor.dom.test.tsx src/App.test.tsx
+
+ RUN  v4.1.10 /workspace
+
+ Test Files  3 passed (3)
+      Tests  28 passed (28)
+   Start at  19:07:31
+   Duration  1.20s (transform 159ms, setup 0ms, import 565ms, tests 530ms, environment 1.02s)
+```
+
+Exit code: `0`.
+
+### Full verification and Vite build
+
+Command:
+
+```text
+npm run typecheck && npm test && npx vite build
+```
+
+Exact result:
+
+```text
+> qingshu@2.1.0 typecheck
+> tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false
+
+> qingshu@2.1.0 test
+> vitest run
+
+ RUN  v4.1.10 /workspace
+
+ Test Files  7 passed (7)
+      Tests  55 passed (55)
+   Start at  19:07:42
+   Duration  1.20s (transform 216ms, setup 0ms, import 1.20s, tests 663ms, environment 908ms)
+
+vite v8.2.1 building client environment for production...
+✓ 321 modules transformed.
+dist/index.html                   0.59 kB │ gzip:   0.36 kB
+dist/assets/index-yVlywBe4.css    6.74 kB │ gzip:   2.29 kB
+dist/assets/index-DVIYKWvI.js   642.41 kB │ gzip: 196.33 kB
+✓ built in 202ms
+
+vite v8.2.1 building client environment for production...
+✓ 2 modules transformed.
+dist-electron/main/index.js  4.55 kB │ gzip: 1.84 kB
+✓ built in 8ms
+
+vite v8.2.1 building client environment for production...
+✓ 2 modules transformed.
+dist-electron/preload/index.js  0.72 kB │ gzip: 0.29 kB
+✓ built in 5ms
+```
+
+Exit code: `0`. Vite emitted its advisory that the renderer chunk exceeds 500 kB after minification.
+
+### Commit
+
+Implementation commit: `92e3ce8` (`Secure native close and editor synchronization`).
+
+### Self-review
+
+- Parent acknowledgements are no longer inferred from any historical emitted string. A pending acknowledgement is consumed on the next changed parent value and cleared whether it matches or not, so later external reuse of that text cannot be mistaken for an acknowledgement.
+- Internal rapid edits continue to use canonical content/range refs, while external parent values reset source and offsets together.
+- The main process retains the only authority to close. Renderer responses are sender-validated, ignored without a pending intent, and only literal `true` permits closure.
+- A one-close allowance prevents the confirmed `close()` call from recursively opening another confirmation.
+- Rejected app quit clears all pending quit state. Confirmed application quit grants each participating window one close and restarts `app.quit()`, covering Cmd+Q and shutdown in addition to window-manager close controls.
+- Both DOM structure and print CSS remove edit/focus controls from PDF and native print output.
+- Focused renderer/main tests, all 55 tests, both TypeScript projects, and renderer/main/preload Vite builds pass.
+
+### Remaining concern
+
+- The renderer bundle is 642.41 kB minified, so Vite reports a chunk-size advisory. This is primarily the Markdown/KaTeX stack and is outside the functional review scope; code splitting can be considered separately.
