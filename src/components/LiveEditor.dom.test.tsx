@@ -182,6 +182,23 @@ describe('LiveEditor state synchronization', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2)
   })
 
+  it('activates the current block index after removal before a memoized block', async () => {
+    const result = renderEditor('Inserted\n\nActive\n\nTarget', { activeBlock: 1 })
+    await screen.findByText('Target')
+
+    result.rerender(
+      <LiveEditor
+        content={'Active\n\nTarget'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.click(await screen.findByText('Target'))
+
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+  })
+
   it('derives blocks and render context with one document parse per source revision', () => {
     const parse = vi.spyOn(markdown, 'parseDocument')
     const result = renderEditor('First\n\nSecond')
