@@ -1,6 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import {
+  open,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises'
 import { release } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app,
@@ -23,6 +31,18 @@ const rendererUrl = process.env.VITE_DEV_SERVER_URL
   : pathToFileURL(indexHtml)
 
 let win: BrowserWindow | null = null
+interface FileRevision {
+  dev: number
+  ino: number
+  mtimeMs: number
+  size: number
+}
+const authorizedDocuments = new WeakMap<
+  Electron.WebContents,
+  Map<string, FileRevision | null>
+>()
+let tempSequence = 0
+
 interface CloseState {
   intentPending: boolean
   allowNextClose: boolean
@@ -109,6 +129,94 @@ function parseHtmlRequest(value: unknown, extra: unknown[]): ExportHtmlRequest {
   return { html: value.html }
 }
 
+function revisionOf(value: Awaited<ReturnType<typeof stat>>): FileRevision {
+  return {
+    dev: Number(value.dev),
+    ino: Number(value.ino),
+    mtimeMs: value.mtimeMs,
+    size: value.size,
+  }
+}
+
+function sameRevision(left: FileRevision, right: FileRevision): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mtimeMs === right.mtimeMs &&
+    left.size === right.size
+  )
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  )
+}
+
+async function currentRevision(path: string): Promise<FileRevision | null> {
+  try {
+    return revisionOf(await stat(path))
+  } catch (error) {
+    if (isMissingFile(error)) return null
+    throw error
+  }
+}
+
+function documentsFor(sender: Electron.WebContents): Map<string, FileRevision | null> {
+  let documents = authorizedDocuments.get(sender)
+  if (!documents) {
+    documents = new Map()
+    authorizedDocuments.set(sender, documents)
+  }
+  return documents
+}
+
+async function assertUnchanged(
+  path: string,
+  expected: FileRevision | null,
+): Promise<void> {
+  const actual = await currentRevision(path)
+  if (
+    (expected === null && actual !== null) ||
+    (expected !== null && (actual === null || !sameRevision(expected, actual)))
+  ) {
+    throw new Error(
+      'File changed on disk since it was opened or saved. Reopen it or use Save As.',
+    )
+  }
+}
+
+async function atomicWrite(path: string, content: string | Buffer): Promise<void> {
+  const tempPath = join(
+    dirname(path),
+    `.${basename(path)}.qingshu-${process.pid}-${++tempSequence}.tmp`,
+  )
+  let handle: FileHandle | undefined
+  let renamed = false
+  try {
+    handle = await open(tempPath, 'wx', 0o600)
+    if (typeof content === 'string') await handle.writeFile(content, 'utf8')
+    else await handle.writeFile(content)
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(tempPath, path)
+    renamed = true
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => undefined)
+    }
+    if (!renamed) {
+      await unlink(tempPath).catch((error: unknown) => {
+        if (!isMissingFile(error)) throw error
+      })
+    }
+  }
+}
+
 async function selectSavePath(
   path: string | undefined,
   options: Electron.SaveDialogOptions,
@@ -137,11 +245,14 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
     : await dialog.showOpenDialog(options)
   const path = result.filePaths[0]
   if (result.canceled || !path) return { canceled: true }
+  const documentPath = resolve(path)
+  const content = await readFile(documentPath, 'utf8')
+  documentsFor(event.sender).set(documentPath, await currentRevision(documentPath))
 
   return {
     canceled: false,
-    path,
-    content: await readFile(path, 'utf8'),
+    path: documentPath,
+    content,
   }
 })
 
@@ -154,7 +265,12 @@ ipcMain.handle(
   ): Promise<FileResult> => {
     assertTrustedIpcSender(event)
     const request = parseSaveRequest(rawRequest, extra)
-    const target = await selectSavePath(request.path, {
+    const documents = documentsFor(event.sender)
+    const requestedPath = request.path ? resolve(request.path) : undefined
+    if (requestedPath && !documents.has(requestedPath)) {
+      throw new Error('Save path was not authorized by a file dialog')
+    }
+    const target = await selectSavePath(requestedPath, {
       title: 'Save Markdown',
       defaultPath: 'Untitled.md',
       filters: [
@@ -163,9 +279,15 @@ ipcMain.handle(
       ],
     })
     if (target.canceled) return target
+    const targetPath = resolve(target.path)
+    if (!requestedPath) {
+      documents.set(targetPath, await currentRevision(targetPath))
+    }
 
-    await writeFile(target.path, request.content, 'utf8')
-    return target
+    await assertUnchanged(targetPath, documents.get(targetPath) ?? null)
+    await atomicWrite(targetPath, request.content)
+    documents.set(targetPath, await currentRevision(targetPath))
+    return { canceled: false, path: targetPath }
   },
 )
 

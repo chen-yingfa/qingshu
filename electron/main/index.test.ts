@@ -4,6 +4,15 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => unknown>(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  stat: vi.fn(),
+  open: vi.fn(),
+  rename: vi.fn(),
+  unlink: vi.fn(),
+  tempHandle: {
+    writeFile: vi.fn(),
+    sync: vi.fn(),
+    close: vi.fn(),
+  },
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   showMessageBox: vi.fn(),
@@ -19,6 +28,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('node:fs/promises', () => ({
   readFile: mocks.readFile,
   writeFile: mocks.writeFile,
+  stat: mocks.stat,
+  open: mocks.open,
+  rename: mocks.rename,
+  unlink: mocks.unlink,
 }))
 
 vi.mock('electron', () => ({
@@ -96,6 +109,18 @@ const event = {
 describe('desktop IPC', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.stat.mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      mtimeMs: 100,
+      size: 6,
+    })
+    mocks.open.mockResolvedValue(mocks.tempHandle)
+    mocks.tempHandle.writeFile.mockResolvedValue(undefined)
+    mocks.tempHandle.sync.mockResolvedValue(undefined)
+    mocks.tempHandle.close.mockResolvedValue(undefined)
+    mocks.rename.mockResolvedValue(undefined)
+    mocks.unlink.mockResolvedValue(undefined)
   })
 
   it('registers only the renderer bridge channels', () => {
@@ -144,6 +169,10 @@ describe('desktop IPC', () => {
   })
 
   it('writes Markdown to an existing path without showing a dialog', async () => {
+    mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/hello.md'] })
+    mocks.readFile.mockResolvedValue('# Hello')
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
         path: '/notes/hello.md',
@@ -152,7 +181,95 @@ describe('desktop IPC', () => {
     ).resolves.toEqual({ canceled: false, path: '/notes/hello.md' })
 
     expect(mocks.showSaveDialog).not.toHaveBeenCalled()
-    expect(mocks.writeFile).toHaveBeenCalledWith('/notes/hello.md', '# Updated', 'utf8')
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith('# Updated', 'utf8')
+    expect(mocks.tempHandle.sync).toHaveBeenCalledOnce()
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/notes\/\.hello\.md\.qingshu-\d+-\d+\.tmp$/),
+      '/notes/hello.md',
+    )
+  })
+
+  it('rejects a renderer path that no dialog previously authorized', async () => {
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/forged.md',
+        content: '# Forged',
+      }),
+    ).rejects.toThrow('Save path was not authorized by a file dialog')
+
+    expect(mocks.open).not.toHaveBeenCalled()
+    expect(mocks.rename).not.toHaveBeenCalled()
+  })
+
+  it('rejects overwrite when the opened file changed externally', async () => {
+    mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/conflict.md'] })
+    mocks.readFile.mockResolvedValue('# First')
+    mocks.stat
+      .mockResolvedValueOnce({ dev: 1, ino: 4, mtimeMs: 100, size: 7 })
+      .mockResolvedValueOnce({ dev: 1, ino: 4, mtimeMs: 200, size: 12 })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/conflict.md',
+        content: '# Mine',
+      }),
+    ).rejects.toThrow('File changed on disk')
+
+    expect(mocks.open).not.toHaveBeenCalled()
+    expect(mocks.rename).not.toHaveBeenCalled()
+  })
+
+  it('authorizes Save As, writes exclusively, and records the new revision', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/notes/new.md',
+    })
+    mocks.stat
+      .mockRejectedValueOnce(missing)
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 300, size: 5 })
+      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 300, size: 5 })
+      .mockResolvedValueOnce({ dev: 1, ino: 8, mtimeMs: 400, size: 6 })
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# New' }),
+    ).resolves.toEqual({ canceled: false, path: '/notes/new.md' })
+
+    expect(mocks.open).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/notes\/\.new\.md\.qingshu-\d+-\d+\.tmp$/),
+      'wx',
+      0o600,
+    )
+    expect(mocks.rename).toHaveBeenCalledOnce()
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/new.md',
+        content: '# Next',
+      }),
+    ).resolves.toMatchObject({ canceled: false, path: '/notes/new.md' })
+    expect(mocks.showSaveDialog).toHaveBeenCalledOnce()
+  })
+
+  it('closes and removes an adjacent temp file after an atomic-save failure', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/notes/failure.md',
+    })
+    mocks.stat.mockRejectedValue(missing)
+    mocks.tempHandle.writeFile.mockRejectedValueOnce(new Error('disk full'))
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Fail' }),
+    ).rejects.toThrow('disk full')
+
+    const tempPath = mocks.open.mock.calls[0][0]
+    expect(mocks.tempHandle.close).toHaveBeenCalledOnce()
+    expect(mocks.unlink).toHaveBeenCalledWith(tempPath)
+    expect(mocks.rename).not.toHaveBeenCalled()
   })
 
   it('does not write when the save dialog is canceled', async () => {
