@@ -180,19 +180,42 @@ describe('desktop IPC', () => {
     },
   )
 
-  it('keeps unexpected Windows directory-sync failures as warnings', () => {
-    const error = Object.assign(new Error('I/O failure'), { code: 'EIO' })
-    expect(main.directorySyncWarning(error, 'win32')).toBe(
-      'Saved, but directory sync failed: I/O failure',
-    )
-  })
+  it.each([
+    ['linux', 'EINVAL'],
+    ['linux', 'ENOTSUP'],
+    ['darwin', 'EINVAL'],
+    ['darwin', 'ENOTSUP'],
+    ['win32', 'EINVAL'],
+    ['win32', 'ENOTSUP'],
+  ] as const)(
+    'suppresses directory-sync %s/%s capability limitations',
+    (platform, code) => {
+      const error = Object.assign(new Error(`unsupported ${code}`), { code })
+      expect(main.directorySyncWarning(error, platform)).toBeUndefined()
+    },
+  )
 
-  it('does not suppress unsupported-operation codes on other platforms', () => {
-    const error = Object.assign(new Error('invalid operation'), { code: 'EINVAL' })
-    expect(main.directorySyncWarning(error, 'linux')).toBe(
-      'Saved, but directory sync failed: invalid operation',
-    )
-  })
+  it.each(['linux', 'darwin'] as const)(
+    'retains permission errors as warnings on %s',
+    (platform) => {
+      for (const code of ['EPERM', 'EACCES']) {
+        const error = Object.assign(new Error(`permission ${code}`), { code })
+        expect(main.directorySyncWarning(error, platform)).toBe(
+          `Saved, but directory sync failed: permission ${code}`,
+        )
+      }
+    },
+  )
+
+  it.each(['linux', 'darwin', 'win32'] as const)(
+    'keeps unexpected directory-sync failures as warnings on %s',
+    (platform) => {
+      const error = Object.assign(new Error('I/O failure'), { code: 'EIO' })
+      expect(main.directorySyncWarning(error, platform)).toBe(
+        'Saved, but directory sync failed: I/O failure',
+      )
+    },
+  )
 
   it('opens a selected Markdown file as UTF-8', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/hello.md'] })
@@ -626,8 +649,8 @@ describe('desktop IPC', () => {
     expect(mocks.showSaveDialog).toHaveBeenCalledOnce()
   })
 
-  it('returns a warning when Windows cannot fsync an opened directory', async () => {
-    const windowsDirectoryError = Object.assign(new Error('directory sync unsupported'), {
+  it('suppresses an unsupported directory fsync after a successful save', async () => {
+    const unsupportedDirectoryError = Object.assign(new Error('directory sync unsupported'), {
       code: 'EINVAL',
     })
     mocks.showSaveDialog.mockResolvedValue({
@@ -637,14 +660,13 @@ describe('desktop IPC', () => {
     mocks.stat.mockRejectedValue(
       Object.assign(new Error('missing'), { code: 'ENOENT' }),
     )
-    mocks.directoryHandle.sync.mockRejectedValue(windowsDirectoryError)
+    mocks.directoryHandle.sync.mockRejectedValue(unsupportedDirectoryError)
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, { content: '# Windows' }),
     ).resolves.toEqual({
       canceled: false,
       path: '/notes/windows.md',
-      warning: 'Saved, but directory sync failed: directory sync unsupported',
     })
     expect(mocks.directoryHandle.close).toHaveBeenCalledOnce()
   })

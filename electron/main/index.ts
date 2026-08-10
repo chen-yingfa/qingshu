@@ -251,9 +251,11 @@ export function directorySyncWarning(
       ? error.code
       : undefined
   if (
-    platform === 'win32' &&
     typeof code === 'string' &&
-    ['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(code)
+    (
+      ['EINVAL', 'ENOTSUP'].includes(code) ||
+      (platform === 'win32' && ['EPERM', 'EACCES'].includes(code))
+    )
   ) {
     return undefined
   }
