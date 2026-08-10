@@ -48,7 +48,10 @@ export function fuzzyFilterCommands(
         ),
       )
       const scores = labelScores.map((labelScore, tokenIndex) =>
-        Math.max(labelScore ?? -Infinity, keywordScores[tokenIndex] - 100),
+        Math.max(
+          labelScore === undefined ? -Infinity : labelScore + 300,
+          keywordScores[tokenIndex] - 100,
+        ),
       )
       return scores.some((score) => !Number.isFinite(score))
         ? undefined
@@ -153,6 +156,9 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
                 className={index === selectedIndex ? 'command-item is-selected' : 'command-item'}
                 type="button"
                 role="option"
+                aria-label={
+                  command.shortcut ? `${command.label}, ${command.shortcut}` : command.label
+                }
                 aria-selected={index === selectedIndex}
                 onMouseMove={() => setSelectedIndex(index)}
                 onClick={() => execute(command)}

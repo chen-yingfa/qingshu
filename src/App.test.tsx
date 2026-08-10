@@ -175,7 +175,10 @@ describe('commands and operation feedback', () => {
       const input = screen.getByRole('combobox', { name: 'Search commands' })
       fireEvent.change(input, { target: { value: query } })
       fireEvent.keyDown(input, { key: 'Enter' })
-      expect(container.querySelector('.app-shell')?.classList.contains(className)).toBe(true)
+      expect(
+        container.querySelector('.app-shell')?.classList.contains(className),
+        query,
+      ).toBe(true)
     }
   })
 
@@ -207,7 +210,7 @@ describe('commands and operation feedback', () => {
       'Export PDF',
     ]) {
       expect(
-        screen.getByRole('option', { name: new RegExp(`^${name}(?:\\s+Ctrl.*)?$`) }),
+        screen.getByRole('option', { name: new RegExp(`^${name}(?:, Ctrl.*)?$`) }),
       ).not.toBeNull()
     }
   })
@@ -221,7 +224,10 @@ describe('commands and operation feedback', () => {
 
     api.exportHtml.mockRejectedValue(new Error('Disk unavailable'))
     menuListener?.('export-html')
-    expect((await screen.findByRole('alert')).textContent).toContain('Disk unavailable')
+    await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    const alerts = await screen.findAllByRole('alert')
+    const errorToast = alerts.find((alert) => alert.classList.contains('toast-error'))
+    expect(errorToast?.textContent).toContain('Disk unavailable')
   })
 
   it('sends a rendered standalone HTML document through the existing bridge', async () => {
