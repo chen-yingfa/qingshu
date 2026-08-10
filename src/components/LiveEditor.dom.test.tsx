@@ -99,12 +99,20 @@ describe('LiveEditor state synchronization', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('B!')
   })
 
-  it('renders all blocks as preview while printing', async () => {
-    renderEditor('# Active\n\n[Link](https://example.com)', { previewAll: true })
+  it('renders the entire source once while printing so cross-block footnotes resolve', async () => {
+    renderEditor(
+      '# Active\n\nA reference across blocks.[^note]\n\n[^note]: Footnote **content**.',
+      { previewAll: true },
+    )
 
     expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
     expect(screen.queryByLabelText('Edit Markdown block')).toBeNull()
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Link' })).toBeTruthy())
+    const reference = await screen.findByRole('link', { name: '1' })
+    expect(document.querySelectorAll('.rendered-block')).toHaveLength(1)
+    expect(reference.getAttribute('href')).toBe('#user-content-fn-note')
+    expect(document.getElementById('user-content-fn-note')?.textContent).toContain(
+      'Footnote content',
+    )
   })
 
   it('keeps rendered links interactive without button nesting', async () => {

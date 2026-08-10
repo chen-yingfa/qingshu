@@ -71,6 +71,8 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
   const listId = useId()
   const filtered = useMemo(
     () => fuzzyFilterCommands(commands, query),
@@ -78,7 +80,13 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
   )
 
   useEffect(() => {
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
     inputRef.current?.focus()
+    return () => {
+      const previous = previousFocusRef.current
+      if (previous?.isConnected) previous.focus()
+    }
   }, [])
 
   useEffect(() => {
@@ -99,6 +107,7 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
       }}
     >
       <section
+        ref={dialogRef}
         className="command-palette"
         role="dialog"
         aria-modal="true"
@@ -106,7 +115,33 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault()
+            event.stopPropagation()
             onDismiss()
+          } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            const direction = event.key === 'ArrowDown' ? 1 : -1
+            setSelectedIndex((index) =>
+              filtered.length ? (index + direction + filtered.length) % filtered.length : 0,
+            )
+            inputRef.current?.focus()
+          } else if (event.key === 'Enter') {
+            event.preventDefault()
+            execute(filtered[selectedIndex])
+          } else if (event.key === 'Tab') {
+            const controls = Array.from(
+              dialogRef.current?.querySelectorAll<HTMLElement>(
+                'input:not([disabled]),button:not([disabled]),[tabindex]:not([tabindex="-1"])',
+              ) ?? [],
+            )
+            const first = controls[0]
+            const last = controls.at(-1)
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault()
+              last?.focus()
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault()
+              first?.focus()
+            }
           }
         }}
       >
@@ -129,26 +164,6 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
             spellCheck={false}
             placeholder="Type a command…"
             onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                event.stopPropagation()
-                onDismiss()
-              } else if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setSelectedIndex((index) =>
-                  filtered.length ? (index + 1) % filtered.length : 0,
-                )
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setSelectedIndex((index) =>
-                  filtered.length ? (index - 1 + filtered.length) % filtered.length : 0,
-                )
-              } else if (event.key === 'Enter') {
-                event.preventDefault()
-                execute(filtered[selectedIndex])
-              }
-            }}
           />
           <kbd>Esc</kbd>
         </div>
@@ -167,6 +182,7 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
                 }
                 aria-selected={index === selectedIndex}
                 onMouseMove={() => setSelectedIndex(index)}
+                onFocus={() => setSelectedIndex(index)}
                 onClick={() => execute(command)}
               >
                 <span>{command.label}</span>

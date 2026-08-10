@@ -177,6 +177,21 @@ describe('desktop IPC', () => {
     )
   })
 
+  it('rejects renderer-supplied export paths instead of bypassing native dialogs', async () => {
+    await expect(
+      mocks.handlers.get('qingshu:export-html')?.(event, {
+        html: '<h1>Hello</h1>',
+        path: '/exports/forced.html',
+      }),
+    ).rejects.toThrow('Invalid qingshu:export-html payload')
+    await expect(
+      mocks.handlers.get('qingshu:export-pdf')?.(event, {
+        path: '/exports/forced.pdf',
+      }),
+    ).rejects.toThrow('Invalid qingshu:export-pdf payload')
+    expect(mocks.showSaveDialog).not.toHaveBeenCalled()
+  })
+
   it('does not write when HTML export is canceled', async () => {
     mocks.showSaveDialog.mockResolvedValue({ canceled: true })
 
@@ -191,7 +206,7 @@ describe('desktop IPC', () => {
     mocks.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/exports/hello.pdf' })
     event.sender.printToPDF.mockResolvedValue(pdf)
 
-    await expect(mocks.handlers.get('qingshu:export-pdf')?.(event, {})).resolves.toEqual({
+    await expect(mocks.handlers.get('qingshu:export-pdf')?.(event)).resolves.toEqual({
       canceled: false,
       path: '/exports/hello.pdf',
     })
@@ -206,9 +221,29 @@ describe('desktop IPC', () => {
     mocks.showSaveDialog.mockResolvedValue({ canceled: true })
 
     await expect(
-      mocks.handlers.get('qingshu:export-pdf')?.(event, {}),
+      mocks.handlers.get('qingshu:export-pdf')?.(event),
     ).resolves.toEqual({ canceled: true })
     expect(event.sender.printToPDF).not.toHaveBeenCalled()
+    expect(mocks.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('runtime-validates every renderer IPC payload', async () => {
+    const invalidCalls: Array<[string, unknown]> = [
+      ['qingshu:open-file', { unexpected: true }],
+      ['qingshu:save-file', { content: 42 }],
+      ['qingshu:export-html', { html: 42 }],
+      ['qingshu:export-pdf', {}],
+      ['qingshu:window-action', 'destroy'],
+      ['qingshu:close-response', 'true'],
+    ]
+
+    for (const [channel, payload] of invalidCalls) {
+      await expect(
+        Promise.resolve().then(() => mocks.handlers.get(channel)?.(event, payload)),
+      ).rejects.toThrow(`Invalid ${channel} payload`)
+    }
+    expect(mocks.showOpenDialog).not.toHaveBeenCalled()
+    expect(mocks.showSaveDialog).not.toHaveBeenCalled()
     expect(mocks.writeFile).not.toHaveBeenCalled()
   })
 

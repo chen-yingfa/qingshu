@@ -21,6 +21,12 @@ describe('ToastRegion', () => {
 
     expect(screen.getByRole('status').textContent).toContain('Saved note.md')
     expect(screen.getByRole('alert').textContent).toContain('Save failed')
+    expect(
+      screen.getByRole('button', { name: 'Dismiss notification: Saved note.md' }),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Dismiss notification: Save failed' }),
+    ).not.toBeNull()
   })
 
   it('can be dismissed immediately and expires automatically', () => {
@@ -34,7 +40,9 @@ describe('ToastRegion', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Dismiss notification: Exported HTML' }),
+    )
     expect(onDismiss).toHaveBeenCalledWith(7)
 
     vi.advanceTimersByTime(3000)

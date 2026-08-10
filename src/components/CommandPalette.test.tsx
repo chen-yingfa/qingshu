@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -86,5 +87,54 @@ describe('CommandPalette keyboard interaction', () => {
     fireEvent.keyDown(screen.getAllByRole('option')[0], { key: 'Escape' })
 
     expect(onDismiss).toHaveBeenCalledOnce()
+  })
+
+  it('traps Tab and Shift+Tab within every dialog control', () => {
+    render(<CommandPalette commands={commands()} onDismiss={vi.fn()} />)
+    const input = screen.getByRole('combobox', { name: 'Search commands' })
+    const options = screen.getAllByRole('option')
+
+    options.at(-1)?.focus()
+    fireEvent.keyDown(options.at(-1)!, { key: 'Tab' })
+    expect(document.activeElement).toBe(input)
+
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(options.at(-1))
+  })
+
+  it('handles arrows from an option and returns focus to the combobox', () => {
+    render(<CommandPalette commands={commands()} onDismiss={vi.fn()} />)
+    const input = screen.getByRole('combobox', { name: 'Search commands' })
+    const options = screen.getAllByRole('option')
+    options[0].focus()
+
+    fireEvent.keyDown(options[0], { key: 'ArrowDown' })
+
+    expect(options[1].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('restores focus to the opener after dismissal', () => {
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open commands
+          </button>
+          {open && <CommandPalette commands={commands()} onDismiss={() => setOpen(false)} />}
+        </>
+      )
+    }
+
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: 'Open commands' })
+    opener.focus()
+    fireEvent.click(opener)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(opener)
   })
 })

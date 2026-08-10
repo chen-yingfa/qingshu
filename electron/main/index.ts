@@ -12,7 +12,6 @@ import {
 } from 'electron'
 import type {
   ExportHtmlRequest,
-  ExportPdfRequest,
   FileResult,
   WindowAction,
 } from '../../src/types/electron'
@@ -66,6 +65,50 @@ function assertTrustedIpcSender(event: IpcMainInvokeEvent): void {
   }
 }
 
+function invalidPayload(channel: string): never {
+  throw new TypeError(`Invalid ${channel} payload`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(value).every(key => allowed.includes(key))
+}
+
+function assertNoPayload(channel: string, args: unknown[]): void {
+  if (args.length !== 0) invalidPayload(channel)
+}
+
+function parseSaveRequest(value: unknown, extra: unknown[]): {
+  path?: string
+  content: string
+} {
+  if (
+    extra.length !== 0 ||
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['path', 'content']) ||
+    typeof value.content !== 'string' ||
+    (value.path !== undefined && typeof value.path !== 'string')
+  ) {
+    invalidPayload('qingshu:save-file')
+  }
+  return { content: value.content, path: value.path as string | undefined }
+}
+
+function parseHtmlRequest(value: unknown, extra: unknown[]): ExportHtmlRequest {
+  if (
+    extra.length !== 0 ||
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['html']) ||
+    typeof value.html !== 'string'
+  ) {
+    invalidPayload('qingshu:export-html')
+  }
+  return { html: value.html }
+}
+
 async function selectSavePath(
   path: string | undefined,
   options: Electron.SaveDialogOptions,
@@ -79,8 +122,9 @@ async function selectSavePath(
   return { canceled: false, path: result.filePath }
 }
 
-ipcMain.handle('qingshu:open-file', async (event): Promise<FileResult> => {
+ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<FileResult> => {
   assertTrustedIpcSender(event)
+  assertNoPayload('qingshu:open-file', args)
   const options: Electron.OpenDialogOptions = {
     properties: ['openFile'],
     filters: [
@@ -105,9 +149,11 @@ ipcMain.handle(
   'qingshu:save-file',
   async (
     event: IpcMainInvokeEvent,
-    request: { path?: string; content: string },
+    rawRequest: unknown,
+    ...extra: unknown[]
   ): Promise<FileResult> => {
     assertTrustedIpcSender(event)
+    const request = parseSaveRequest(rawRequest, extra)
     const target = await selectSavePath(request.path, {
       title: 'Save Markdown',
       defaultPath: 'Untitled.md',
@@ -125,9 +171,14 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:export-html',
-  async (event: IpcMainInvokeEvent, request: ExportHtmlRequest): Promise<FileResult> => {
+  async (
+    event: IpcMainInvokeEvent,
+    rawRequest: unknown,
+    ...extra: unknown[]
+  ): Promise<FileResult> => {
     assertTrustedIpcSender(event)
-    const target = await selectSavePath(request.path, {
+    const request = parseHtmlRequest(rawRequest, extra)
+    const target = await selectSavePath(undefined, {
       title: 'Export HTML',
       defaultPath: 'Untitled.html',
       filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
@@ -141,9 +192,10 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:export-pdf',
-  async (event: IpcMainInvokeEvent, request: ExportPdfRequest = {}): Promise<FileResult> => {
+  async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<FileResult> => {
     assertTrustedIpcSender(event)
-    const target = await selectSavePath(request.path, {
+    assertNoPayload('qingshu:export-pdf', args)
+    const target = await selectSavePath(undefined, {
       title: 'Export PDF',
       defaultPath: 'Untitled.pdf',
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -161,8 +213,20 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:window-action',
-  (event: IpcMainInvokeEvent, action: WindowAction): void => {
+  (
+    event: IpcMainInvokeEvent,
+    rawAction: unknown,
+    ...extra: unknown[]
+  ): void => {
     assertTrustedIpcSender(event)
+    if (
+      extra.length !== 0 ||
+      typeof rawAction !== 'string' ||
+      !['minimize', 'toggle-maximize', 'close'].includes(rawAction)
+    ) {
+      invalidPayload('qingshu:window-action')
+    }
+    const action = rawAction as WindowAction
     const target = BrowserWindow.fromWebContents(event.sender)
     if (!target) return
 
@@ -182,8 +246,16 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:close-response',
-  (event: IpcMainInvokeEvent, confirmed: boolean): void => {
+  (
+    event: IpcMainInvokeEvent,
+    rawConfirmed: unknown,
+    ...extra: unknown[]
+  ): void => {
     assertTrustedIpcSender(event)
+    if (extra.length !== 0 || typeof rawConfirmed !== 'boolean') {
+      invalidPayload('qingshu:close-response')
+    }
+    const confirmed = rawConfirmed
     const target = BrowserWindow.fromWebContents(event.sender)
     if (!target) return
     const state = closeStates.get(target)

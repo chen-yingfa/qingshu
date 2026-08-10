@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import App from './App'
+import App, { formatShortcut } from './App'
 import type { MenuCommand, QingshuApi } from './types/electron'
 
 let menuListener: ((command: MenuCommand) => void) | undefined
@@ -133,7 +133,7 @@ describe('application safety controls', () => {
     expect(api.respondToClose).toHaveBeenLastCalledWith(true)
   })
 
-  it('switches every block to rendered preview before PDF export', async () => {
+  it('switches to one full-document preview before PDF export', async () => {
     let finishExport: (() => void) | undefined
     api.exportPdf.mockImplementation(
       () =>
@@ -144,25 +144,76 @@ describe('application safety controls', () => {
     )
     render(<App />)
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
-      target: { value: '# First\n\nSecond' },
+      target: {
+        value: '# First\n\nReference across blocks.[^note]\n\n[^note]: Footnote text.',
+      },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Toggle focus mode' }))
     menuListener?.('export-pdf')
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledTimes(1))
     expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
-    expect(document.querySelectorAll('.rendered-block')).toHaveLength(2)
+    expect(document.querySelectorAll('.rendered-block')).toHaveLength(1)
     expect(document.querySelector('.editor')?.textContent).toContain('First')
-    expect(document.querySelector('.editor')?.textContent).toContain('Second')
+    expect(screen.getByRole('link', { name: '1' }).getAttribute('href')).toBe(
+      '#user-content-fn-note',
+    )
+    expect(document.getElementById('user-content-fn-note')?.textContent).toContain(
+      'Footnote text',
+    )
     expect(screen.queryByRole('button', { name: 'Exit focus mode' })).toBeNull()
     finishExport?.()
     await waitFor(() =>
       expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull(),
     )
   })
+
+  it('waits for fonts and current image completion before requesting PDF', async () => {
+    let resolveFonts!: () => void
+    const fontsReady = new Promise<void>((resolve) => {
+      resolveFonts = resolve
+    })
+    const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { ready: fontsReady },
+    })
+    api.exportPdf.mockResolvedValue({ canceled: true })
+
+    try {
+      render(<App />)
+      fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+        target: { value: '![Diagram](https://example.com/diagram.png)' },
+      })
+      menuListener?.('export-pdf')
+
+      const image = await screen.findByRole('img', { name: 'Diagram' })
+      Object.defineProperty(image, 'complete', { configurable: true, value: false })
+      expect(api.exportPdf).not.toHaveBeenCalled()
+
+      resolveFonts()
+      await Promise.resolve()
+      expect(api.exportPdf).not.toHaveBeenCalled()
+
+      fireEvent.error(image)
+      await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
+    } finally {
+      if (previousFonts) {
+        Object.defineProperty(document, 'fonts', previousFonts)
+      } else {
+        Reflect.deleteProperty(document, 'fonts')
+      }
+    }
+  })
 })
 
 describe('commands and operation feedback', () => {
+  it('formats command shortcut labels for the active platform', () => {
+    expect(formatShortcut('Ctrl+Shift+S', false)).toBe('Ctrl+Shift+S')
+    expect(formatShortcut('Ctrl+Shift+S', true)).toBe('⌘⇧S')
+    expect(formatShortcut('Ctrl+O', true)).toBe('⌘O')
+  })
+
   it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {
     const { container } = render(<App />)
 

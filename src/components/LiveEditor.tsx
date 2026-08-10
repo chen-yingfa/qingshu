@@ -35,6 +35,7 @@ interface LiveEditorProps {
   formatRequest?: FormatRequest
   autoSpacing?: boolean
   previewAll?: boolean
+  onPreviewReady?(error?: Error): void
   onChange(content: string): void
   onActiveBlockChange(index: number): void
 }
@@ -101,6 +102,51 @@ function editorBlocks(content: string): MarkdownBlock[] {
     })
   }
   return blocks
+}
+
+function FullDocumentPreview({
+  content,
+  onReady,
+}: {
+  content: string
+  onReady?(error?: Error): void
+}) {
+  const [rendered, setRendered] = useState<{ source: string; html: string } | null>(null)
+
+  useEffect(() => {
+    let current = true
+    void renderMarkdown(content).then(
+      (html) => {
+        if (current) setRendered({ source: content, html })
+      },
+      (error: unknown) => {
+        if (current) {
+          onReady?.(error instanceof Error ? error : new Error(String(error)))
+        }
+      },
+    )
+    return () => {
+      current = false
+    }
+  }, [content, onReady])
+
+  useLayoutEffect(() => {
+    if (rendered?.source === content) onReady?.()
+  }, [content, onReady, rendered])
+
+  const ready = rendered?.source === content
+  return (
+    <div
+      className="preview-block print-document"
+      data-print-document=""
+      data-render-ready={ready ? 'true' : 'false'}
+    >
+      <div
+        className="rendered-block"
+        dangerouslySetInnerHTML={{ __html: ready ? rendered.html : '' }}
+      />
+    </div>
+  )
 }
 
 function RenderedBlock({
@@ -218,6 +264,7 @@ export function LiveEditor({
   formatRequest,
   autoSpacing = false,
   previewAll = false,
+  onPreviewReady,
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
@@ -390,8 +437,11 @@ export function LiveEditor({
 
   return (
     <section className="editor" aria-label="Markdown document">
-      {blocks.map((block, index) =>
-        index === safeActive && !previewAll ? (
+      {previewAll ? (
+        <FullDocumentPreview content={content} onReady={onPreviewReady} />
+      ) : (
+        blocks.map((block, index) =>
+          index === safeActive ? (
           <textarea
             key={`active-${safeActive}`}
             ref={textareaRef}
@@ -431,14 +481,15 @@ export function LiveEditor({
             }}
             onKeyDown={handleKeyDown}
           />
-        ) : (
-          <RenderedBlock
-            key={`${block.start}-${block.end}-${index}`}
-            block={block}
-            editable={!previewAll}
-            onActivate={() => onActiveBlockChange(index)}
-          />
-        ),
+          ) : (
+            <RenderedBlock
+              key={`${block.start}-${block.end}-${index}`}
+              block={block}
+              editable
+              onActivate={() => onActiveBlockChange(index)}
+            />
+          ),
+        )
       )}
     </section>
   )

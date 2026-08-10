@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ExportHtmlRequest,
-  ExportPdfRequest,
   MenuCommand,
   QingshuApi,
   WindowAction,
@@ -12,8 +11,7 @@ const api: QingshuApi = {
   saveFile: request => ipcRenderer.invoke('qingshu:save-file', request),
   exportHtml: (request: ExportHtmlRequest) =>
     ipcRenderer.invoke('qingshu:export-html', request),
-  exportPdf: (request: ExportPdfRequest = {}) =>
-    ipcRenderer.invoke('qingshu:export-pdf', request),
+  exportPdf: () => ipcRenderer.invoke('qingshu:export-pdf'),
   windowAction: (action: WindowAction) =>
     ipcRenderer.invoke('qingshu:window-action', action),
   respondToClose: confirmed =>

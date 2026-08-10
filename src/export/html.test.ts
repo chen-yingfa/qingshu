@@ -30,4 +30,27 @@ describe('createHtmlDocument', () => {
     expect(html).toContain('class="katex"')
     expect(html).not.toContain('$$')
   })
+
+  it('keeps cross-block footnotes linked when exporting the full source', async () => {
+    const html = await createHtmlDocument(
+      'First block references a note.[^shared]\n\nSecond block.\n\n[^shared]: Shared footnote.',
+    )
+
+    expect(html).toContain('href="#user-content-fn-shared"')
+    expect(html).toContain('id="user-content-fn-shared"')
+    expect(html).toContain('Shared footnote.')
+  })
+
+  it('exports complex equations as accessible MathML without KaTeX font assets', async () => {
+    const html = await createHtmlDocument(
+      '$$\\sum_{n=1}^{\\infty}\\frac{1}{n^2}=\\frac{\\pi^2}{6}$$',
+    )
+
+    expect(html).toContain('<math xmlns="http://www.w3.org/1998/Math/MathML"')
+    expect(html).toContain('<annotation encoding="application/x-tex">')
+    expect(html).toContain('.katex-html{display:none}')
+    expect(html).not.toMatch(/KaTeX_(?:Main|Math|Size|AMS|Caligraphic)/)
+    expect(html).not.toMatch(/\.(?:woff2?|ttf|otf)/)
+    expect(html).not.toContain('url(')
+  })
 })

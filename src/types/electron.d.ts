@@ -3,12 +3,7 @@ export type FileResult =
   | { canceled: false; path: string; content?: string }
 
 export type ExportHtmlRequest = {
-  path?: string
   html: string
-}
-
-export type ExportPdfRequest = {
-  path?: string
 }
 
 export type WindowAction = 'minimize' | 'toggle-maximize' | 'close'
@@ -25,7 +20,7 @@ export interface QingshuApi {
   openFile(): Promise<FileResult>
   saveFile(request: { path?: string; content: string }): Promise<FileResult>
   exportHtml(request: ExportHtmlRequest): Promise<FileResult>
-  exportPdf(request?: ExportPdfRequest): Promise<FileResult>
+  exportPdf(): Promise<FileResult>
   windowAction(action: WindowAction): Promise<void>
   respondToClose(confirmed: boolean): Promise<void>
   onCloseIntent(listener: () => void): () => void

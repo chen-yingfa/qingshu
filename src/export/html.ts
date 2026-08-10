@@ -1,5 +1,3 @@
-import katexStyles from 'katex/dist/katex.min.css?inline'
-
 import { renderMarkdown } from '../markdown/markdown'
 
 const exportStyles = `
@@ -23,16 +21,12 @@ hr{margin:2.5em 0;border:0;border-top:1px solid var(--line)}
 input[type=checkbox]{margin-right:.45em;accent-color:var(--accent)}
 .contains-task-list{padding-left:1.25em}.task-list-item{list-style:none}
 [data-footnotes]{margin-top:3em;padding-top:1em;border-top:1px solid var(--line);color:var(--muted);font-size:.9em}
-.katex-display{overflow-x:auto;overflow-y:hidden;padding:.45em 0}
+.katex{font:inherit}.katex-html{display:none}.katex-mathml{display:inline}
+.katex-display{display:block;overflow-x:auto;overflow-y:hidden;padding:.45em 0;text-align:center}
+.katex-display .katex-mathml{display:block}
 @media(max-width:700px){html{background:#fffefa}body{padding:38px 24px;box-shadow:none;font-size:16px}}
 @media print{html{background:white}body{max-width:none;min-height:0;padding:0;box-shadow:none}}
 `
-
-function safeKatexStyles(): string {
-  return katexStyles
-    .replace(/@font-face\s*\{[^}]*\}/g, '')
-    .replace(/url\([^)]*\)/g, '')
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -58,7 +52,7 @@ export async function createHtmlDocument(source: string, path?: string): Promise
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="Qingshu">
 <title>${escapeHtml(documentTitle(path))}</title>
-<style>${safeKatexStyles()}${exportStyles}</style>
+<style>${exportStyles}</style>
 </head>
 <body>
 ${body}

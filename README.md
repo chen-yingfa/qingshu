@@ -14,8 +14,8 @@ in the repository.
 - Light/dark themes, distraction-free focus mode, and an A4 page preview.
 - Markdown open/save/save-as through a sandboxed Electron preload bridge.
 - Attractive A4 PDF export through Chromium.
-- Complete UTF-8 HTML export with rendered GFM/KaTeX and all document styling
-  inlined; it has no stylesheet or font-network dependency.
+- Complete UTF-8 HTML export with rendered GFM and accessible standards-based MathML;
+  all styling is inlined and equations need no bundled or network fonts.
 - Fuzzy, keyboard-accessible command palette and dismissible success/error toasts.
 - Dirty-document confirmation for New, Open, native window close, and application
   quit.
@@ -60,7 +60,8 @@ toolbar.
 - `src/components/LiveEditor.tsx` maintains exact Markdown source while rendering
   inactive blocks through the shared sanitized Markdown pipeline.
 - `src/hooks/useDocument.ts` owns the document reducer and open/save workflows.
-- `src/markdown/` contains GFM/KaTeX rendering and CJK transforms/statistics.
+- `src/markdown/` contains sanitized GFM/KaTeX-to-MathML rendering and CJK
+  transforms/statistics.
 - `electron/preload/` exposes the narrow typed `window.qingshu` API.
 - `electron/main/` validates IPC senders, performs native file/print operations, and
   retains sole authority over window/application closing.
@@ -99,7 +100,7 @@ default where no explicit target is configured.
   plugin, or knowledge-base layer.
 - Syntax highlighting, table manipulation, image importing/embedding, and
   Marp/Slidev-specific tooling are not implemented.
-- HTML styling and math rendering are self-contained, but images referenced by the
+- HTML styling and MathML equations are self-contained, but images referenced by the
   Markdown remain referenced URLs or file paths rather than embedded data.
 - PDF appearance relies on the host Chromium print engine and installed fallback CJK
   fonts.

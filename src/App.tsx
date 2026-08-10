@@ -13,6 +13,7 @@ import { Toolbar } from './components/Toolbar'
 import { createHtmlDocument } from './export/html'
 import { useDocument } from './hooks/useDocument'
 import { spaceCjkLatin } from './markdown/cjk'
+import { waitForPrintReadiness } from './print/readiness'
 import type { MenuCommand } from './types/electron'
 
 function filename(path: string): string {
@@ -23,14 +24,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function waitForPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-    } else {
-      setTimeout(resolve, 0)
-    }
+export function formatShortcut(
+  shortcut: string,
+  isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform),
+): string {
+  if (!isMac) return shortcut
+  return shortcut.replace(/^Ctrl\+Shift\+/, '⌘⇧').replace(/^Ctrl\+/, '⌘')
+}
+
+function createPreviewBarrier() {
+  let resolve!: () => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<void>((ready, failed) => {
+    resolve = ready
+    reject = failed
   })
+  return { promise, resolve, reject }
 }
 
 export default function App() {
@@ -45,6 +54,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const toastId = useRef(0)
+  const previewBarrier = useRef<ReturnType<typeof createPreviewBarrier> | null>(null)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
@@ -122,9 +132,10 @@ export default function App() {
           break
         }
         case 'export-pdf':
+          previewBarrier.current = createPreviewBarrier()
           setPrintPreview(true)
           try {
-            await waitForPaint()
+            await waitForPrintReadiness(previewBarrier.current.promise)
             const result = await window.qingshu.exportPdf()
             if (!result.canceled) {
               dispatch({ type: 'error', message: null })
@@ -138,6 +149,7 @@ export default function App() {
             })
             addToast('error', message)
           } finally {
+            previewBarrier.current = null
             setPrintPreview(false)
           }
           break
@@ -179,28 +191,28 @@ export default function App() {
       {
         id: 'new',
         label: 'New document',
-        shortcut: 'Ctrl+N',
+        shortcut: formatShortcut('Ctrl+N'),
         keywords: ['blank', 'file'],
         run: () => runCommand('new'),
       },
       {
         id: 'open',
         label: 'Open file',
-        shortcut: 'Ctrl+O',
+        shortcut: formatShortcut('Ctrl+O'),
         keywords: ['load', 'document'],
         run: () => runCommand('open'),
       },
       {
         id: 'save',
         label: 'Save',
-        shortcut: 'Ctrl+S',
+        shortcut: formatShortcut('Ctrl+S'),
         keywords: ['write', 'document'],
         run: () => runCommand('save'),
       },
       {
         id: 'save-as',
         label: 'Save as',
-        shortcut: 'Ctrl+Shift+S',
+        shortcut: formatShortcut('Ctrl+Shift+S'),
         keywords: ['copy', 'rename', 'document'],
         run: () => runCommand('save-as'),
       },
@@ -332,6 +344,10 @@ export default function App() {
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
             previewAll={printPreview}
+            onPreviewReady={(error) => {
+              if (error) previewBarrier.current?.reject(error)
+              else previewBarrier.current?.resolve()
+            }}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
           />

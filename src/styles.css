@@ -341,6 +341,30 @@ button {
   border-radius: 6px;
 }
 
+.rendered-block .katex {
+  font: inherit;
+}
+
+.rendered-block .katex-html {
+  display: none;
+}
+
+.rendered-block .katex-mathml {
+  display: inline;
+}
+
+.rendered-block .katex-display {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.45em 0;
+  text-align: center;
+}
+
+.rendered-block .katex-display .katex-mathml {
+  display: block;
+}
+
 .source-block {
   display: block;
   width: 100%;

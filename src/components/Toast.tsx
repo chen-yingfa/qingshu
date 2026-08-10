@@ -29,7 +29,7 @@ function Toast({ toast, duration, onDismiss }: ToastProps) {
       <span className="toast-message">{toast.message}</span>
       <button
         type="button"
-        aria-label="Dismiss notification"
+        aria-label={`Dismiss notification: ${toast.message}`}
         onClick={() => onDismiss(toast.id)}
       >
         ×

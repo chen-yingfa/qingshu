@@ -1,5 +1,5 @@
 import rehypeKatex from 'rehype-katex'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import rehypeStringify from 'rehype-stringify'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -55,7 +55,7 @@ const renderer = unified()
   .use(remarkGfm)
   .use(remarkMath)
   .use(remarkRehype)
-  .use(rehypeSanitize)
+  .use(rehypeSanitize, { ...defaultSchema, clobberPrefix: '' })
   .use(rehypeKatex)
   .use(rehypeStringify)
 
