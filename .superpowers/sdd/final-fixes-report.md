@@ -202,6 +202,105 @@ No commits were amended and nothing was pushed.
 
 ---
 
+## Final Semantic-footnote and Physical-save Re-review
+
+All four findings were reproduced against the current implementation and accepted
+without pushback.
+
+### Semantic footnote canonicalization
+
+The previous implementation globally rewrote serialized HTML attributes with
+regular expressions after sanitization. An ordinary Markdown link such as
+`#user-content-fn-manual` could therefore consume the identifier intended for a
+real footnote and redirect both links.
+
+Footnote identifiers are now canonicalized only on semantic mdast
+`footnoteReference` and `footnoteDefinition` nodes before remark converts the
+tree to HAST. Semantic HAST anchors carrying `dataFootnoteRef` receive the
+document-global reference ordinal before sanitization. There is no serialized
+HTML footnote rewrite. Ordinary footnote-shaped links remain byte-for-byte
+untouched and do not participate in the mapping. Focused tests place ordinary
+definition/backlink-shaped fragments before hostile and Unicode semantic
+footnotes, then verify definition targets and backlinks.
+
+### Platform-scoped directory durability
+
+Directory open/sync/close errors are converted through one platform-aware helper.
+Only Windows `EINVAL`, `EPERM`, `EACCES`, and `ENOTSUP` are treated as known
+unsupported directory operations. The same codes on other platforms and
+unexpected Windows errors such as `EIO` remain renderer-visible saved-with-
+warning results. The committed file-handle revision continues to replace the
+authorized revision after rename, so warning delivery does not invalidate the
+next save.
+
+### Physical path authorization
+
+Open and Save As now resolve existing selections through `realpath`. New Save As
+targets resolve the existing parent physically and append the selected basename.
+The physical path is returned to the renderer and is the sole key for
+authorization and save queues. Consequently, selecting a symlink writes the
+physical target rather than atomically replacing the symlink itself, and
+concurrent dialogs selecting two aliases of one target serialize in invocation
+order on one queue.
+
+Tests cover physical Open return/use, symlink-target rename, physical-parent
+handling for a new file, and deterministically interleaved concurrent aliases.
+
+### Superseded durability warnings
+
+When an intervening edit supersedes a committed save, the hook still adopts the
+authorized path and leaves the current content dirty. If the committed save also
+carried a durability warning, the superseded operation now retains its path and
+warning metadata. App presents a warning toast prefixed `Durability warning`
+while the status bar remains `Unsaved`; it does not emit a clean `Saved` status
+or success toast.
+
+### Strict TDD evidence
+
+- RED: the ordinary-fragment collision test failed because the first ordinary
+  `#user-content-fn-*` link was globally rewritten to the hostile footnote target.
+- GREEN: Markdown, LiveEditor DOM, and HTML export suites passed 31/31 after
+  moving canonicalization into semantic mdast/HAST transforms.
+- RED: six platform-focused directory-sync cases failed because no
+  platform-scoped policy existed.
+- GREEN: all four known Windows unsupported codes were suppressed, while Windows
+  `EIO` and non-Windows `EINVAL` remained warnings; the full main suite passed.
+- RED: four physical-path tests returned or renamed lexical aliases and the
+  concurrent aliases did not share a queue.
+- GREEN: all four physical-path regressions and all 37 main-process tests passed.
+- RED: hook/App tests showed that an edit-superseded save dropped its committed
+  durability warning entirely.
+- GREEN: reducer/hook/App save-lifecycle suites passed 25/25 with the document
+  still dirty and the warning visible.
+
+### Commits
+
+- `19e53c4` — semantic pre-sanitize footnote canonicalization and collision test
+- `16d9541` — physical target authorization, alias queueing, and Windows-only
+  directory-sync fallback
+- `3ee8b1c` — preserve warning metadata and truthful UI for superseded saves
+
+### Verification
+
+- `npm test`: 15 files, 133 tests passed.
+- `npm run typecheck`: both TypeScript projects passed.
+- `npx vite build`: renderer, main, and preload production bundles built.
+- `npx electron-builder --linux AppImage --x64`: passed.
+- `WINEPREFIX=/tmp/qingshu-wine WINEDEBUG=-all npx electron-builder --win nsis
+  --x64`: passed and produced the x64 NSIS installer plus block map. This agent
+  required Wine 64/32-bit packaging prerequisites and a clean prefix.
+
+No commit was amended and nothing was pushed.
+
+### Remaining concerns
+
+- Vite reports its non-failing renderer chunk-size advisory (about 659 kB
+  minified).
+- electron-builder reports duplicate dependency references while traversing the
+  unified/remark dependency graph; both requested packages are produced.
+
+---
+
 ## Latest Security and Save-lifecycle Review
 
 All latest findings were verified against `f2819f5` and were valid. No reasoned
