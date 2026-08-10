@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as markdown from '../markdown/markdown'
 import { LiveEditor } from './LiveEditor'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function renderEditor(
   content: string,
@@ -162,6 +165,39 @@ describe('LiveEditor state synchronization', () => {
     await waitFor(() => expect(screen.getByText('Third').closest('.preview-block')).toBe(thirdBlock))
   })
 
+  it('activates the current block index after insertion before a memoized block', async () => {
+    const result = renderEditor('Active\n\nTarget')
+    await screen.findByText('Target')
+
+    result.rerender(
+      <LiveEditor
+        content={'Inserted\n\nActive\n\nTarget'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.click(await screen.findByText('Target'))
+
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2)
+  })
+
+  it('derives blocks and render context with one document parse per source revision', () => {
+    const parse = vi.spyOn(markdown, 'parseDocument')
+    const result = renderEditor('First\n\nSecond')
+    expect(parse).toHaveBeenCalledTimes(1)
+
+    result.rerender(
+      <LiveEditor
+        content={'Changed\n\nSecond'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(parse).toHaveBeenCalledTimes(2)
+  })
+
   it('bounds render work for a large document when only the active block changes', async () => {
     const renderBlock = vi.spyOn(markdown, 'renderMarkdownBlock')
     const content = Array.from({ length: 160 }, (_, index) => `Block ${index}`).join(
@@ -218,5 +254,52 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(textarea.selectionStart).toBe(0)
     expect(textarea.selectionEnd).toBe(2)
+  })
+
+  it.each([
+    {
+      name: 'Marp',
+      source: [
+        '---',
+        'marp: true',
+        'theme: 中文Theme',
+        'title: "中文A"',
+        '---',
+        '<!-- _class: 中文Lead -->',
+        '',
+        '# 正文React19',
+      ].join('\n'),
+      marker: 'title:',
+    },
+    {
+      name: 'Slidev',
+      source: [
+        '---',
+        'layout: 中文Layout',
+        'theme: 中文Theme',
+        'title: "中文A"',
+        '---',
+        '::right::',
+        '<Tweet id="中文A" />',
+        '',
+        '正文Vue3',
+      ].join('\n'),
+      marker: 'layout:',
+    },
+  ])('protects full-document $name metadata while its parsed block is active', ({
+    source,
+    marker,
+  }) => {
+    const activeBlock = markdown
+      .parseDocument(source)
+      .blocks.findIndex((block) => block.source.includes(marker))
+    const result = renderEditor(source, { activeBlock, autoSpacing: true })
+
+    fireEvent.blur(screen.getByLabelText('Active Markdown block'))
+
+    expect(result.onChange).not.toHaveBeenCalled()
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toContain('"中文A"')
   })
 })

@@ -17,6 +17,9 @@ export interface MarkdownBlock {
 
 interface PositionedNode {
   type: string
+  identifier?: string
+  label?: string
+  children?: PositionedNode[]
   position?: {
     start: { offset?: number }
     end: { offset?: number }
@@ -27,6 +30,7 @@ interface FootnoteReference {
   start: number
   end: number
   label: string
+  identifier: string
   ordinal: number
 }
 
@@ -35,6 +39,11 @@ export interface DocumentRenderContext {
   footnoteSource: string
   references: FootnoteReference[]
   signature: string
+}
+
+export interface MarkdownDocumentModel {
+  blocks: MarkdownBlock[]
+  renderContext: DocumentRenderContext
 }
 
 interface MarkdownRoot {
@@ -52,8 +61,7 @@ function sourceHash(source: string): string {
   return (hash >>> 0).toString(36)
 }
 
-export function parseBlocks(source: string): MarkdownBlock[] {
-  const tree = markdownParser.parse(source) as MarkdownRoot
+function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
   const identities = new Map<string, number>()
 
   return tree.children.flatMap((node) => {
@@ -81,6 +89,16 @@ export function parseBlocks(source: string): MarkdownBlock[] {
   })
 }
 
+function frontMatterEnd(source: string): number {
+  const opening = source.match(/^(?:\uFEFF)?(---|\+\+\+)[ \t]*\r?\n/u)
+  if (!opening) return 0
+  const escaped = opening[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+  const closing = new RegExp(`^${escaped}[ \\t]*(?:\\r?\\n|$)`, 'gmu')
+  closing.lastIndex = opening[0].length
+  const match = closing.exec(source)
+  return match ? match.index + match[0].length : 0
+}
+
 const renderer = unified()
   .use(remarkParse)
   .use(remarkGfm)
@@ -94,12 +112,10 @@ export async function renderMarkdown(source: string): Promise<string> {
   return String(await renderer.process(source))
 }
 
-function footnoteIdentifier(label: string): string {
-  return label.trim().toLowerCase().replace(/\s+/gu, '-')
-}
-
-export function createDocumentRenderContext(source: string): DocumentRenderContext {
-  const tree = markdownParser.parse(source) as MarkdownRoot
+function renderContextFromTree(
+  source: string,
+  tree: MarkdownRoot,
+): DocumentRenderContext {
   const support: string[] = []
   const footnotes: string[] = []
 
@@ -114,21 +130,35 @@ export function createDocumentRenderContext(source: string): DocumentRenderConte
     }
   }
 
+  const protectedFrontMatterEnd = frontMatterEnd(source)
   const counts = new Map<string, number>()
   const references: FootnoteReference[] = []
-  const referencePattern = /\[\^([^\]\r\n]+)\](?!:)/gu
-  for (const match of source.matchAll(referencePattern)) {
-    const label = match[1]
-    const normalized = footnoteIdentifier(label)
-    const ordinal = (counts.get(normalized) ?? 0) + 1
-    counts.set(normalized, ordinal)
-    references.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      label,
-      ordinal,
-    })
+  const visit = (node: PositionedNode) => {
+    if (node.type === 'footnoteReference') {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (
+        start !== undefined &&
+        end !== undefined &&
+        start >= protectedFrontMatterEnd &&
+        node.identifier
+      ) {
+        const identifier = node.identifier
+        const ordinal = (counts.get(identifier) ?? 0) + 1
+        counts.set(identifier, ordinal)
+        references.push({
+          start,
+          end,
+          identifier,
+          label: node.label ?? identifier,
+          ordinal,
+        })
+      }
+      return
+    }
+    node.children?.forEach(visit)
   }
+  tree.children.forEach(visit)
 
   const supportSource = support.join('\n\n')
   return {
@@ -136,9 +166,25 @@ export function createDocumentRenderContext(source: string): DocumentRenderConte
     footnoteSource: footnotes.join('\n\n'),
     references,
     signature: `${supportSource}\u0000${references
-      .map(({ label, ordinal }) => `${footnoteIdentifier(label)}:${ordinal}`)
+      .map(({ identifier, ordinal }) => `${identifier}:${ordinal}`)
       .join(',')}`,
   }
+}
+
+export function parseDocument(source: string): MarkdownDocumentModel {
+  const tree = markdownParser.parse(source) as MarkdownRoot
+  return {
+    blocks: blocksFromTree(source, tree),
+    renderContext: renderContextFromTree(source, tree),
+  }
+}
+
+export function parseBlocks(source: string): MarkdownBlock[] {
+  return parseDocument(source).blocks
+}
+
+export function createDocumentRenderContext(source: string): DocumentRenderContext {
+  return parseDocument(source).renderContext
 }
 
 function withoutFootnoteSection(html: string): string {
@@ -166,7 +212,7 @@ export async function renderMarkdownBlock(
       const reference = references[referenceIndex++]
       if (!reference) return `id="user-content-fnref-${generated}"`
       const suffix = reference.ordinal === 1 ? '' : `-${reference.ordinal}`
-      return `id="user-content-fnref-${footnoteIdentifier(reference.label)}${suffix}"`
+      return `id="user-content-fnref-${reference.identifier}${suffix}"`
     },
   )
   return html

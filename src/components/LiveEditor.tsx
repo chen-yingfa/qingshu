@@ -1,6 +1,7 @@
 import {
   memo,
   type KeyboardEvent,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,8 +11,7 @@ import {
 
 import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
 import {
-  createDocumentRenderContext,
-  parseBlocks,
+  parseDocument,
   renderDocumentFootnotes,
   renderMarkdown,
   renderMarkdownBlock,
@@ -100,18 +100,20 @@ export function moveByCjkWord(
   return previous?.index ?? 0
 }
 
-function editorBlocks(content: string): MarkdownBlock[] {
-  const blocks = parseBlocks(content)
-  if (blocks.length === 0 || /\n\s*\n$/u.test(content)) {
-    blocks.push({
+function editorBlocks(
+  content: string,
+  parsedBlocks: MarkdownBlock[],
+): MarkdownBlock[] {
+  if (parsedBlocks.length === 0 || /\n\s*\n$/u.test(content)) {
+    return [...parsedBlocks, {
       id: 'empty-tail',
       type: 'paragraph',
       source: '',
       start: content.length,
       end: content.length,
-    })
+    }]
   }
-  return blocks
+  return parsedBlocks
 }
 
 function FullDocumentPreview({
@@ -171,12 +173,14 @@ function deferWork(callback: () => void): () => void {
 const RenderedBlock = memo(function RenderedBlock({
   block,
   context,
+  index,
   onActivate,
   editable,
 }: {
   block: MarkdownBlock
   context: DocumentRenderContext
-  onActivate(): void
+  index: number
+  onActivate(index: number): void
   editable: boolean
 }) {
   const [html, setHtml] = useState('')
@@ -205,7 +209,7 @@ const RenderedBlock = memo(function RenderedBlock({
               'a, button, input, select, textarea, summary',
             )
           ) {
-            onActivate()
+            onActivate(index)
           }
         }}
         dangerouslySetInnerHTML={{ __html: html }}
@@ -216,7 +220,7 @@ const RenderedBlock = memo(function RenderedBlock({
           className="edit-block-button"
           aria-label="Edit Markdown block"
           title="Edit Markdown block"
-          onClick={onActivate}
+          onClick={() => onActivate(index)}
         >
           Edit
         </button>
@@ -227,6 +231,8 @@ const RenderedBlock = memo(function RenderedBlock({
   previous.block.id === next.block.id &&
   previous.block.source === next.block.source &&
   previous.context.signature === next.context.signature &&
+  previous.index === next.index &&
+  previous.onActivate === next.onActivate &&
   previous.editable === next.editable,
 )
 
@@ -322,8 +328,12 @@ export function LiveEditor({
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
-  const blocks = useMemo(() => editorBlocks(content), [content])
-  const renderContext = useMemo(() => createDocumentRenderContext(content), [content])
+  const model = useMemo(() => parseDocument(content), [content])
+  const blocks = useMemo(
+    () => editorBlocks(content, model.blocks),
+    [content, model.blocks],
+  )
+  const renderContext = model.renderContext
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(active.source)
@@ -335,6 +345,11 @@ export function LiveEditor({
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
+  const activationRef = useRef(onActiveBlockChange)
+  activationRef.current = onActiveBlockChange
+  const activateBlock = useCallback((index: number) => {
+    activationRef.current(index)
+  }, [])
   contentRef.current = content
 
   useLayoutEffect(() => {
@@ -399,14 +414,37 @@ export function LiveEditor({
     selectionEnd = selectionStart,
   ) => {
     if (composingRef.current) return
-    const transform = (source: string) => {
-      const normalized = normalizeCjkInput(source)
-      return autoSpacing ? spaceCjkLatin(normalized) : normalized
+    const candidate = replaceBlockSource(
+      contentRef.current,
+      rangeRef.current,
+      value,
+    )
+    const transformTo = (end: number) => {
+      const range = { start: rangeRef.current.start, end }
+      let transformed = normalizeCjkInput(candidate, range)
+      let transformedEnd = end + transformed.length - candidate.length
+      if (autoSpacing) {
+        const spaced = spaceCjkLatin(transformed, {
+          start: range.start,
+          end: transformedEnd,
+        })
+        transformedEnd += spaced.length - transformed.length
+        transformed = spaced
+      }
+      return { source: transformed, end: transformedEnd }
     }
-    const normalized = transform(value)
+    const transformed = transformTo(rangeRef.current.start + value.length)
+    const normalized = transformed.source.slice(
+      rangeRef.current.start,
+      transformed.end,
+    )
     if (normalized !== value) {
-      const nextStart = transform(value.slice(0, selectionStart)).length
-      const nextEnd = transform(value.slice(0, selectionEnd)).length
+      const nextStart =
+        transformTo(rangeRef.current.start + selectionStart).end -
+        rangeRef.current.start
+      const nextEnd =
+        transformTo(rangeRef.current.start + selectionEnd).end -
+        rangeRef.current.start
       commitDraft(normalized)
       afterPaint(() => {
         textareaRef.current?.setSelectionRange(nextStart, nextEnd)
@@ -542,7 +580,8 @@ export function LiveEditor({
               block={block}
               context={renderContext}
               editable
-              onActivate={() => onActiveBlockChange(index)}
+              index={index}
+              onActivate={activateBlock}
             />
           ),
         )

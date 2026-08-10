@@ -11,7 +11,7 @@ export interface DocumentStats {
 
 type TextTransform = (text: string, start: number, source: string) => string
 
-interface SourceRange {
+export interface SourceRange {
   start: number
   end: number
 }
@@ -122,9 +122,19 @@ function destinationRange(
   return { start: start + destinationStart, end: start + index }
 }
 
-function collectProtectedRanges(source: string): SourceRange[] {
+function collectProtectedRanges(
+  source: string,
+  editableRange?: SourceRange,
+): SourceRange[] {
   const tree = markdownParser.parse(source) as MarkdownNode
   const ranges: SourceRange[] = collectPresentationRanges(source)
+  if (editableRange) {
+    ranges.push({ start: 0, end: Math.max(0, editableRange.start) })
+    ranges.push({
+      start: Math.min(source.length, editableRange.end),
+      end: source.length,
+    })
+  }
 
   const visit = (node: MarkdownNode) => {
     const start = node.position?.start.offset
@@ -174,8 +184,12 @@ function collectProtectedRanges(source: string): SourceRange[] {
   return merged
 }
 
-function transformMarkdownText(source: string, transform: TextTransform): string {
-  const ranges = collectProtectedRanges(source)
+function transformMarkdownText(
+  source: string,
+  transform: TextTransform,
+  editableRange?: SourceRange,
+): string {
+  const ranges = collectProtectedRanges(source, editableRange)
   let result = ''
   let index = 0
 
@@ -237,8 +251,11 @@ function normalizePlainText(text: string, start: number, source: string): string
   return result
 }
 
-export function normalizeCjkInput(source: string): string {
-  return transformMarkdownText(source, normalizePlainText)
+export function normalizeCjkInput(
+  source: string,
+  editableRange?: SourceRange,
+): string {
+  return transformMarkdownText(source, normalizePlainText, editableRange)
 }
 
 function spacePlainText(source: string): string {
@@ -248,8 +265,11 @@ function spacePlainText(source: string): string {
     .replace(new RegExp(`([A-Za-z0-9])([${cjk}])`, 'gu'), '$1 $2')
 }
 
-export function spaceCjkLatin(source: string): string {
-  return transformMarkdownText(source, spacePlainText)
+export function spaceCjkLatin(
+  source: string,
+  editableRange?: SourceRange,
+): string {
+  return transformMarkdownText(source, spacePlainText, editableRange)
 }
 
 function fallbackWordCount(source: string): number {

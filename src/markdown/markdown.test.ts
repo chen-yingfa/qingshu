@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createDocumentRenderContext,
+  parseDocument,
   parseBlocks,
   renderDocumentFootnotes,
   renderMarkdown,
@@ -104,5 +105,36 @@ describe('renderMarkdown', () => {
     expect(footnotes).toContain('Shared <strong>footnote</strong>.')
     expect(footnotes).toContain('href="#user-content-fnref-note"')
     expect(footnotes).toContain('href="#user-content-fnref-note-2"')
+  })
+
+  it('derives footnote ordinals only from AST footnoteReference nodes', async () => {
+    const source = [
+      '---',
+      'title: "[^front-matter]"',
+      '---',
+      'First[^real] and `[^inline-code]` and \\[^escaped].',
+      '',
+      '```md',
+      '[^fenced-code]',
+      '```',
+      '',
+      '<!-- [^html-comment] -->',
+      '',
+      'Second[^real].',
+      '',
+      '[^real]: Actual note.',
+    ].join('\n')
+    const model = parseDocument(source)
+    const rendered = await Promise.all(
+      model.blocks.map((block) => renderMarkdownBlock(block, model.renderContext)),
+    )
+
+    expect(model.renderContext.references).toHaveLength(2)
+    expect(rendered.join('\n')).toContain('id="user-content-fnref-real"')
+    expect(rendered.join('\n')).toContain('id="user-content-fnref-real-2"')
+    expect(rendered.join('\n')).not.toContain('fnref-front-matter')
+    expect(rendered.join('\n')).not.toContain('fnref-inline-code')
+    expect(rendered.join('\n')).not.toContain('fnref-fenced-code')
+    expect(rendered.join('\n')).not.toContain('fnref-html-comment')
   })
 })
