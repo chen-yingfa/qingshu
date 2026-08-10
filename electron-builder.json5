@@ -36,6 +36,7 @@
   "linux": {
     "icon": "build/icon.png",
     "category": "Office",
+    "syncDesktopName": true,
     "synopsis": "A lightweight desktop Markdown editor",
     "description": "Qingshu is a lightweight desktop Markdown editor focused on clean writing, live preview, and practical CJK input.",
     "target": [

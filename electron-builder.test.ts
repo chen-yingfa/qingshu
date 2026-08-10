@@ -17,7 +17,10 @@ describe('desktop package metadata', () => {
     expect(config.linux).toMatchObject({
       icon: 'build/icon.png',
       category: 'Office',
+      syncDesktopName: true,
     })
+    const packageMetadata = JSON.parse(await readFile('package.json', 'utf8'))
+    expect(packageMetadata.desktopName).toBe('Qingshu')
   })
 
   it('includes original SVG, PNG, and Windows ICO icon assets', async () => {

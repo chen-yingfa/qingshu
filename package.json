@@ -3,6 +3,7 @@
   "version": "2.1.0",
   "main": "dist-electron/main/index.js",
   "description": "A lightweight Electron Markdown editor.",
+  "desktopName": "Qingshu",
   "author": "草鞋没号 <308487730@qq.com>",
   "license": "MIT",
   "private": true,
