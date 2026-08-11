@@ -76,12 +76,6 @@ type ActivePdfExport = ReturnType<typeof createPreviewBarrier> & {
   controller: AbortController
 }
 
-function resolvesDark(theme: AppSettings['theme']): boolean {
-  if (theme === 'dark') return true
-  if (theme === 'light') return false
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
-}
-
 function initialSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
@@ -131,10 +125,13 @@ export default function App() {
     openRecentDocument,
     saveDocument,
   } = useDocument(settings.defaultSourceMode)
-  const [dark, setDark] = useState(() => resolvesDark(settings.theme))
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
+  )
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(settings.defaultA4)
-  const [autoSpacing, setAutoSpacing] = useState(settings.autoSpacing)
+  const dark = settings.theme === 'system' ? systemDark : settings.theme === 'dark'
+  const autoSpacing = settings.autoSpacing
   const sourceMode = state.sourceMode
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -247,7 +244,7 @@ export default function App() {
     if (settings.theme !== 'system') return undefined
     const media = window.matchMedia?.('(prefers-color-scheme: dark)')
     if (!media) return undefined
-    const update = (event: MediaQueryListEvent) => setDark(event.matches)
+    const update = (event: MediaQueryListEvent) => setSystemDark(event.matches)
     media.addEventListener?.('change', update)
     return () => media.removeEventListener?.('change', update)
   }, [settings.theme])
@@ -442,7 +439,6 @@ export default function App() {
   const applySettings = useCallback(
     (next: AppSettings) => {
       setSettings(next)
-      if (next.theme !== settings.theme) setDark(resolvesDark(next.theme))
       if (
         next.autoSpacing !== settings.autoSpacing &&
         next.autoSpacing &&
@@ -451,9 +447,6 @@ export default function App() {
         const spaced = spaceCjkLatin(state.content)
         if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
       }
-      if (next.autoSpacing !== settings.autoSpacing) {
-        setAutoSpacing(next.autoSpacing)
-      }
     },
     [autoSpacing, dispatch, settings, state.content],
   )
@@ -461,14 +454,10 @@ export default function App() {
   const toggleOption = useCallback(
     (option: 'dark' | 'focus' | 'a4' | 'spacing' | 'source') => {
       if (option === 'dark') {
-        setDark((value) => {
-          const next = !value
-          setSettings((current) => ({
-            ...current,
-            theme: next ? 'dark' : 'light',
-          }))
-          return next
-        })
+        setSettings((current) => ({
+          ...current,
+          theme: dark ? 'light' : 'dark',
+        }))
       }
       if (option === 'focus') setFocus((value) => !value)
       if (option === 'a4') {
@@ -479,18 +468,15 @@ export default function App() {
         })
       }
       if (option === 'spacing') {
-        setAutoSpacing((value) => {
-          const enabled = !value
-          if (enabled) {
-            const spaced = spaceCjkLatin(state.content)
-            if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
-          }
-          setSettings((current) => ({
-            ...current,
-            autoSpacing: enabled,
-          }))
-          return enabled
-        })
+        const enabled = !autoSpacing
+        if (enabled) {
+          const spaced = spaceCjkLatin(state.content)
+          if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
+        }
+        setSettings((current) => ({
+          ...current,
+          autoSpacing: enabled,
+        }))
       }
       if (option === 'source') {
         setFormatRequest(undefined)
@@ -499,7 +485,7 @@ export default function App() {
         dispatch({ type: 'source-mode', enabled: next })
       }
     },
-    [dispatch, state.content, state.sourceMode],
+    [autoSpacing, dark, dispatch, state.content, state.sourceMode],
   )
 
   const shellActionsRef = useRef({
