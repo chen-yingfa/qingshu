@@ -463,6 +463,53 @@ describe('desktop IPC', () => {
     ).resolves.not.toHaveProperty('warnings')
   })
 
+  it('serializes concurrent recent mutations and notification delivery', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.readFile.mockRejectedValue(missing)
+    mocks.showOpenDialog
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/concurrent-a.md'],
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/concurrent-b.md'],
+      })
+    let releaseFirstWrite!: () => void
+    mocks.recentHandle.writeFile
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            releaseFirstWrite = () => reject(new Error('recent failure a'))
+          }),
+      )
+      .mockRejectedValueOnce(new Error('recent failure b'))
+
+    const first = mocks.handlers.get('qingshu:open-file')?.(event)
+    const second = mocks.handlers.get('qingshu:open-file')?.(event)
+    await vi.waitFor(() =>
+      expect(mocks.recentHandle.writeFile).toHaveBeenCalledOnce(),
+    )
+    let listSettled = false
+    const listed = (
+      mocks.handlers.get('qingshu:list-recent-files')?.(event) as Promise<unknown>
+    ).finally(() => {
+      listSettled = true
+    })
+    await Promise.resolve()
+    expect(listSettled).toBe(false)
+
+    releaseFirstWrite()
+    await Promise.all([first, second])
+    await expect(listed).resolves.toMatchObject({
+      paths: ['/notes/concurrent-b.md', '/notes/concurrent-a.md'],
+      warnings: [
+        expect.stringContaining('recent failure a'),
+        expect.stringContaining('recent failure b'),
+      ],
+    })
+  })
+
   it('keeps a committed save successful when recent chmod fails', async () => {
     mocks.showOpenDialog.mockResolvedValue({
       canceled: false,
@@ -593,6 +640,74 @@ describe('desktop IPC', () => {
       content: '# Hello',
     })
     expect(mocks.open).toHaveBeenCalledWith('/real/note.md', 'r')
+  })
+
+  it('rejects a dialog selection when the canonical target is swapped before handle open', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/swapped.md'],
+    })
+    mocks.stat.mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
+    })
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 99,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
+    })
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).rejects.toThrow('File changed while it was being opened')
+    expect(mocks.sourceHandle.readFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-regular file selected for opening', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/directory.md'],
+    })
+    mocks.stat.mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      mode: 0o040755,
+      mtimeMs: 100,
+      size: 6,
+    })
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      mode: 0o040755,
+      mtimeMs: 100,
+      size: 6,
+    })
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).rejects.toThrow('Only regular files can be opened')
+    expect(mocks.sourceHandle.readFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a recent path whose canonical name is rebound after handle open', async () => {
+    const path = '/notes/rebound.md'
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [path],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.realpath
+      .mockResolvedValueOnce(path)
+      .mockResolvedValueOnce('/attacker/rebound.md')
+
+    await expect(
+      mocks.handlers.get('qingshu:open-recent-file')?.(event, path),
+    ).rejects.toThrow('File changed while it was being opened')
   })
 
   it('rejects content that changes while the opened handle is being read', async () => {
@@ -730,6 +845,35 @@ describe('desktop IPC', () => {
     ])
     expect(writes).toEqual(['older', 'newest'])
     expect(documentRenameCalls()).toHaveLength(2)
+  })
+
+  it('cancels an in-flight save before discard so it cannot rename afterward', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/discarded.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    let releaseWrite!: () => void
+    mocks.tempHandle.writeFile.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWrite = resolve
+        }),
+    )
+
+    const save = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/discarded.md',
+      content: 'discard me',
+      saveToken: 'tab-2:7',
+    }) as Promise<unknown>
+    await vi.waitFor(() => expect(mocks.tempHandle.writeFile).toHaveBeenCalled())
+
+    await expect(
+      mocks.handlers.get('qingshu:cancel-save')?.(event, 'tab-2:7'),
+    ).resolves.toBeUndefined()
+    releaseWrite()
+    await expect(save).rejects.toThrow('Save was canceled')
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
   it('serializes duplicate Open between Save A and Save B on one authorization', async () => {
@@ -916,6 +1060,38 @@ describe('desktop IPC', () => {
     expect(mocks.tempHandle.sync).toHaveBeenCalledOnce()
     expect(documentRenameCalls()).toHaveLength(0)
     expect(mocks.unlink).toHaveBeenCalledOnce()
+  })
+
+  it('verifies an existing save target through an open handle before rename', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/handle-conflict.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.sourceHandle.stat
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 2,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+      .mockResolvedValueOnce({
+        dev: 1,
+        ino: 77,
+        mode: 0o100644,
+        mtimeMs: 100,
+        size: 6,
+      })
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/handle-conflict.md',
+        content: '# Mine',
+        saveToken: 'tab-2:8',
+      }),
+    ).rejects.toThrow('File changed on disk')
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
   it('treats a chmod between verification and rename as a conflict', async () => {
@@ -1210,6 +1386,75 @@ describe('desktop IPC', () => {
     )
   })
 
+  it('atomically commits HTML exports with private temp permissions', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/private.html',
+    })
+
+    await expect(
+      mocks.handlers
+        .get('qingshu:export-html')
+        ?.(event, { html: '<h1>Private</h1>' }),
+    ).resolves.toEqual({ canceled: false, path: '/exports/private.html' })
+
+    expect(mocks.open).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/exports\/\.private\.html\.qingshu-\d+-\d+\.tmp$/,
+      ),
+      'wx',
+      0o600,
+    )
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith(
+      '<h1>Private</h1>',
+      'utf8',
+    )
+    expect(mocks.tempHandle.sync).toHaveBeenCalled()
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/exports\/\.private\.html\.qingshu-\d+-\d+\.tmp$/,
+      ),
+      '/exports/private.html',
+    )
+  })
+
+  it('does not remember an HTML export when its atomic commit fails', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/failed.html',
+    })
+    mocks.rename.mockRejectedValueOnce(new Error('rename failed'))
+
+    await expect(
+      mocks.handlers
+        .get('qingshu:export-html')
+        ?.(event, { html: '<h1>Failed</h1>' }),
+    ).rejects.toThrow('rename failed')
+    await expect(
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(event, '/exports/failed.html'),
+    ).rejects.toThrow('File was not exported by Qingshu')
+    expect(mocks.unlink).toHaveBeenCalled()
+  })
+
+  it('rejects oversized Markdown and HTML IPC payloads before opening dialogs', async () => {
+    const oversized = 'x'.repeat(16 * 1024 * 1024 + 1)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        content: oversized,
+        saveToken: 'tab-1:oversized',
+      }),
+    ).rejects.toThrow('Markdown content exceeds the 16 MiB limit')
+    await expect(
+      mocks.handlers
+        .get('qingshu:export-html')
+        ?.(event, { html: oversized }),
+    ).rejects.toThrow('HTML content exceeds the 16 MiB limit')
+    expect(mocks.showSaveDialog).not.toHaveBeenCalled()
+  })
+
   it('reveals only files exported by the requesting renderer', async () => {
     mocks.showSaveDialog.mockResolvedValue({
       canceled: false,
@@ -1298,6 +1543,52 @@ describe('desktop IPC', () => {
         .get('qingshu:show-item-in-folder')
         ?.(windowEvent, '/exports/reload.html'),
     ).rejects.toThrow('File was not exported by Qingshu')
+  })
+
+  it('clears document authorization when the main frame navigates', async () => {
+    await main.createWindow()
+    const window = mocks.browserWindows.at(-1)
+    window.webContents.mainFrame = senderFrame
+    const windowEvent = {
+      senderFrame,
+      sender: window.webContents,
+    }
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/reload.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(windowEvent)
+
+    mocks.webContentsListeners
+      .get('did-start-navigation')
+      ?.({}, 'file:///workspace/dist/index.html', false, true)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(windowEvent, {
+        path: '/notes/reload.md',
+        content: '# stale authorization',
+        saveToken: 'tab-2:9',
+      }),
+    ).rejects.toThrow('Save path was not authorized by a file dialog')
+  })
+
+  it('rejects a second native dialog while one is already pending', async () => {
+    let releaseDialog!: () => void
+    mocks.showOpenDialog.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseDialog = () => resolve({ canceled: true, filePaths: [] })
+        }),
+    )
+
+    const first = mocks.handlers.get('qingshu:open-file')?.(event)
+    await vi.waitFor(() => expect(mocks.showOpenDialog).toHaveBeenCalledOnce())
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).rejects.toThrow('A native file dialog is already open')
+    expect(mocks.showOpenDialog).toHaveBeenCalledOnce()
+    releaseDialog()
+    await expect(first).resolves.toEqual({ canceled: true })
   })
 
   it('atomically consumes a reveal grant before asynchronous validation', async () => {

@@ -141,6 +141,55 @@ describe('useDocument save lifecycle', () => {
     expect(saveFile).not.toHaveBeenCalled()
   })
 
+  it('cancels an in-flight save before removing a discarded tab', async () => {
+    let finishSave!: (value: { canceled: false; path: string }) => void
+    let finishCancellation!: () => void
+    const cancelSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCancellation = resolve
+        }),
+    )
+    window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/discarded.md',
+      }),
+      saveFile: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve
+          }),
+      ),
+      cancelSave,
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.newDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: '# Discard' }))
+
+    let save!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      save = result.current.saveDocument()
+    })
+    await waitFor(() => expect(window.qingshu.saveFile).toHaveBeenCalledOnce())
+    const request = vi.mocked(window.qingshu.saveFile).mock.calls[0][0]
+    let close!: Promise<void>
+    act(() => {
+      close = result.current.closeTab('tab-2')
+    })
+
+    expect(cancelSave).toHaveBeenCalledWith(request.saveToken)
+    expect(result.current.tabs.some((tab) => tab.id === 'tab-2')).toBe(true)
+    finishCancellation()
+    await act(async () => {
+      await close
+    })
+    expect(result.current.tabs.some((tab) => tab.id === 'tab-2')).toBe(false)
+
+    finishSave({ canceled: false, path: '/notes/discarded.md' })
+    await expect(save).resolves.toEqual({ status: 'superseded' })
+  })
+
   it('deduplicates simultaneous opens before allocating tab resources', async () => {
     window.qingshu = {
       openFile: vi.fn().mockResolvedValue({
