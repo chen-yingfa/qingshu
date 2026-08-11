@@ -592,7 +592,7 @@ describe('application safety controls', () => {
     expect(api.showItemInFolder).toHaveBeenCalledWith('/notes/export.pdf')
   })
 
-  it('waits for fonts and current image completion before requesting PDF', async () => {
+  it('waits for fonts and blocks PDF export when a current image fails', async () => {
     let resolveFonts!: () => void
     const fontsReady = new Promise<void>((resolve) => {
       resolveFonts = resolve
@@ -620,7 +620,16 @@ describe('application safety controls', () => {
       expect(api.exportPdf).not.toHaveBeenCalled()
 
       fireEvent.error(image)
-      await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
+      await waitFor(() =>
+        expect(
+          screen.getAllByText(
+            'Failed to load image "Diagram" before PDF export',
+          ),
+        ).toHaveLength(2),
+      )
+      expect(api.exportPdf).not.toHaveBeenCalled()
+      expect(image.getAttribute('data-image-error')).toBe('true')
+      expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull()
     } finally {
       if (previousFonts) {
         Object.defineProperty(document, 'fonts', previousFonts)
