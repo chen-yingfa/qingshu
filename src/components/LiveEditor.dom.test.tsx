@@ -91,6 +91,36 @@ describe('LiveEditor state synchronization', () => {
     expect(current.selectionStart).toBe(1)
   })
 
+  it('does not duplicate content when a tight list becomes loose while active', () => {
+    const result = renderEditor('- First\n- Second')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: {
+        value: '- First\n\n- Second',
+        selectionStart: 9,
+        selectionEnd: 9,
+      },
+    })
+    result.rerender(
+      <LiveEditor
+        content={'- First\n\n- Second'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect(screen.getAllByLabelText('Active Markdown block')).toHaveLength(1)
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('- First\n\n- Second')
+    expect(result.container.querySelectorAll('.rendered-block')).toHaveLength(0)
+  })
+
   it('synchronizes the active draft after a same-index document replacement', () => {
     const result = renderEditor('Old document')
     const previous = screen.getByLabelText('Active Markdown block')

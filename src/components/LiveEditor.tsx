@@ -45,6 +45,12 @@ interface InsertedBlock {
   rightPadding: number
 }
 
+interface EditingBoundary {
+  content: string
+  start: number
+  end: number
+}
+
 interface FormatRequest {
   id: number
   command: FormatCommand
@@ -260,6 +266,70 @@ function editorBlocks(
     }
   }
   return editable.sort((left, right) => left.start - right.start)
+}
+
+function preserveEditingBoundary(
+  content: string,
+  blocks: MarkdownBlock[],
+  boundary: EditingBoundary | null,
+): MarkdownBlock[] {
+  if (!boundary || boundary.content !== content) return blocks
+  if (
+    blocks.some(
+      (block) =>
+        block.start === boundary.start && block.end === boundary.end,
+    )
+  ) {
+    return blocks
+  }
+  const containingIndex = blocks.findIndex(
+    (block) =>
+      block.start <= boundary.start && block.end >= boundary.end,
+  )
+  if (containingIndex < 0) return blocks
+  const containing = blocks[containingIndex]
+  const beforeRaw = content.slice(containing.start, boundary.start)
+  const beforeSource = beforeRaw.replace(/\s+$/u, '')
+  const afterRaw = content.slice(boundary.end, containing.end)
+  const afterLeading = afterRaw.match(/^\s+/u)?.[0].length ?? 0
+  const afterSource = afterRaw.slice(afterLeading)
+  const activeSource = content.slice(boundary.start, boundary.end)
+  const activeType =
+    parseDocument(activeSource).blocks[0]?.type ?? 'paragraph'
+  const replacement: MarkdownBlock[] = []
+
+  if (beforeSource) {
+    replacement.push({
+      id: `${containing.id}-before-${boundary.start}`,
+      type: containing.type,
+      source: beforeSource,
+      start: containing.start,
+      end: containing.start + beforeSource.length,
+    })
+  }
+  replacement.push({
+    id: `editing-boundary-${boundary.start}`,
+    type: activeType,
+    source: activeSource,
+    start: boundary.start,
+    end: boundary.end,
+  })
+  if (afterSource) {
+    const afterStart = boundary.end + afterLeading
+    replacement.push({
+      id: `${containing.id}-after-${boundary.end}`,
+      type: containing.type,
+      source: afterSource,
+      start: afterStart,
+      end: afterStart + afterSource.length,
+    })
+  }
+
+  return [
+    ...blocks.slice(0, containingIndex),
+    ...replacement,
+    ...blocks.slice(containingIndex + 1),
+  ]
 }
 
 function reorderInsertedBlocks(
@@ -683,6 +753,8 @@ export function LiveEditor({
     content: string
     blocks: InsertedBlock[]
   }>({ content, blocks: [] })
+  const [editingBoundary, setEditingBoundary] =
+    useState<EditingBoundary | null>(null)
   const [draggedBlock, setDraggedBlock] = useState<number | null>(null)
   const [dropBoundary, setDropBoundary] = useState<number | null>(null)
   const draggedBlockRef = useRef<number | null>(null)
@@ -693,9 +765,14 @@ export function LiveEditor({
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(() => parseDocument(content), [content])
-  const blocks = useMemo(
+  const parsedEditorBlocks = useMemo(
     () => editorBlocks(content, model.blocks, currentInsertedBlocks),
     [content, currentInsertedBlocks, model.blocks],
+  )
+  const blocks = useMemo(
+    () =>
+      preserveEditingBoundary(content, parsedEditorBlocks, editingBoundary),
+    [content, editingBoundary, parsedEditorBlocks],
   )
   const renderContext = model.renderContext
   const movableBlocks = useMemo(() => {
@@ -730,6 +807,7 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
+    setEditingBoundary(null)
     setActiveSession((session) => session + 1)
   }
 
@@ -796,6 +874,11 @@ export function LiveEditor({
               : block,
         ),
       }
+    })
+    setEditingBoundary({
+      content: nextContent,
+      start: previous.start,
+      end: previous.start + sourceValue.length,
     })
     setDraft(value)
     rangeRef.current.end = rangeRef.current.start + sourceValue.length

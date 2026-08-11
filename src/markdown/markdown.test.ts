@@ -11,12 +11,11 @@ import {
 } from './markdown'
 
 describe('parseBlocks', () => {
-  it('keeps blank-line-separated list items as distinct editor blocks', () => {
+  it('retains blank-line-separated items as one semantic loose list', () => {
     const blocks = parseBlocks('- Previous item\n\n-')
 
     expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
-      { type: 'list', source: '- Previous item' },
-      { type: 'list', source: '-' },
+      { type: 'list', source: '- Previous item\n\n-' },
     ])
   })
 
@@ -26,6 +25,13 @@ describe('parseBlocks', () => {
     expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
       { type: 'list', source: '- First\n- Second' },
     ])
+  })
+
+  it('renders loose ordered items as one semantic list', async () => {
+    const html = await renderMarkdown('3. alpha\n\n9. beta')
+
+    expect(html.match(/<ol/g)).toHaveLength(1)
+    expect(html.match(/<li/g)).toHaveLength(2)
   })
 
   it('preserves exact source slices and offsets for top-level blocks', () => {
