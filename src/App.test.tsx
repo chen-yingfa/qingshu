@@ -271,6 +271,58 @@ describe('commands and operation feedback', () => {
     expect(formatShortcut('Ctrl+O', true)).toBe('⌘O')
   })
 
+  it.each([
+    ['b', false, '**word**'],
+    ['i', false, '_word_'],
+    ['`', false, '`word`'],
+    ['m', false, '$word$'],
+  ])(
+    'runs configurable formatting hotkey Ctrl+%s',
+    async (key, shiftKey, expected) => {
+      render(<App />)
+      const editor = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      fireEvent.change(editor, { target: { value: 'word' } })
+      editor.setSelectionRange(0, 4)
+
+      fireEvent.keyDown(window, { key, ctrlKey: true, shiftKey })
+
+      await waitFor(() => expect(editor.value).toBe(expected))
+    },
+  )
+
+  it('opens settings and applies font size and a recorded hotkey', async () => {
+    const { container } = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    fireEvent.change(screen.getByLabelText('Document font size'), {
+      target: { value: '20' },
+    })
+    fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
+      key: 'k',
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+
+    expect(
+      (container.querySelector('.app-shell') as HTMLElement).style.getPropertyValue(
+        '--document-font-size',
+      ),
+    ).toBe('20px')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: 'word' } })
+    editor.setSelectionRange(0, 4)
+    fireEvent.keyDown(window, {
+      key: 'k',
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    await waitFor(() => expect(editor.value).toBe('**word**'))
+  })
+
   it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {
     const { container } = render(<App />)
 
@@ -316,11 +368,26 @@ describe('commands and operation feedback', () => {
       'Save as',
       'Export HTML',
       'Export PDF',
+      'Bold',
+      'Italic',
+      'Inline code',
+      'Inline math',
+      'Settings',
     ]) {
       expect(
         screen.getByRole('option', { name: new RegExp(`^${name}(?:, Ctrl.*)?$`) }),
       ).not.toBeNull()
     }
+    expect(
+      screen.getByRole('option', { name: /^Bold, Ctrl\+B$/ }),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('option', { name: /^Inline math, Ctrl\+M$/ }),
+    ).not.toBeNull()
+    fireEvent.click(
+      screen.getByRole('option', { name: /^Settings, Ctrl\+,$/ }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Settings' })).not.toBeNull()
   })
 
   it('shows success and error toasts for bridge operations', async () => {

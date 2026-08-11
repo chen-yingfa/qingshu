@@ -30,6 +30,7 @@ export type FormatCommand =
   | 'italic'
   | 'link'
   | 'code'
+  | 'math'
   | 'quote'
   | 'unordered-list'
 
@@ -661,6 +662,8 @@ function formattedValue(
       return applyInlineFormat(value, start, end, '_', '_')
     case 'code':
       return applyInlineFormat(value, start, end, '`', '`')
+    case 'math':
+      return applyInlineFormat(value, start, end, '$', '$')
     case 'link':
       return applyInlineFormat(value, start, end, '[', '](url)')
     case 'heading':

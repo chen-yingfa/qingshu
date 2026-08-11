@@ -1,7 +1,8 @@
+import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
 import { Icon, type IconName } from './Icons'
 
-export type DocumentFont = 'sans' | 'serif' | 'mono'
+export type { DocumentFont } from '../settings'
 
 interface ToolbarProps {
   dark: boolean
@@ -12,6 +13,7 @@ interface ToolbarProps {
   onFile(command: 'new' | 'open' | 'save' | 'save-as' | 'export-html' | 'export-pdf'): void
   onFormat(command: FormatCommand): void
   onFontChange(font: DocumentFont): void
+  onSettings(): void
   onToggle(option: 'dark' | 'focus' | 'a4' | 'spacing'): void
 }
 
@@ -21,6 +23,7 @@ const formats: Array<[FormatCommand, IconName, string]> = [
   ['italic', 'italic', 'Italic'],
   ['link', 'link', 'Link'],
   ['code', 'code', 'Inline code'],
+  ['math', 'math', 'Inline math'],
   ['quote', 'quote', 'Block quote'],
   ['unordered-list', 'list', 'Bullet list'],
 ]
@@ -59,6 +62,7 @@ export function Toolbar({
   onFile,
   onFormat,
   onFontChange,
+  onSettings,
   onToggle,
 }: ToolbarProps) {
   return (
@@ -121,6 +125,11 @@ export function Toolbar({
           icon="sun"
           active={dark}
           onClick={() => onToggle('dark')}
+        />
+        <ToolButton
+          label="Settings"
+          icon="settings"
+          onClick={onSettings}
         />
       </div>
     </nav>

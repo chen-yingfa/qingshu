@@ -31,9 +31,9 @@ button {
 .app-shell {
   --accent: #a2673f;
   --accent-soft: #eee1d6;
-  --bg: #eae7e1;
-  --chrome: rgba(247, 245, 241, 0.96);
-  --paper: #fffefa;
+  --bg: #fff;
+  --chrome: rgba(255, 255, 255, 0.97);
+  --paper: #fff;
   --text: #292723;
   --muted: #77716a;
   --line: #d9d4cc;
@@ -252,7 +252,7 @@ button {
   font-family:
     Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
-  font-size: 17px;
+  font-size: var(--document-font-size, 17px);
   line-height: 1.85;
   overflow-wrap: anywhere;
 }
@@ -621,6 +621,178 @@ button {
   white-space: nowrap;
 }
 
+.settings-backdrop {
+  position: fixed;
+  z-index: 35;
+  inset: 0;
+  display: grid;
+  padding: 28px 20px;
+  background: rgba(28, 25, 22, 0.38);
+  backdrop-filter: blur(5px);
+  place-items: center;
+}
+
+.settings-dialog {
+  display: grid;
+  width: min(760px, 100%);
+  max-height: min(820px, calc(100vh - 56px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  color: var(--text);
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(20, 17, 14, 0.28);
+}
+
+.settings-header,
+.settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-color: var(--line);
+  background: var(--chrome);
+}
+
+.settings-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-header h2,
+.settings-header p {
+  margin: 0;
+}
+
+.settings-header h2 {
+  font-size: 18px;
+}
+
+.settings-header p,
+.settings-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 22px;
+}
+
+.settings-scroll {
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.settings-section legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-field,
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 240px);
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.settings-field select,
+.settings-field input,
+.shortcut-row input {
+  width: 100%;
+  height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--code);
+  font: 12px/1.3 ui-sans-serif, sans-serif;
+}
+
+.settings-number {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+
+.settings-check input {
+  accent-color: var(--accent);
+}
+
+.shortcut-list {
+  display: grid;
+  gap: 8px;
+}
+
+.shortcut-row input {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+}
+
+.shortcut-row input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.shortcut-row input.has-conflict {
+  border-color: #c75b5b;
+}
+
+.shortcut-row small {
+  display: block;
+  margin-top: 3px;
+  color: #c75b5b;
+  font-size: 10px;
+  text-align: right;
+}
+
+.settings-footer {
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-footer button {
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--code);
+}
+
+.settings-footer .settings-done {
+  border-color: var(--accent);
+  color: white;
+  background: var(--accent);
+}
+
 .palette-backdrop {
   position: fixed;
   z-index: 30;
@@ -924,6 +1096,20 @@ kbd {
   .palette-backdrop {
     padding: 56px 10px 10px;
   }
+
+  .settings-backdrop {
+    padding: 10px;
+  }
+
+  .settings-dialog {
+    max-height: calc(100vh - 20px);
+  }
+
+  .settings-field,
+  .shortcut-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -942,6 +1128,7 @@ kbd {
   .edit-block-button,
   .block-drag-handle,
   .block-drop-zone,
+  .settings-backdrop,
   .palette-backdrop,
   .toast-region {
     display: none;

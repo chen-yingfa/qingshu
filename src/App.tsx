@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import {
   CommandPalette,
@@ -7,13 +14,24 @@ import {
 import { LiveEditor, type FormatCommand } from './components/LiveEditor'
 import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
+import { SettingsDialog } from './components/SettingsDialog'
 import { TitleBar } from './components/TitleBar'
 import { ToastRegion, type ToastMessage } from './components/Toast'
-import { Toolbar, type DocumentFont } from './components/Toolbar'
+import { Toolbar } from './components/Toolbar'
 import { createHtmlDocument } from './export/html'
 import { useDocument } from './hooks/useDocument'
 import { spaceCjkLatin } from './markdown/cjk'
 import { waitForPrintReadiness } from './print/readiness'
+import {
+  DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
+  SHORTCUT_ACTIONS,
+  loadSettings,
+  matchesShortcut,
+  shortcutLabel,
+  type AppSettings,
+  type ShortcutAction,
+} from './settings'
 import type { MenuCommand } from './types/electron'
 
 function filename(path: string): string {
@@ -36,8 +54,7 @@ export function formatShortcut(
   shortcut: string,
   isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform),
 ): string {
-  if (!isMac) return shortcut
-  return shortcut.replace(/^Ctrl\+Shift\+/, '⌘⇧').replace(/^Ctrl\+/, '⌘')
+  return shortcutLabel(shortcut, isMac)
 }
 
 function createPreviewBarrier() {
@@ -54,30 +71,37 @@ type ActivePdfExport = ReturnType<typeof createPreviewBarrier> & {
   controller: AbortController
 }
 
-function storedDocumentFont(): DocumentFont {
-  const value = window.localStorage.getItem('qingshu:document-font')
-  return value === 'serif' || value === 'mono' ? value : 'sans'
+function resolvesDark(theme: AppSettings['theme']): boolean {
+  if (theme === 'dark') return true
+  if (theme === 'light') return false
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 }
 
 export default function App() {
   const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
-  const [dark, setDark] = useState(
-    () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
+  const [settings, setSettings] = useState(() =>
+    loadSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY)),
   )
+  const [dark, setDark] = useState(() => resolvesDark(settings.theme))
   const [focus, setFocus] = useState(false)
-  const [a4, setA4] = useState(false)
-  const [autoSpacing, setAutoSpacing] = useState(false)
-  const [documentFont, setDocumentFont] = useState<DocumentFont>(
-    storedDocumentFont,
-  )
+  const [a4, setA4] = useState(settings.defaultA4)
+  const [autoSpacing, setAutoSpacing] = useState(settings.autoSpacing)
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const toastId = useRef(0)
   const activePdfExport = useRef<ActivePdfExport | null>(null)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
+
+  const requestFormat = useCallback((command: FormatCommand) => {
+    setFormatRequest((request) => ({
+      id: (request?.id ?? 0) + 1,
+      command,
+    }))
+  }, [])
 
   const addToast = useCallback(
     (
@@ -122,8 +146,9 @@ export default function App() {
   )
 
   useEffect(() => {
-    window.localStorage.setItem('qingshu:document-font', documentFont)
-  }, [documentFont])
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+    window.localStorage.setItem('qingshu:document-font', settings.font)
+  }, [settings])
 
   const canDiscard = useCallback(
     () =>
@@ -271,11 +296,40 @@ export default function App() {
     ],
   )
 
+  const applySettings = useCallback(
+    (next: AppSettings) => {
+      setSettings(next)
+      setDark(resolvesDark(next.theme))
+      setA4(next.defaultA4)
+      if (next.autoSpacing && !autoSpacing) {
+        const spaced = spaceCjkLatin(state.content)
+        if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
+      }
+      setAutoSpacing(next.autoSpacing)
+    },
+    [autoSpacing, dispatch, state.content],
+  )
+
   const toggleOption = useCallback(
     (option: 'dark' | 'focus' | 'a4' | 'spacing') => {
-      if (option === 'dark') setDark((value) => !value)
+      if (option === 'dark') {
+        setDark((value) => {
+          const next = !value
+          setSettings((current) => ({
+            ...current,
+            theme: next ? 'dark' : 'light',
+          }))
+          return next
+        })
+      }
       if (option === 'focus') setFocus((value) => !value)
-      if (option === 'a4') setA4((value) => !value)
+      if (option === 'a4') {
+        setA4((value) => {
+          const next = !value
+          setSettings((current) => ({ ...current, defaultA4: next }))
+          return next
+        })
+      }
       if (option === 'spacing') {
         setAutoSpacing((value) => {
           const enabled = !value
@@ -283,6 +337,10 @@ export default function App() {
             const spaced = spaceCjkLatin(state.content)
             if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
           }
+          setSettings((current) => ({
+            ...current,
+            autoSpacing: enabled,
+          }))
           return enabled
         })
       }
@@ -295,69 +353,161 @@ export default function App() {
       {
         id: 'new',
         label: 'New document',
-        shortcut: formatShortcut('Ctrl+N'),
+        shortcut: formatShortcut(settings.shortcuts.new) || undefined,
         keywords: ['blank', 'file'],
         run: () => runCommand('new'),
       },
       {
         id: 'open',
         label: 'Open file',
-        shortcut: formatShortcut('Ctrl+O'),
+        shortcut: formatShortcut(settings.shortcuts.open) || undefined,
         keywords: ['load', 'document'],
         run: () => runCommand('open'),
       },
       {
         id: 'save',
         label: 'Save',
-        shortcut: formatShortcut('Ctrl+S'),
+        shortcut: formatShortcut(settings.shortcuts.save) || undefined,
         keywords: ['write', 'document'],
         run: () => runCommand('save'),
       },
       {
         id: 'save-as',
         label: 'Save as',
-        shortcut: formatShortcut('Ctrl+Shift+S'),
+        shortcut: formatShortcut(settings.shortcuts.saveAs) || undefined,
         keywords: ['copy', 'rename', 'document'],
         run: () => runCommand('save-as'),
       },
       {
         id: 'export-html',
         label: 'Export HTML',
+        shortcut: formatShortcut(settings.shortcuts.exportHtml) || undefined,
         keywords: ['web', 'standalone', 'document'],
         run: () => runCommand('export-html'),
       },
       {
         id: 'export-pdf',
         label: 'Export PDF',
+        shortcut: formatShortcut(settings.shortcuts.exportPdf) || undefined,
         keywords: ['print', 'a4', 'document'],
         run: () => runCommand('export-pdf'),
       },
       {
         id: 'theme',
         label: 'Toggle color theme',
+        shortcut: formatShortcut(settings.shortcuts.theme) || undefined,
         keywords: ['dark', 'light', 'appearance'],
         run: () => toggleOption('dark'),
       },
       {
         id: 'focus',
         label: 'Toggle focus mode',
+        shortcut: formatShortcut(settings.shortcuts.focus) || undefined,
         keywords: ['distraction', 'zen', 'view'],
         run: () => toggleOption('focus'),
       },
       {
         id: 'a4',
         label: 'Toggle A4 preview',
+        shortcut: formatShortcut(settings.shortcuts.a4) || undefined,
         keywords: ['page', 'paper', 'view'],
         run: () => toggleOption('a4'),
       },
       {
         id: 'spacing',
         label: 'Toggle automatic CJK spacing',
+        shortcut: formatShortcut(settings.shortcuts.spacing) || undefined,
         keywords: ['chinese', 'latin', 'space', '中文'],
         run: () => toggleOption('spacing'),
       },
+      {
+        id: 'bold',
+        label: 'Bold',
+        shortcut: formatShortcut(settings.shortcuts.bold) || undefined,
+        keywords: ['format', 'strong'],
+        run: () => requestFormat('bold'),
+      },
+      {
+        id: 'italic',
+        label: 'Italic',
+        shortcut: formatShortcut(settings.shortcuts.italic) || undefined,
+        keywords: ['format', 'emphasis'],
+        run: () => requestFormat('italic'),
+      },
+      {
+        id: 'inline-code',
+        label: 'Inline code',
+        shortcut:
+          formatShortcut(settings.shortcuts.inlineCode) || undefined,
+        keywords: ['format', 'code', 'backtick'],
+        run: () => requestFormat('code'),
+      },
+      {
+        id: 'inline-math',
+        label: 'Inline math',
+        shortcut:
+          formatShortcut(settings.shortcuts.inlineMath) || undefined,
+        keywords: ['format', 'latex', 'equation'],
+        run: () => requestFormat('math'),
+      },
+      {
+        id: 'settings',
+        label: 'Settings',
+        shortcut: formatShortcut(settings.shortcuts.settings) || undefined,
+        keywords: ['preferences', 'font', 'hotkeys', 'defaults'],
+        run: () => setSettingsOpen(true),
+      },
     ],
-    [runCommand, toggleOption],
+    [requestFormat, runCommand, settings.shortcuts, toggleOption],
+  )
+
+  const executeShortcutAction = useCallback(
+    (action: ShortcutAction) => {
+      const menuCommands: Partial<Record<ShortcutAction, MenuCommand>> = {
+        new: 'new',
+        open: 'open',
+        save: 'save',
+        saveAs: 'save-as',
+        exportHtml: 'export-html',
+        exportPdf: 'export-pdf',
+      }
+      const formatCommands: Partial<Record<ShortcutAction, FormatCommand>> = {
+        bold: 'bold',
+        italic: 'italic',
+        inlineCode: 'code',
+        inlineMath: 'math',
+      }
+      const options: Partial<
+        Record<ShortcutAction, 'dark' | 'focus' | 'a4' | 'spacing'>
+      > = {
+        theme: 'dark',
+        focus: 'focus',
+        a4: 'a4',
+        spacing: 'spacing',
+      }
+      if (action === 'palette') {
+        setPaletteOpen((open) => !open)
+        return
+      }
+      if (action === 'settings') {
+        setPaletteOpen(false)
+        setSettingsOpen(true)
+        return
+      }
+      const menu = menuCommands[action]
+      if (menu) {
+        void runCommand(menu)
+        return
+      }
+      const format = formatCommands[action]
+      if (format) {
+        requestFormat(format)
+        return
+      }
+      const option = options[action]
+      if (option) toggleOption(option)
+    },
+    [requestFormat, runCommand, toggleOption],
   )
 
   useEffect(() => window.qingshu.onMenuCommand((command) => void runCommand(command)), [
@@ -374,35 +524,28 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (settingsOpen || event.repeat) return
       if (event.key === 'Escape' && focus && !paletteOpen) {
         event.preventDefault()
         setFocus(false)
         return
       }
-      if (!(event.ctrlKey || event.metaKey)) return
-      if (event.key.toLowerCase() === 'p') {
-        event.preventDefault()
-        setPaletteOpen(true)
-        return
-      }
-      const command =
-        event.key.toLowerCase() === 's'
-          ? event.shiftKey
-            ? 'save-as'
-            : 'save'
-          : event.key.toLowerCase() === 'o'
-            ? 'open'
-            : event.key.toLowerCase() === 'n'
-              ? 'new'
-              : undefined
-      if (command) {
-        event.preventDefault()
-        void runCommand(command)
-      }
+      const action = SHORTCUT_ACTIONS.find(({ id }) =>
+        matchesShortcut(event, settings.shortcuts[id]),
+      )?.id
+      if (!action || (paletteOpen && action !== 'palette')) return
+      event.preventDefault()
+      executeShortcutAction(action)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [focus, paletteOpen, runCommand])
+  }, [
+    executeShortcutAction,
+    focus,
+    paletteOpen,
+    settings.shortcuts,
+    settingsOpen,
+  ])
 
   return (
     <div
@@ -411,8 +554,13 @@ export default function App() {
         dark ? 'theme-dark' : 'theme-light',
         focus ? 'focus-mode' : '',
         a4 ? 'a4-mode' : '',
-        `font-${documentFont}`,
+        `font-${settings.font}`,
       ].join(' ')}
+      style={
+        {
+          '--document-font-size': `${settings.fontSize}px`,
+        } as CSSProperties
+      }
     >
       <TitleBar
         path={state.path}
@@ -424,12 +572,11 @@ export default function App() {
         focus={focus}
         a4={a4}
         autoSpacing={autoSpacing}
-        documentFont={documentFont}
+        documentFont={settings.font}
         onFile={(command) => void runCommand(command)}
-        onFormat={(command) =>
-          setFormatRequest((request) => ({ id: (request?.id ?? 0) + 1, command }))
-        }
-        onFontChange={setDocumentFont}
+        onFormat={requestFormat}
+        onFontChange={(font) => setSettings((current) => ({ ...current, font }))}
+        onSettings={() => setSettingsOpen(true)}
         onToggle={toggleOption}
       />
       {focus && !printPreview && (
@@ -466,6 +613,13 @@ export default function App() {
       />
       {paletteOpen && (
         <CommandPalette commands={commands} onDismiss={() => setPaletteOpen(false)} />
+      )}
+      {settingsOpen && (
+        <SettingsDialog
+          settings={settings}
+          onChange={applySettings}
+          onDismiss={() => setSettingsOpen(false)}
+        />
       )}
       <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </div>

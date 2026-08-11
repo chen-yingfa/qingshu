@@ -19,6 +19,8 @@ in the repository.
 - Enter at the end of a block inserts a new editable block before the following
   content.
 - Light/dark themes, distraction-free focus mode, and an A4 page preview.
+- Persistent settings for theme and editor defaults, document font and size,
+  and customizable keyboard shortcuts.
 - Markdown open/save/save-as through a sandboxed Electron preload bridge.
 - Attractive A4 PDF export through Chromium.
 - Complete UTF-8 HTML export with rendered GFM and accessible standards-based MathML;
@@ -53,13 +55,19 @@ directives and component blocks unchanged.
 | `Ctrl+O` | Open Markdown |
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save as |
+| `Ctrl+B` | Bold |
+| `Ctrl+I` | Italic |
+| `` Ctrl+` `` | Inline code |
+| `Ctrl+M` | Inline math |
+| `Ctrl+,` | Open settings |
 | `Escape` | Close the command palette or leave focus mode |
 | `↑` / `↓`, `Enter`, `Escape` | Navigate, run, or dismiss the palette |
 | `Ctrl+←` / `Ctrl+→` | Move by CJK-aware word boundaries in the editor |
 
 Theme, focus mode, A4 preview, automatic CJK spacing, HTML export, and PDF export are
 available in the command palette. Formatting controls are also available in the
-toolbar.
+toolbar. All shortcuts can be reassigned or cleared from Settings; assigned
+shortcuts are shown on the right side of command-palette entries.
 
 ## Architecture
 
