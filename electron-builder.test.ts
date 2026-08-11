@@ -24,8 +24,10 @@ describe('desktop package metadata', () => {
   })
 
   it('includes generated PNG, Windows ICO, and macOS ICNS assets', async () => {
-    const [png, ico, icns, generator] = await Promise.all([
+    const [source, png, publicPng, ico, icns, generator] = await Promise.all([
+      readFile('build/icon-source.png'),
       readFile('build/icon.png'),
+      readFile('public/icon.png'),
       readFile('build/icon.ico'),
       readFile('build/icon.icns'),
       readFile('build/generate-icons.mjs', 'utf8'),
@@ -36,8 +38,26 @@ describe('desktop package metadata', () => {
     )
     expect(png.readUInt32BE(16)).toBe(1024)
     expect(png.readUInt32BE(20)).toBe(1024)
+    expect(png).toEqual(source)
+    expect(publicPng.readUInt32BE(16)).toBe(256)
+    expect(publicPng.readUInt32BE(20)).toBe(256)
     expect(ico.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]))
     expect(icns.subarray(0, 4).toString('ascii')).toBe('icns')
-    expect(generator).toContain("IcnsImage.fromPNG(png, 'ic10')")
+    for (const type of [
+      'icp4',
+      'icp5',
+      'icp6',
+      'ic07',
+      'ic08',
+      'ic09',
+      'ic10',
+      'ic11',
+      'ic12',
+      'ic13',
+      'ic14',
+    ]) {
+      expect(icns.includes(Buffer.from(type))).toBe(true)
+    }
+    expect(generator).toContain("['ic10', 1024]")
   })
 })

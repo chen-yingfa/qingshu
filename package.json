@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "icons": "node build/generate-icons.mjs",
+    "prebuild": "npm run icons",
     "build": "npm run typecheck && vite build && electron-builder",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false"
@@ -48,6 +49,7 @@
     "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "png-to-ico": "^3.0.2",
+    "pngjs": "^7.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vite-plugin-electron": "^1.1.1",
