@@ -12,6 +12,7 @@ import {
 } from 'react'
 
 import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
+import type { EditorSelection } from '../hooks/useDocument'
 import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
   frontMatterEnd,
@@ -167,6 +168,8 @@ interface LiveEditorBaseProps {
   onPreviewReady?(error?: Error): void
   onChange(content: string): void
   onActiveBlockChange(index: number): void
+  selection?: EditorSelection
+  onSelectionChange?(selection: EditorSelection): void
 }
 
 type LiveEditorProps = LiveEditorBaseProps &
@@ -753,11 +756,15 @@ function DocumentSourceEditor({
   contentRevision,
   formatRequest,
   onChange,
+  selection,
+  onSelectionChange,
 }: {
   content: string
   contentRevision: number
   formatRequest?: FormatRequest
   onChange(content: string): void
+  selection?: EditorSelection
+  onSelectionChange?(selection: EditorSelection): void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const handledFormatRef = useRef(0)
@@ -769,6 +776,24 @@ function DocumentSourceEditor({
   const pendingAcknowledgementsRef = useRef(
     new Map<number, string>(),
   )
+
+  const reportSelection = (textarea: HTMLTextAreaElement) => {
+    onSelectionChange?.({
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      direction: textarea.selectionDirection ?? 'none',
+    })
+  }
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || !selection) return
+    textarea.setSelectionRange(
+      Math.min(selection.start, textarea.value.length),
+      Math.min(selection.end, textarea.value.length),
+      selection.direction,
+    )
+  }, [selection])
 
   useLayoutEffect(() => {
     if (
@@ -889,9 +914,11 @@ function DocumentSourceEditor({
       autoFocus
       spellCheck={false}
       value={draft}
-      onChange={(event) =>
+      onChange={(event) => {
         commit(event.target.value, event.target.selectionStart)
-      }
+        reportSelection(event.currentTarget)
+      }}
+      onSelect={(event) => reportSelection(event.currentTarget)}
       onKeyDown={(event) => {
         if (
           event.key !== 'Tab' ||
@@ -996,6 +1023,8 @@ export function LiveEditor({
   onPreviewReady,
   onChange,
   onActiveBlockChange,
+  selection,
+  onSelectionChange,
 }: LiveEditorProps) {
   if (
     sourceMode &&
@@ -1152,6 +1181,24 @@ export function LiveEditor({
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current)
   }, [draft, safeActive])
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || sourceMode || !selection) return
+    textarea.setSelectionRange(
+      Math.min(selection.start, textarea.value.length),
+      Math.min(selection.end, textarea.value.length),
+      selection.direction,
+    )
+  }, [activeSession, selection, sourceMode])
+
+  const reportSelection = (textarea: HTMLTextAreaElement) => {
+    onSelectionChange?.({
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      direction: textarea.selectionDirection ?? 'none',
+    })
+  }
 
   function commitDraft(value: string) {
     const previousContent = contentRef.current
@@ -1761,6 +1808,8 @@ export function LiveEditor({
           contentRevision={contentRevision!}
           formatRequest={formatRequest}
           onChange={onChange}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
         />
       ) : (
         <>
@@ -1854,6 +1903,7 @@ export function LiveEditor({
                         onChange={(event) => {
                           const textarea = event.currentTarget
                           commitDraft(textarea.value)
+                          reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
                             normalize(
                               textarea.value,
@@ -1862,6 +1912,7 @@ export function LiveEditor({
                             )
                           }
                         }}
+                        onSelect={(event) => reportSelection(event.currentTarget)}
                         onBlur={(event) => {
                           setActiveInputFocused(false)
                           composingRef.current = false

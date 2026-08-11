@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => unknown>(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  chmod: vi.fn(),
   stat: vi.fn(),
   realpath: vi.fn(),
   open: vi.fn(),
@@ -25,6 +26,16 @@ const mocks = vi.hoisted(() => ({
     sync: vi.fn(),
     close: vi.fn(),
   },
+  recentHandle: {
+    writeFile: vi.fn(),
+    sync: vi.fn(),
+    chmod: vi.fn(),
+    close: vi.fn(),
+  },
+  recentDirectoryHandle: {
+    sync: vi.fn(),
+    close: vi.fn(),
+  },
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   showMessageBox: vi.fn(),
@@ -41,6 +52,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('node:fs/promises', () => ({
   readFile: mocks.readFile,
   writeFile: mocks.writeFile,
+  chmod: mocks.chmod,
   stat: mocks.stat,
   realpath: mocks.realpath,
   open: mocks.open,
@@ -124,9 +136,52 @@ const event = {
   },
 }
 
+function documentRenameCalls() {
+  return mocks.rename.mock.calls.filter(([, target]) =>
+    String(target).endsWith('.md'),
+  )
+}
+
+function documentExclusiveOpenCalls() {
+  return mocks.open.mock.calls.filter(
+    ([path, flags]) =>
+      flags === 'wx' && !String(path).includes('.recent-files.json.qingshu-'),
+  )
+}
+
 describe('desktop IPC', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    for (const mock of [
+      mocks.readFile,
+      mocks.writeFile,
+      mocks.chmod,
+      mocks.stat,
+      mocks.realpath,
+      mocks.open,
+      mocks.rename,
+      mocks.unlink,
+      mocks.sourceHandle.readFile,
+      mocks.sourceHandle.stat,
+      mocks.sourceHandle.close,
+      mocks.tempHandle.writeFile,
+      mocks.tempHandle.sync,
+      mocks.tempHandle.stat,
+      mocks.tempHandle.chmod,
+      mocks.tempHandle.close,
+      mocks.directoryHandle.sync,
+      mocks.directoryHandle.close,
+      mocks.recentHandle.writeFile,
+      mocks.recentHandle.sync,
+      mocks.recentHandle.chmod,
+      mocks.recentHandle.close,
+      mocks.recentDirectoryHandle.sync,
+      mocks.recentDirectoryHandle.close,
+      mocks.showOpenDialog,
+      mocks.showSaveDialog,
+    ]) {
+      mock.mockReset()
+    }
     mocks.stat.mockResolvedValue({
       dev: 1,
       ino: 2,
@@ -136,6 +191,10 @@ describe('desktop IPC', () => {
     })
     mocks.realpath.mockImplementation(async (path: string) => path)
     mocks.open.mockImplementation(async (path: string, flags: string) => {
+      if (path.includes('.recent-files.json.qingshu-')) {
+        return mocks.recentHandle
+      }
+      if (path === '/user-data') return mocks.recentDirectoryHandle
       if (flags === 'wx') return mocks.tempHandle
       if (path.includes('.md')) return mocks.sourceHandle
       return mocks.directoryHandle
@@ -162,12 +221,20 @@ describe('desktop IPC', () => {
     mocks.tempHandle.close.mockResolvedValue(undefined)
     mocks.directoryHandle.sync.mockResolvedValue(undefined)
     mocks.directoryHandle.close.mockResolvedValue(undefined)
+    mocks.recentHandle.writeFile.mockResolvedValue(undefined)
+    mocks.recentHandle.sync.mockResolvedValue(undefined)
+    mocks.recentHandle.chmod.mockResolvedValue(undefined)
+    mocks.recentHandle.close.mockResolvedValue(undefined)
+    mocks.recentDirectoryHandle.sync.mockResolvedValue(undefined)
+    mocks.recentDirectoryHandle.close.mockResolvedValue(undefined)
+    mocks.chmod.mockResolvedValue(undefined)
     mocks.rename.mockResolvedValue(undefined)
     mocks.unlink.mockResolvedValue(undefined)
   })
 
   it('registers only the renderer bridge channels', () => {
     expect([...mocks.handlers.keys()].sort()).toEqual([
+      'qingshu:choose-save-path',
       'qingshu:close-response',
       'qingshu:export-html',
       'qingshu:export-pdf',
@@ -196,10 +263,21 @@ describe('desktop IPC', () => {
       paths: ['/notes/recent.md'],
       removed: ['/notes/missing.md'],
     })
-    expect(mocks.writeFile).toHaveBeenCalledWith(
-      '/user-data/recent-files.json',
+    expect(mocks.recentHandle.writeFile).toHaveBeenCalledWith(
       JSON.stringify(['/notes/recent.md']),
-      { encoding: 'utf8', mode: 0o600 },
+      'utf8',
+    )
+    expect(mocks.recentHandle.sync).toHaveBeenCalledOnce()
+    expect(mocks.recentHandle.chmod).toHaveBeenCalledWith(0o600)
+    expect(mocks.chmod).toHaveBeenCalledWith(
+      '/user-data/recent-files.json',
+      0o600,
+    )
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/user-data\/\.recent-files\.json\.qingshu-\d+-\d+\.tmp$/,
+      ),
+      '/user-data/recent-files.json',
     )
 
     await expect(
@@ -233,9 +311,45 @@ describe('desktop IPC', () => {
     ).resolves.toMatchObject({ paths: [] })
   })
 
+  it('keeps open successful when recents cannot be read or persisted and recovers the write queue', async () => {
+    const denied = Object.assign(new Error('permission denied'), {
+      code: 'EACCES',
+    })
+    mocks.readFile.mockRejectedValue(denied)
+    mocks.recentHandle.writeFile
+      .mockRejectedValueOnce(new Error('recent write failed'))
+      .mockResolvedValue(undefined)
+    mocks.showOpenDialog
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/first.md'],
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/second.md'],
+      })
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).resolves.toMatchObject({ canceled: false, path: '/notes/first.md' })
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).resolves.toMatchObject({ canceled: false, path: '/notes/second.md' })
+    expect(mocks.recentHandle.writeFile).toHaveBeenCalledTimes(2)
+    expect(mocks.rename).toHaveBeenCalledOnce()
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toMatchObject({
+      paths: ['/notes/second.md', '/notes/first.md'],
+      warning: expect.stringContaining('Recent files could not be updated'),
+    })
+  })
+
   it('removes a recent file that disappears after canonical validation', async () => {
     const path = '/notes/raced-away.md'
-    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    const missing = Object.assign(new Error('missing parent'), {
+      code: 'ENOTDIR',
+    })
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [path] })
     await mocks.handlers.get('qingshu:open-file')?.(event)
     mocks.open.mockRejectedValueOnce(missing)
@@ -245,7 +359,7 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('Recent file no longer exists and was removed')
     await expect(
       mocks.handlers.get('qingshu:list-recent-files')?.(event),
-    ).resolves.toEqual({ paths: [], removed: [path] })
+    ).resolves.toMatchObject({ removed: [path] })
   })
 
   it.each(['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'])(
@@ -255,6 +369,21 @@ describe('desktop IPC', () => {
       expect(main.directorySyncWarning(error, 'win32')).toBeUndefined()
     },
   )
+
+  it('detects invalid stored recent entries that filtering removed', () => {
+    expect(
+      main.recentEntriesNeedCleanup(
+        ['/notes/recent.md', 42],
+        ['/notes/recent.md'],
+      ),
+    ).toBe(true)
+    expect(
+      main.recentEntriesNeedCleanup(
+        ['/notes/recent.md'],
+        ['/notes/recent.md'],
+      ),
+    ).toBe(false)
+  })
 
   it.each([
     ['linux', 'EINVAL'],
@@ -450,14 +579,14 @@ describe('desktop IPC', () => {
     }) as Promise<unknown>
 
     await vi.waitFor(() => expect(writes).toEqual(['older']))
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
     releaseFirst()
     await expect(Promise.all([older, newer])).resolves.toEqual([
       { canceled: false, path: '/notes/ordered.md' },
       { canceled: false, path: '/notes/ordered.md' },
     ])
     expect(writes).toEqual(['older', 'newest'])
-    expect(mocks.rename).toHaveBeenCalledTimes(2)
+    expect(documentRenameCalls()).toHaveLength(2)
   })
 
   it('rejects a renderer path that no dialog previously authorized', async () => {
@@ -469,17 +598,12 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('Save path was not authorized by a file dialog')
 
     expect(
-      mocks.open.mock.calls.filter(([, flags]) => flags === 'wx'),
+      documentExclusiveOpenCalls(),
     ).toHaveLength(0)
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
-  it('rejects Save As to a canonical path already authorized by another tab before writing', async () => {
-    mocks.showOpenDialog.mockResolvedValue({
-      canceled: false,
-      filePaths: ['/notes/existing.md'],
-    })
-    await mocks.handlers.get('qingshu:open-file')?.(event)
+  it('canonically authorizes a Save As selection without writing', async () => {
     mocks.showSaveDialog.mockResolvedValue({
       canceled: false,
       filePath: '/aliases/existing.md',
@@ -487,11 +611,8 @@ describe('desktop IPC', () => {
     mocks.realpath.mockResolvedValueOnce('/notes/existing.md')
 
     await expect(
-      mocks.handlers.get('qingshu:save-file')?.(event, {
-        content: '# Conflicting draft',
-      }),
-    ).rejects.toThrow('already open in another tab')
-    expect(mocks.rename).not.toHaveBeenCalled()
+      mocks.handlers.get('qingshu:choose-save-path')?.(event),
+    ).resolves.toEqual({ canceled: false, path: '/notes/existing.md' })
     expect(mocks.tempHandle.writeFile).not.toHaveBeenCalled()
   })
 
@@ -522,9 +643,9 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('File changed on disk')
 
     expect(
-      mocks.open.mock.calls.filter(([, flags]) => flags === 'wx'),
+      documentExclusiveOpenCalls(),
     ).toHaveLength(0)
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
   it('rechecks the target after temp fsync and aborts if an external edit interleaves', async () => {
@@ -557,7 +678,7 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('File changed on disk')
 
     expect(mocks.tempHandle.sync).toHaveBeenCalledOnce()
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
     expect(mocks.unlink).toHaveBeenCalledOnce()
   })
 
@@ -590,7 +711,7 @@ describe('desktop IPC', () => {
       }),
     ).rejects.toThrow('File changed on disk')
     expect(mocks.tempHandle.chmod).toHaveBeenCalledWith(0o644)
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
   it('unifies concurrent Save As aliases under one physical-path queue', async () => {
@@ -735,7 +856,7 @@ describe('desktop IPC', () => {
       'wx',
       0o600,
     )
-    expect(mocks.rename).toHaveBeenCalledOnce()
+    expect(documentRenameCalls()).toHaveLength(1)
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
@@ -809,7 +930,7 @@ describe('desktop IPC', () => {
       canceled: false,
       path: '/notes/durable-warning.md',
     })
-    expect(mocks.rename).toHaveBeenCalledTimes(2)
+    expect(documentRenameCalls()).toHaveLength(2)
   })
 
   it('closes and removes an adjacent temp file after an atomic-save failure', async () => {
@@ -828,7 +949,7 @@ describe('desktop IPC', () => {
     const tempPath = mocks.open.mock.calls[0][0]
     expect(mocks.tempHandle.close).toHaveBeenCalledOnce()
     expect(mocks.unlink).toHaveBeenCalledWith(tempPath)
-    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(documentRenameCalls()).toHaveLength(0)
   })
 
   it('does not write when the save dialog is canceled', async () => {

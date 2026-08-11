@@ -32,6 +32,10 @@ beforeEach(() => {
   })
   api = {
     openFile: vi.fn(),
+    chooseSavePath: vi.fn().mockResolvedValue({
+      canceled: false,
+      path: '/notes/selected.md',
+    }),
     listRecentFiles: vi.fn().mockResolvedValue({ paths: [], removed: [] }),
     openRecentFile: vi.fn(),
     saveFile: vi.fn(),
@@ -93,6 +97,15 @@ describe('document replacement', () => {
 })
 
 describe('document tabs', () => {
+  it('links the active tab to its document tabpanel', () => {
+    render(<App />)
+    const tab = screen.getByRole('tab', { name: 'Untitled' })
+    const panel = screen.getByRole('tabpanel')
+
+    expect(tab.getAttribute('aria-controls')).toBe(panel.id)
+    expect(panel.getAttribute('aria-labelledby')).toBe(tab.id)
+  })
+
   it('keeps independently edited documents and activates duplicate canonical paths', async () => {
     api.openFile
       .mockResolvedValueOnce({
@@ -183,6 +196,108 @@ describe('document tabs', () => {
     expect(window.localStorage.getItem('qingshu:settings:v1')).toContain(
       '"tabOrientation":"horizontal"',
     )
+  })
+
+  it.each(['horizontal', 'vertical'] as const)(
+    'keeps preview and source editors in the workspace for %s and focus layouts',
+    (orientation) => {
+      window.localStorage.setItem(
+        'qingshu:settings:v1',
+        JSON.stringify({ tabOrientation: orientation }),
+      )
+      const { container } = render(<App />)
+      const shell = container.querySelector('.app-shell')!
+      const workspace = container.querySelector('.workspace-layout')!
+
+      expect(shell.classList.contains(`tabs-${orientation}`)).toBe(true)
+      expect(workspace.contains(screen.getByLabelText('Active Markdown block'))).toBe(
+        true,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+      expect(workspace.contains(screen.getByLabelText('Markdown source'))).toBe(true)
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle focus mode' }))
+      expect(shell.classList.contains('focus-mode')).toBe(true)
+      expect(workspace.contains(screen.getByLabelText('Markdown source'))).toBe(true)
+    },
+  )
+
+  it('restores each tab source mode and exact editor selection', async () => {
+    render(<App />)
+    const first = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(first, { target: { value: 'First selection' } })
+    first.setSelectionRange(2, 8, 'backward')
+    fireEvent.select(first)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    const second = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    fireEvent.change(second, { target: { value: 'Second source selection' } })
+    second.setSelectionRange(3, 12, 'forward')
+    fireEvent.select(second)
+
+    fireEvent.click(screen.getAllByRole('tab')[0])
+    const restoredFirst = await screen.findByLabelText('Active Markdown block')
+    expect((restoredFirst as HTMLTextAreaElement).selectionStart).toBe(2)
+    expect((restoredFirst as HTMLTextAreaElement).selectionEnd).toBe(8)
+    expect((restoredFirst as HTMLTextAreaElement).selectionDirection).toBe(
+      'backward',
+    )
+
+    fireEvent.click(screen.getAllByRole('tab')[1])
+    const restoredSecond = await screen.findByLabelText('Markdown source')
+    expect((restoredSecond as HTMLTextAreaElement).selectionStart).toBe(3)
+    expect((restoredSecond as HTMLTextAreaElement).selectionEnd).toBe(12)
+    expect((restoredSecond as HTMLTextAreaElement).selectionDirection).toBe(
+      'forward',
+    )
+  })
+
+  it('ignores stale recent refresh responses and surfaces persistence warnings', async () => {
+    let resolveOlder!: (value: {
+      paths: string[]
+      removed: string[]
+    }) => void
+    let resolveNewer!: (value: {
+      paths: string[]
+      removed: string[]
+      warning?: string
+    }) => void
+    api.listRecentFiles
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewer = resolve
+          }),
+      )
+    api.openFile.mockResolvedValue({
+      canceled: false,
+      path: '/notes/opened.md',
+      content: '# Opened',
+    })
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await waitFor(() => expect(api.listRecentFiles).toHaveBeenCalledTimes(2))
+    resolveNewer({
+      paths: ['/notes/newest.md'],
+      removed: [],
+      warning: 'Recent files could not be updated: permission denied',
+    })
+    await screen.findByText('Recent files could not be updated: permission denied')
+    resolveOlder({ paths: ['/notes/stale.md'], removed: [] })
+    await Promise.resolve()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recent files' }))
+    expect(screen.getByRole('menuitem', { name: 'newest.md' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'stale.md' })).toBeNull()
   })
 
   it('shows dynamic recent commands and opens them from the compact toolbar menu', async () => {
@@ -651,7 +766,9 @@ describe('commands and operation feedback', () => {
     await waitFor(() => expect(api.openFile).toHaveBeenCalledOnce())
     await waitFor(() => expect(api.saveFile).toHaveBeenCalledTimes(2))
     expect(api.saveFile.mock.calls[0][0]).toMatchObject({ path: undefined })
-    expect(api.saveFile.mock.calls[1][0]).toMatchObject({ path: undefined })
+    expect(api.saveFile.mock.calls[1][0]).toMatchObject({
+      path: '/notes/selected.md',
+    })
   })
 
   it('exposes file, HTML, and PDF actions in the palette', () => {

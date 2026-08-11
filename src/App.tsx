@@ -114,6 +114,7 @@ function initialSettings(): AppSettings {
 }
 
 export default function App() {
+  const [settings, setSettings] = useState(initialSettings)
   const {
     state,
     dispatch,
@@ -125,13 +126,12 @@ export default function App() {
     openDocument,
     openRecentDocument,
     saveDocument,
-  } = useDocument()
-  const [settings, setSettings] = useState(initialSettings)
+  } = useDocument(settings.defaultSourceMode)
   const [dark, setDark] = useState(() => resolvesDark(settings.theme))
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(settings.defaultA4)
   const [autoSpacing, setAutoSpacing] = useState(settings.autoSpacing)
-  const [sourceMode, setSourceMode] = useState(settings.defaultSourceMode)
+  const sourceMode = state.sourceMode
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -141,6 +141,7 @@ export default function App() {
   const settingsStorageWarned = useRef(false)
   const activePdfExport = useRef<ActivePdfExport | null>(null)
   const formatRequestId = useRef(0)
+  const recentRefreshGeneration = useRef(0)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
@@ -172,13 +173,17 @@ export default function App() {
   }, [])
 
   const refreshRecents = useCallback(async () => {
+    const generation = ++recentRefreshGeneration.current
     try {
       const result = await window.qingshu.listRecentFiles()
+      if (generation !== recentRefreshGeneration.current) return
       setRecentPaths(result.paths)
+      if (result.warning) addToast('warning', result.warning)
       for (const path of result.removed) {
         addToast('warning', `Removed missing recent file: ${filename(path)}`)
       }
     } catch (error) {
+      if (generation !== recentRefreshGeneration.current) return
       addToast('error', errorMessage(error))
     }
   }, [addToast])
@@ -428,7 +433,7 @@ export default function App() {
       if (next.defaultA4 !== settings.defaultA4) setA4(next.defaultA4)
       if (next.defaultSourceMode !== settings.defaultSourceMode) {
         setFormatRequest(undefined)
-        setSourceMode(next.defaultSourceMode)
+        dispatch({ type: 'source-mode', enabled: next.defaultSourceMode })
       }
       if (
         next.autoSpacing !== settings.autoSpacing &&
@@ -481,14 +486,12 @@ export default function App() {
       }
       if (option === 'source') {
         setFormatRequest(undefined)
-        setSourceMode((value) => {
-          const next = !value
-          if (next) dispatch({ type: 'activate', index: 0 })
-          return next
-        })
+        const next = !state.sourceMode
+        if (next) dispatch({ type: 'activate', index: 0 })
+        dispatch({ type: 'source-mode', enabled: next })
       }
     },
-    [dispatch, state.content],
+    [dispatch, state.content, state.sourceMode],
   )
 
   const commands = useMemo<PaletteCommand[]>(
@@ -793,7 +796,12 @@ export default function App() {
             onClose={handleCloseTab}
           />
         )}
-        <main className="workspace">
+        <main
+          className="workspace"
+          id={`document-panel-${activeTabId}`}
+          role="tabpanel"
+          aria-labelledby={`document-tab-${activeTabId}`}
+        >
           <div className="paper">
             <LiveEditor
             key={activeTabId}
@@ -803,10 +811,14 @@ export default function App() {
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
             sourceMode={sourceMode}
+            selection={state.selection}
             previewAll={printPreview}
             onPreviewReady={handlePreviewReady}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
+            onSelectionChange={(selection) =>
+              dispatch({ type: 'selection', selection })
+            }
             />
           </div>
         </main>

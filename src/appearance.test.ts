@@ -21,4 +21,20 @@ describe('writing surface appearance', () => {
       'font-size: var(--document-font-size, 17px);',
     )
   })
+
+  it('pins workspace rows for horizontal, vertical, and focus tab layouts', () => {
+    expect(styles).toMatch(/\.title-bar\s*\{[^}]*grid-row:\s*1;/su)
+    expect(styles).toMatch(/\.toolbar\s*\{[^}]*grid-row:\s*2;/su)
+    expect(styles).toMatch(
+      /\.tab-strip-horizontal\s*\{[^}]*grid-row:\s*3;/su,
+    )
+    expect(styles).toMatch(/\.workspace-layout\s*\{[^}]*grid-row:\s*4;/su)
+    expect(styles).toMatch(/\.status-bar\s*\{[^}]*grid-row:\s*5;/su)
+    expect(styles).toMatch(
+      /\.tabs-vertical\s*\{[^}]*grid-template-rows:\s*38px 46px 0 minmax\(0,\s*1fr\) 30px;/su,
+    )
+    expect(styles).toMatch(
+      /\.focus-mode\s*\{[^}]*grid-template-rows:\s*0 0 0 minmax\(0,\s*1fr\) 0;/su,
+    )
+  })
 })

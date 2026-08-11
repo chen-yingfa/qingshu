@@ -9,6 +9,7 @@ export type ExportHtmlRequest = {
 export type RecentFilesResult = {
   paths: string[]
   removed: string[]
+  warning?: string
 }
 
 export type WindowAction = 'minimize' | 'toggle-maximize' | 'close'
@@ -23,11 +24,11 @@ export type MenuCommand =
 
 export interface QingshuApi {
   openFile(): Promise<FileResult>
+  chooseSavePath(): Promise<FileResult>
   listRecentFiles(): Promise<RecentFilesResult>
   openRecentFile(path: string): Promise<Extract<FileResult, { canceled: false }>>
   saveFile(request: {
     path?: string
-    sourcePath?: string
     content: string
   }): Promise<FileResult>
   exportHtml(request: ExportHtmlRequest): Promise<FileResult>

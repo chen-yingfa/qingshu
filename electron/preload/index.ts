@@ -8,6 +8,7 @@ import type {
 
 const api: QingshuApi = {
   openFile: () => ipcRenderer.invoke('qingshu:open-file'),
+  chooseSavePath: () => ipcRenderer.invoke('qingshu:choose-save-path'),
   listRecentFiles: () => ipcRenderer.invoke('qingshu:list-recent-files'),
   openRecentFile: path =>
     ipcRenderer.invoke('qingshu:open-recent-file', path),

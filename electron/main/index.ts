@@ -1,4 +1,5 @@
 import {
+  chmod,
   open,
   readFile,
   realpath,
@@ -62,6 +63,7 @@ let recentFiles: string[] | null = null
 let recentFilesLoad: Promise<void> | null = null
 let removedRecentFiles: string[] = []
 let recentFilesWrite = Promise.resolve()
+let recentFilesWarning: string | undefined
 let tempSequence = 0
 
 interface CloseState {
@@ -126,12 +128,60 @@ function recentFilesPath(): string {
   return join(app.getPath('userData'), 'recent-files.json')
 }
 
+function noteRecentWarning(error: unknown): void {
+  recentFilesWarning = `Recent files could not be updated: ${messageOf(error)}`
+}
+
+async function atomicWriteRecentFiles(content: string): Promise<void> {
+  const target = recentFilesPath()
+  const tempPath = join(
+    dirname(target),
+    `.${basename(target)}.qingshu-${process.pid}-${++tempSequence}.tmp`,
+  )
+  let handle: FileHandle | undefined
+  let renamed = false
+  try {
+    handle = await open(tempPath, 'wx', 0o600)
+    await handle.chmod(0o600)
+    await handle.writeFile(content, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(tempPath, target)
+    renamed = true
+    await chmod(target, 0o600)
+    await syncDirectory(dirname(target))
+  } finally {
+    await handle?.close().catch(() => undefined)
+    if (!renamed) {
+      await unlink(tempPath).catch((error: unknown) => {
+        if (!isMissingFile(error)) throw error
+      })
+    }
+  }
+}
+
 function persistRecentFiles(): Promise<void> {
   const content = JSON.stringify(recentFiles ?? [])
-  recentFilesWrite = recentFilesWrite.then(() =>
-    writeFile(recentFilesPath(), content, { encoding: 'utf8', mode: 0o600 }),
+  const operation = recentFilesWrite
+    .catch(() => undefined)
+    .then(() => atomicWriteRecentFiles(content))
+  recentFilesWrite = operation.then(
+    () => undefined,
+    () => undefined,
   )
-  return recentFilesWrite
+  return operation
+}
+
+export function recentEntriesNeedCleanup(
+  stored: unknown,
+  valid: string[],
+): boolean {
+  return (
+    !Array.isArray(stored) ||
+    stored.length !== valid.length ||
+    stored.some((value, index) => value !== valid[index])
+  )
 }
 
 async function ensureRecentFiles(): Promise<void> {
@@ -142,7 +192,9 @@ async function ensureRecentFiles(): Promise<void> {
     try {
       stored = JSON.parse(await readFile(recentFilesPath(), 'utf8'))
     } catch (error) {
-      if (!isMissingFile(error) && !(error instanceof SyntaxError)) throw error
+      if (!isMissingFile(error) && !(error instanceof SyntaxError)) {
+        noteRecentWarning(error)
+      }
     }
     const candidates = Array.isArray(stored)
       ? stored.filter(
@@ -158,18 +210,14 @@ async function ensureRecentFiles(): Promise<void> {
         if (canonical === path && !valid.includes(path)) valid.push(path)
         else removed.push(path)
       } catch (error) {
-        if (!isMissingFile(error)) throw error
+        if (!isMissingFile(error)) noteRecentWarning(error)
         removed.push(path)
       }
     }
     recentFiles = valid
     removedRecentFiles = removed
-    if (
-      removed.length > 0 ||
-      valid.length !== candidates.length ||
-      !Array.isArray(stored)
-    ) {
-      await persistRecentFiles()
+    if (recentEntriesNeedCleanup(stored, valid)) {
+      await persistRecentFiles().catch(noteRecentWarning)
     }
   })()
   try {
@@ -188,11 +236,19 @@ async function rememberRecent(path: string): Promise<void> {
   await persistRecentFiles()
 }
 
+async function safelyRememberRecent(path: string): Promise<void> {
+  try {
+    await rememberRecent(path)
+  } catch (error) {
+    noteRecentWarning(error)
+  }
+}
+
 async function removeRecent(path: string): Promise<void> {
   await ensureRecentFiles()
   recentFiles = (recentFiles ?? []).filter((candidate) => candidate !== path)
   removedRecentFiles = [...removedRecentFiles, path]
-  await persistRecentFiles()
+  await persistRecentFiles().catch(noteRecentWarning)
 }
 
 async function rememberExport(
@@ -210,23 +266,20 @@ async function rememberExport(
 
 function parseSaveRequest(value: unknown, extra: unknown[]): {
   path?: string
-  sourcePath?: string
   content: string
 } {
   if (
     extra.length !== 0 ||
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['path', 'sourcePath', 'content']) ||
+    !hasOnlyKeys(value, ['path', 'content']) ||
     typeof value.content !== 'string' ||
-    (value.path !== undefined && typeof value.path !== 'string') ||
-    (value.sourcePath !== undefined && typeof value.sourcePath !== 'string')
+    (value.path !== undefined && typeof value.path !== 'string')
   ) {
     invalidPayload('qingshu:save-file')
   }
   return {
     content: value.content,
     path: value.path as string | undefined,
-    sourcePath: value.sourcePath as string | undefined,
   }
 }
 
@@ -267,7 +320,7 @@ function isMissingFile(error: unknown): boolean {
     typeof error === 'object' &&
     error !== null &&
     'code' in error &&
-    error.code === 'ENOENT'
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
   )
 }
 
@@ -486,7 +539,7 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
   const documentPath = await canonicalDocumentPath(path)
   const { content, revision } = await readStableDocument(documentPath)
   authorizeDocument(documentsFor(event.sender), documentPath, revision)
-  await rememberRecent(documentPath)
+  await safelyRememberRecent(documentPath)
 
   return {
     canceled: false,
@@ -506,7 +559,13 @@ ipcMain.handle(
     await ensureRecentFiles()
     const removed = removedRecentFiles
     removedRecentFiles = []
-    return { paths: [...(recentFiles ?? [])], removed }
+    const warning = recentFilesWarning
+    recentFilesWarning = undefined
+    return {
+      paths: [...(recentFiles ?? [])],
+      removed,
+      ...(warning ? { warning } : {}),
+    }
   },
 )
 
@@ -548,8 +607,35 @@ ipcMain.handle(
     }
     const { content, revision } = opened
     authorizeDocument(documentsFor(event.sender), path, revision)
-    await rememberRecent(path)
+    await safelyRememberRecent(path)
     return { canceled: false, path, content }
+  },
+)
+
+ipcMain.handle(
+  'qingshu:choose-save-path',
+  async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<FileResult> => {
+    assertTrustedIpcSender(event)
+    assertNoPayload('qingshu:choose-save-path', args)
+    const target = await selectSavePath(undefined, {
+      title: 'Save Markdown',
+      defaultPath: 'Untitled.md',
+      filters: [
+        { name: 'Markdown', extensions: ['md'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+    if (target.canceled) return target
+    const targetPath = await canonicalDocumentPath(target.path)
+    const documents = documentsFor(event.sender)
+    if (!documents.has(targetPath)) {
+      authorizeDocument(
+        documents,
+        targetPath,
+        await currentRevision(targetPath),
+      )
+    }
+    return { canceled: false, path: targetPath }
   },
 )
 
@@ -581,19 +667,7 @@ ipcMain.handle(
     if (target.canceled) return target
     const targetPath = requestedPath ?? await canonicalDocumentPath(target.path)
     if (!requestedPath) {
-      const existingTarget = documents.get(targetPath)
-      const sourcePath = request.sourcePath
-        ? await canonicalDocumentPath(request.sourcePath)
-        : undefined
-      if (
-        existingTarget?.initialized &&
-        sourcePath !== targetPath
-      ) {
-        throw new Error(
-          'The selected file is already open in another tab. Choose a different path.',
-        )
-      }
-      document = existingTarget ?? installDocumentQueue(documents, targetPath)
+      document = installDocumentQueue(documents, targetPath)
     }
     if (!document) throw new Error('Save path authorization was lost')
 
@@ -609,7 +683,7 @@ ipcMain.handle(
         document.revision,
       )
       document.revision = committed.revision
-      await rememberRecent(targetPath)
+      await safelyRememberRecent(targetPath)
       return {
         canceled: false,
         path: targetPath,

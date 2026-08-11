@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
@@ -74,13 +74,52 @@ export function Toolbar({
   onToggle,
 }: ToolbarProps) {
   const [recentOpen, setRecentOpen] = useState(false)
+  const recentControlRef = useRef<HTMLDivElement>(null)
+  const recentTriggerRef = useRef<HTMLButtonElement>(null)
+  const recentMenuRef = useRef<HTMLDivElement>(null)
+  const recentItemsRef = useRef<Array<HTMLButtonElement | null>>([])
+
+  useEffect(() => {
+    if (!recentOpen) return undefined
+    if (recentPaths.length > 0) recentItemsRef.current[0]?.focus()
+    else recentMenuRef.current?.focus()
+    const dismiss = (event: MouseEvent) => {
+      if (!recentControlRef.current?.contains(event.target as Node)) {
+        setRecentOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', dismiss)
+    return () => document.removeEventListener('mousedown', dismiss)
+  }, [recentOpen, recentPaths.length])
+
+  const navigateRecent = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let target = index
+    if (event.key === 'ArrowDown') target = (index + 1) % recentPaths.length
+    else if (event.key === 'ArrowUp') {
+      target = (index - 1 + recentPaths.length) % recentPaths.length
+    } else if (event.key === 'Home') target = 0
+    else if (event.key === 'End') target = recentPaths.length - 1
+    else if (event.key === 'Escape') {
+      event.preventDefault()
+      setRecentOpen(false)
+      recentTriggerRef.current?.focus()
+      return
+    } else return
+    event.preventDefault()
+    recentItemsRef.current[target]?.focus()
+  }
+
   return (
     <nav className="toolbar" aria-label="Editor toolbar">
       <div className="tool-group file-tools">
         <ToolButton label="New document" icon="new" onClick={() => onFile('new')} />
         <ToolButton label="Open file" icon="open" onClick={() => onFile('open')} />
-        <div className="recent-files-control">
+        <div className="recent-files-control" ref={recentControlRef}>
           <button
+            ref={recentTriggerRef}
             type="button"
             className="tool-button recent-files-button"
             aria-label="Recent files"
@@ -91,20 +130,38 @@ export function Toolbar({
             <span aria-hidden="true">↶</span>
           </button>
           {recentOpen && (
-            <div className="recent-files-menu" role="menu" aria-label="Recent files">
+            <div
+              ref={recentMenuRef}
+              className="recent-files-menu"
+              role="menu"
+              aria-label="Recent files"
+              tabIndex={-1}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setRecentOpen(false)
+                  recentTriggerRef.current?.focus()
+                }
+              }}
+            >
               {recentPaths.length === 0 ? (
                 <span className="recent-files-empty">No recent files</span>
               ) : (
-                recentPaths.map((path) => (
+                recentPaths.map((path, index) => (
                   <button
+                    ref={(button) => {
+                      recentItemsRef.current[index] = button
+                    }}
                     type="button"
                     role="menuitem"
+                    tabIndex={-1}
                     key={path}
                     title={path}
                     onClick={() => {
                       setRecentOpen(false)
                       onRecent(path)
                     }}
+                    onKeyDown={(event) => navigateRecent(event, index)}
                   >
                     {path.split(/[\\/]/).at(-1) || path}
                   </button>

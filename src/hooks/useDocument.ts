@@ -8,6 +8,14 @@ export interface DocumentState {
   error: string | null
   latestSaveRequest: number
   contentRevision: number
+  sourceMode: boolean
+  selection: EditorSelection
+}
+
+export interface EditorSelection {
+  start: number
+  end: number
+  direction: 'forward' | 'backward' | 'none'
 }
 
 export interface DocumentTab extends DocumentState {
@@ -32,6 +40,8 @@ export type DocumentAction =
     }
   | { type: 'save-error'; message: string; requestId: number }
   | { type: 'activate'; index: number }
+  | { type: 'source-mode'; enabled: boolean }
+  | { type: 'selection'; selection: EditorSelection }
   | { type: 'error'; message: string | null }
 
 export const initialDocumentState: DocumentState = {
@@ -41,25 +51,40 @@ export const initialDocumentState: DocumentState = {
   error: null,
   latestSaveRequest: 0,
   contentRevision: 0,
+  sourceMode: false,
+  selection: { start: 0, end: 0, direction: 'none' },
 }
 
-function createTab(id: string, state: Partial<DocumentState> = {}): DocumentTab {
-  return { ...initialDocumentState, ...state, id }
+function createTab(
+  id: string,
+  state: Partial<DocumentState> = {},
+): DocumentTab {
+  return {
+    ...initialDocumentState,
+    ...state,
+    selection: state.selection ?? { ...initialDocumentState.selection },
+    id,
+  }
 }
 
-export const initialTabsState: TabsState = {
-  tabs: [createTab('tab-1')],
-  activeTabId: 'tab-1',
+function createInitialTabsState(sourceMode = false): TabsState {
+  return {
+    tabs: [createTab('tab-1', { sourceMode })],
+    activeTabId: 'tab-1',
+  }
 }
+
+export const initialTabsState: TabsState = createInitialTabsState()
 
 export type TabsAction =
-  | { type: 'new-tab'; id: string }
+  | { type: 'new-tab'; id: string; sourceMode?: boolean }
   | {
       type: 'open-tab'
       id: string
       content: string
       path: string
       requestId: number
+      sourceMode?: boolean
     }
   | { type: 'activate-tab'; tabId: string }
   | { type: 'close-tab'; tabId: string }
@@ -80,13 +105,12 @@ export function documentReducer(
       }
     case 'load':
       return {
+        ...initialDocumentState,
         content: action.content,
         path: action.path,
-        dirty: false,
-        activeBlock: 0,
-        error: null,
         latestSaveRequest: action.requestId,
         contentRevision: state.contentRevision + 1,
+        sourceMode: state.sourceMode,
       }
     case 'save-started':
       return { ...state, latestSaveRequest: action.requestId }
@@ -102,6 +126,10 @@ export function documentReducer(
         : state
     case 'activate':
       return { ...state, activeBlock: Math.max(0, action.index) }
+    case 'source-mode':
+      return { ...state, sourceMode: action.enabled }
+    case 'selection':
+      return { ...state, selection: action.selection }
     case 'error':
       return { ...state, error: action.message }
   }
@@ -111,7 +139,10 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   switch (action.type) {
     case 'new-tab':
       return {
-        tabs: [...state.tabs, createTab(action.id)],
+        tabs: [
+          ...state.tabs,
+          createTab(action.id, { sourceMode: action.sourceMode ?? false }),
+        ],
         activeTabId: action.id,
       }
     case 'open-tab': {
@@ -125,6 +156,7 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
             path: action.path,
             latestSaveRequest: action.requestId,
             contentRevision: 1,
+            sourceMode: action.sourceMode ?? false,
           }),
         ],
         activeTabId: action.id,
@@ -166,6 +198,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function filename(path: string): string {
+  return path.split(/[\\/]/).at(-1) || path
+}
+
 export type DocumentOperationResult =
   | { status: 'success'; path: string }
   | { status: 'warning'; path: string; message: string }
@@ -173,8 +209,12 @@ export type DocumentOperationResult =
   | { status: 'superseded'; path?: string; warning?: string }
   | { status: 'error'; message: string }
 
-export function useDocument() {
-  const [tabsState, tabsDispatch] = useReducer(tabsReducer, initialTabsState)
+export function useDocument(defaultSourceMode = false) {
+  const [tabsState, tabsDispatch] = useReducer(
+    tabsReducer,
+    defaultSourceMode,
+    createInitialTabsState,
+  )
   const requestId = useRef(0)
   const tabId = useRef(1)
   const contentRevisions = useRef(new Map<string, number>([['tab-1', 0]]))
@@ -196,13 +236,18 @@ export function useDocument() {
   const newDocument = useCallback(() => {
     const id = `tab-${++tabId.current}`
     contentRevisions.current.set(id, 0)
-    tabsDispatch({ type: 'new-tab', id })
-  }, [])
+    tabsDispatch({ type: 'new-tab', id, sourceMode: defaultSourceMode })
+  }, [defaultSourceMode])
 
   const openDocument = useCallback(async () => {
     try {
       const result = await window.qingshu.openFile()
       if (result.canceled) return { status: 'canceled' } as const
+      const existing = tabsState.tabs.find((tab) => tab.path === result.path)
+      if (existing) {
+        tabsDispatch({ type: 'activate-tab', tabId: existing.id })
+        return { status: 'success', path: result.path } as const
+      }
       const id = `tab-${++tabId.current}`
       contentRevisions.current.set(id, 1)
       tabsDispatch({
@@ -211,6 +256,7 @@ export function useDocument() {
         content: result.content ?? '',
         path: result.path,
         requestId: ++requestId.current,
+        sourceMode: defaultSourceMode,
       })
       return { status: 'success', path: result.path } as const
     } catch (error) {
@@ -222,11 +268,16 @@ export function useDocument() {
       })
       return { status: 'error', message } as const
     }
-  }, [tabsState.activeTabId])
+  }, [defaultSourceMode, tabsState.activeTabId, tabsState.tabs])
 
   const openRecentDocument = useCallback(async (path: string) => {
     try {
       const result = await window.qingshu.openRecentFile(path)
+      const existing = tabsState.tabs.find((tab) => tab.path === result.path)
+      if (existing) {
+        tabsDispatch({ type: 'activate-tab', tabId: existing.id })
+        return { status: 'success', path: result.path } as const
+      }
       const id = `tab-${++tabId.current}`
       contentRevisions.current.set(id, 1)
       tabsDispatch({
@@ -235,6 +286,7 @@ export function useDocument() {
         content: result.content ?? '',
         path: result.path,
         requestId: ++requestId.current,
+        sourceMode: defaultSourceMode,
       })
       return { status: 'success', path: result.path } as const
     } catch (error) {
@@ -246,7 +298,7 @@ export function useDocument() {
       })
       return { status: 'error', message } as const
     }
-  }, [tabsState.activeTabId])
+  }, [defaultSourceMode, tabsState.activeTabId, tabsState.tabs])
 
   const saveDocument = useCallback(
     async (saveAs = false) => {
@@ -254,6 +306,34 @@ export function useDocument() {
       const content = state.content
       const savedContentRevision =
         contentRevisions.current.get(activeTabId) ?? state.contentRevision
+      let savePath = state.path
+      if (saveAs) {
+        try {
+          const selected = await window.qingshu.chooseSavePath()
+          if (selected.canceled) return { status: 'canceled' } as const
+          const owner = tabsState.tabs.find(
+            (tab) => tab.id !== activeTabId && tab.path === selected.path,
+          )
+          if (owner) {
+            const message = `${filename(selected.path)} is already open in another tab. Choose a different path.`
+            tabsDispatch({
+              type: 'document',
+              tabId: activeTabId,
+              action: { type: 'error', message },
+            })
+            return { status: 'error', message } as const
+          }
+          savePath = selected.path
+        } catch (error) {
+          const message = errorMessage(error)
+          tabsDispatch({
+            type: 'document',
+            tabId: activeTabId,
+            action: { type: 'error', message },
+          })
+          return { status: 'error', message } as const
+        }
+      }
       const currentRequest = ++requestId.current
       latestSaveRequests.current.set(activeTabId, currentRequest)
       tabsDispatch({
@@ -264,8 +344,7 @@ export function useDocument() {
       try {
         const result = await window.qingshu.saveFile({
           content,
-          path: saveAs ? undefined : state.path,
-          sourcePath: saveAs ? state.path : undefined,
+          path: savePath,
         })
         if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           if (!result.canceled && result.warning) {
@@ -321,7 +400,13 @@ export function useDocument() {
         return { status: 'error', message } as const
       }
     },
-    [state.content, state.contentRevision, state.path, tabsState.activeTabId],
+    [
+      state.content,
+      state.contentRevision,
+      state.path,
+      tabsState.activeTabId,
+      tabsState.tabs,
+    ],
   )
 
   const activateTab = useCallback((tabId: string) => {

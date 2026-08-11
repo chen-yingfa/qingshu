@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react'
+import { type KeyboardEvent, useEffect, useRef } from 'react'
 
 import type { DocumentTab } from '../hooks/useDocument'
 
@@ -21,6 +21,15 @@ export function TabStrip({
   onActivate,
   onClose,
 }: TabStripProps) {
+  const pendingClose = useRef<string | null>(null)
+
+  useEffect(() => {
+    const closed = pendingClose.current
+    if (!closed || tabs.some((tab) => tab.id === closed)) return
+    pendingClose.current = null
+    document.getElementById(`document-tab-${activeTabId}`)?.focus()
+  }, [activeTabId, tabs])
+
   const navigate = (event: KeyboardEvent, index: number) => {
     const previousKey = orientation === 'horizontal' ? 'ArrowLeft' : 'ArrowUp'
     const nextKey = orientation === 'horizontal' ? 'ArrowRight' : 'ArrowDown'
@@ -54,6 +63,7 @@ export function TabStrip({
               className="document-tab"
               aria-label={accessibleName}
               aria-selected={tab.id === activeTabId}
+              aria-controls={`document-panel-${tab.id}`}
               tabIndex={tab.id === activeTabId ? 0 : -1}
               onClick={() => onActivate(tab.id)}
               onKeyDown={(event) => navigate(event, index)}
@@ -65,7 +75,11 @@ export function TabStrip({
               type="button"
               className="document-tab-close"
               aria-label={`Close ${name}`}
-              onClick={() => onClose(tab.id)}
+              tabIndex={tab.id === activeTabId ? 0 : -1}
+              onClick={() => {
+                pendingClose.current = tab.id
+                onClose(tab.id)
+              }}
             >
               ×
             </button>

@@ -11,20 +11,46 @@ afterEach(() => {
 })
 
 describe('useDocument save lifecycle', () => {
+  it('does not consume tab IDs or revision entries for duplicate opens', async () => {
+    window.qingshu = {
+      openFile: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/same.md',
+        content: '# Same',
+      }),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+
+    await act(async () => {
+      await result.current.openDocument()
+    })
+    await act(async () => {
+      await result.current.openDocument()
+    })
+    act(() => result.current.newDocument())
+
+    expect(result.current.tabs.map((tab) => tab.id)).toEqual([
+      'tab-1',
+      'tab-2',
+      'tab-3',
+    ])
+  })
+
   it.each([false, true])(
     'preserves both tab buffers when Save As collides with a %s dirty owner',
     async (ownerDirty) => {
+      const saveFile = vi.fn()
       window.qingshu = {
         openFile: vi.fn().mockResolvedValue({
           canceled: false,
           path: '/notes/existing.md',
           content: '# Existing',
         }),
-        saveFile: vi
-          .fn()
-          .mockRejectedValue(
-            new Error('The selected file is already open in another tab.'),
-          ),
+        chooseSavePath: vi.fn().mockResolvedValue({
+          canceled: false,
+          path: '/notes/existing.md',
+        }),
+        saveFile,
       } as unknown as QingshuApi
       const { result } = renderHook(() => useDocument())
       await act(async () => {
@@ -47,8 +73,10 @@ describe('useDocument save lifecycle', () => {
 
       expect(operation).toEqual({
         status: 'error',
-        message: 'The selected file is already open in another tab.',
+        message:
+          'existing.md is already open in another tab. Choose a different path.',
       })
+      expect(saveFile).not.toHaveBeenCalled()
       expect(result.current.tabs).toHaveLength(3)
       expect(
         result.current.tabs.find((tab) => tab.path === '/notes/existing.md'),
@@ -75,7 +103,13 @@ describe('useDocument save lifecycle', () => {
           finishSave = resolve
         }),
     )
-    window.qingshu = { saveFile } as unknown as QingshuApi
+    window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/selected.md',
+      }),
+      saveFile,
+    } as unknown as QingshuApi
     const { result } = renderHook(() => useDocument())
 
     act(() => result.current.dispatch({ type: 'edit', content: 'first draft' }))
@@ -84,6 +118,9 @@ describe('useDocument save lifecycle', () => {
       save = result.current.saveDocument(true)
     })
     act(() => result.current.dispatch({ type: 'edit', content: 'newest draft' }))
+    await act(async () => {
+      await Promise.resolve()
+    })
     finishSave({ canceled: false, path: '/notes/selected.md' })
 
     let operation: Awaited<typeof save>
@@ -166,6 +203,10 @@ describe('useDocument save lifecycle', () => {
       warning: string
     }) => void
     window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/warning.md',
+      }),
       saveFile: vi.fn(
         () =>
           new Promise((resolve) => {
@@ -180,6 +221,9 @@ describe('useDocument save lifecycle', () => {
       save = result.current.saveDocument(true)
     })
     act(() => result.current.dispatch({ type: 'edit', content: 'newest draft' }))
+    await act(async () => {
+      await Promise.resolve()
+    })
     finishSave({
       canceled: false,
       path: '/notes/warning.md',
@@ -211,6 +255,10 @@ describe('useDocument save lifecycle', () => {
     }) => void
     let finishNewer!: (result: { canceled: true }) => void
     window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/older.md',
+      }),
       saveFile: vi.fn()
         .mockImplementationOnce(
           () =>
@@ -233,6 +281,9 @@ describe('useDocument save lifecycle', () => {
     act(() => {
       older = result.current.saveDocument(true)
       newer = result.current.saveDocument(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
     })
     finishNewer({ canceled: true })
     await act(async () => {

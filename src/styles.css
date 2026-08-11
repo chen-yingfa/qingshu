@@ -84,6 +84,7 @@ button {
   border-bottom: 1px solid var(--line);
   background: var(--chrome);
   user-select: none;
+  grid-row: 1;
 }
 
 .brand-mark {
@@ -155,6 +156,7 @@ button {
   padding: 5px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--chrome);
+  grid-row: 2;
 }
 
 .tool-group {
@@ -217,6 +219,7 @@ button {
 
 .tab-strip-horizontal {
   border-bottom: 1px solid var(--line);
+  grid-row: 3;
 }
 
 .tab-strip-vertical {
@@ -285,6 +288,7 @@ button {
 .workspace-layout {
   display: flex;
   min-height: 0;
+  grid-row: 4;
 }
 
 .tool-button {
@@ -756,6 +760,7 @@ button {
   color: var(--muted);
   background: var(--chrome);
   font-size: 11px;
+  grid-row: 5;
 }
 
 .status-message {
@@ -1167,6 +1172,10 @@ kbd {
   from { opacity: 0; transform: translateY(8px); }
 }
 
+.tabs-vertical {
+  grid-template-rows: 38px 46px 0 minmax(0, 1fr) 30px;
+}
+
 .focus-mode {
   grid-template-rows: 0 0 0 minmax(0, 1fr) 0;
 }
@@ -1212,6 +1221,14 @@ kbd {
 @media (max-width: 760px) {
   .app-shell {
     grid-template-rows: 38px auto auto minmax(0, 1fr) 30px;
+  }
+
+  .app-shell.tabs-vertical {
+    grid-template-rows: 38px auto 0 minmax(0, 1fr) 30px;
+  }
+
+  .app-shell.focus-mode {
+    grid-template-rows: 0 0 0 minmax(0, 1fr) 0;
   }
 
   .toolbar {
