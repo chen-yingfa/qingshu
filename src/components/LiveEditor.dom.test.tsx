@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as markdown from '../markdown/markdown'
+import * as markdownCjk from '../markdown/cjk'
 import { LiveEditor } from './LiveEditor'
 
 afterEach(() => {
@@ -1211,6 +1212,22 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() =>
       expect((textarea as HTMLTextAreaElement).selectionStart).toBe(7),
     )
+  })
+
+  it('normalizes one source transformation while mapping the selection', async () => {
+    const normalize = vi.spyOn(markdownCjk, 'normalizeCjkInput')
+    const result = renderEditor('中文', { autoSpacing: true })
+    const textarea = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(textarea, {
+      target: { value: '中文text', selectionStart: 6, selectionEnd: 6 },
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('中文 text')
+    expect(normalize).toHaveBeenCalledOnce()
+    await waitFor(() => expect(textarea.selectionStart).toBe(7))
   })
 
   it('ends composition and normalizes safely when the block blurs', () => {

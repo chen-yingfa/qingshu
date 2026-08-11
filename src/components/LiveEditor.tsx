@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react'
 
-import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
+import { normalizeCjkInput } from '../markdown/cjk'
 import type { EditorSelection } from '../hooks/useDocument'
 import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
@@ -153,6 +153,31 @@ function sourceOffsetForEditorOffset(
     visibleOffset += 1
   }
   return sourceOffset
+}
+
+function mappedTransformOffset(
+  before: string,
+  after: string,
+  offset: number,
+): number {
+  let sourceIndex = 0
+  let transformedIndex = 0
+  while (sourceIndex < offset && transformedIndex < after.length) {
+    if (before[sourceIndex] === after[transformedIndex]) {
+      sourceIndex += 1
+      transformedIndex += 1
+    } else if (
+      after[transformedIndex] === ' ' &&
+      before[sourceIndex] !== ' '
+    ) {
+      transformedIndex += 1
+    } else {
+      // CJK punctuation shortcuts replace one UTF-16 code unit with one.
+      sourceIndex += 1
+      transformedIndex += 1
+    }
+  }
+  return transformedIndex
 }
 
 function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
@@ -1323,45 +1348,47 @@ export function LiveEditor({
       rangeRef.current,
       sourceValue,
     )
-    const transformTo = (end: number) => {
-      const range = { start: rangeRef.current.start, end }
-      let transformed = normalizeCjkInput(candidate, range)
-      let transformedEnd = end + transformed.length - candidate.length
-      if (autoSpacing) {
-        const spaced = spaceCjkLatin(transformed, {
-          start: range.start,
-          end: transformedEnd,
-        })
-        transformedEnd += spaced.length - transformed.length
-        transformed = spaced
-      }
-      return { source: transformed, end: transformedEnd }
+    const editableRange = {
+      start: rangeRef.current.start,
+      end: rangeRef.current.start + sourceValue.length,
     }
-    const transformed = transformTo(
-      rangeRef.current.start + sourceValue.length,
+    const transformedSource = normalizeCjkInput(
+      candidate,
+      editableRange,
+      autoSpacing,
+    )
+    const transformedEnd = mappedTransformOffset(
+      candidate,
+      transformedSource,
+      editableRange.end,
     )
     const normalized = toEditorValue(
-      transformed.source.slice(rangeRef.current.start, transformed.end),
+      transformedSource.slice(editableRange.start, transformedEnd),
     )
     if (normalized !== value) {
-      const transformedStart = transformTo(
-        rangeRef.current.start +
-          sourceOffsetForEditorOffset(sourceValue, selectionStart),
+      const sourceSelectionStart =
+        editableRange.start +
+        sourceOffsetForEditorOffset(sourceValue, selectionStart)
+      const sourceSelectionEnd =
+        editableRange.start +
+        sourceOffsetForEditorOffset(sourceValue, selectionEnd)
+      const transformedStart = mappedTransformOffset(
+        candidate,
+        transformedSource,
+        sourceSelectionStart,
       )
-      const transformedEnd = transformTo(
-        rangeRef.current.start +
-          sourceOffsetForEditorOffset(sourceValue, selectionEnd),
+      const transformedSelectionEnd = mappedTransformOffset(
+        candidate,
+        transformedSource,
+        sourceSelectionEnd,
       )
       const nextStart = toEditorValue(
-        transformedStart.source.slice(
-          rangeRef.current.start,
-          transformedStart.end,
-        ),
+        transformedSource.slice(editableRange.start, transformedStart),
       ).length
       const nextEnd = toEditorValue(
-        transformedEnd.source.slice(
-          rangeRef.current.start,
-          transformedEnd.end,
+        transformedSource.slice(
+          editableRange.start,
+          transformedSelectionEnd,
         ),
       ).length
       commitDraft(normalized)

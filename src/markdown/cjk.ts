@@ -254,8 +254,16 @@ function normalizePlainText(text: string, start: number, source: string): string
 export function normalizeCjkInput(
   source: string,
   editableRange?: SourceRange,
+  autoSpacing = false,
 ): string {
-  return transformMarkdownText(source, normalizePlainText, editableRange)
+  return transformMarkdownText(
+    source,
+    (text, start, fullSource) => {
+      const normalized = normalizePlainText(text, start, fullSource)
+      return autoSpacing ? spacePlainText(normalized) : normalized
+    },
+    editableRange,
+  )
 }
 
 function spacePlainText(source: string): string {
