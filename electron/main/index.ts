@@ -44,11 +44,18 @@ interface AuthorizedDocument {
   initialized: boolean
   saveQueue: Promise<void>
 }
+interface ExportedFile {
+  realPath: string
+  revision: FileRevision
+}
 const authorizedDocuments = new WeakMap<
   Electron.WebContents,
   Map<string, AuthorizedDocument>
 >()
-const exportedFiles = new WeakMap<Electron.WebContents, Set<string>>()
+const exportedFiles = new WeakMap<
+  Electron.WebContents,
+  Map<string, ExportedFile>
+>()
 let tempSequence = 0
 
 interface CloseState {
@@ -109,9 +116,16 @@ function assertNoPayload(channel: string, args: unknown[]): void {
   if (args.length !== 0) invalidPayload(channel)
 }
 
-function rememberExport(sender: Electron.WebContents, path: string): void {
-  const files = exportedFiles.get(sender) ?? new Set<string>()
-  files.add(resolve(path))
+async function rememberExport(
+  sender: Electron.WebContents,
+  path: string,
+): Promise<void> {
+  const requestedPath = resolve(path)
+  const realPath = await realpath(requestedPath)
+  const revision = await currentRevision(realPath)
+  if (!revision) throw new Error('Exported file could not be verified')
+  const files = exportedFiles.get(sender) ?? new Map<string, ExportedFile>()
+  files.set(requestedPath, { realPath, revision })
   exportedFiles.set(sender, files)
 }
 
@@ -465,7 +479,7 @@ ipcMain.handle(
     if (target.canceled) return target
 
     await writeFile(target.path, request.html, 'utf8')
-    rememberExport(event.sender, target.path)
+    await rememberExport(event.sender, target.path)
     return target
   },
 )
@@ -487,27 +501,45 @@ ipcMain.handle(
       printBackground: true,
     })
     await writeFile(target.path, pdf)
-    rememberExport(event.sender, target.path)
+    await rememberExport(event.sender, target.path)
     return target
   },
 )
 
 ipcMain.handle(
   'qingshu:show-item-in-folder',
-  (
+  async (
     event: IpcMainInvokeEvent,
     rawPath: unknown,
     ...extra: unknown[]
-  ): void => {
+  ): Promise<void> => {
     assertTrustedIpcSender(event)
     if (extra.length !== 0 || typeof rawPath !== 'string') {
       invalidPayload('qingshu:show-item-in-folder')
     }
-    const path = resolve(rawPath as string)
-    if (!exportedFiles.get(event.sender)?.has(path)) {
+    const path = rawPath as string
+    const files = exportedFiles.get(event.sender)
+    const exported = files?.get(path)
+    if (path !== resolve(path) || !exported) {
       throw new Error('File was not exported by Qingshu')
     }
-    shell.showItemInFolder(path)
+    let realPath: string
+    let revision: FileRevision | null
+    try {
+      realPath = await realpath(path)
+      revision = await currentRevision(realPath)
+    } catch {
+      throw new Error('Exported file has changed or no longer exists')
+    }
+    if (
+      realPath !== exported.realPath ||
+      !revision ||
+      !sameRevision(revision, exported.revision)
+    ) {
+      throw new Error('Exported file has changed or no longer exists')
+    }
+    shell.showItemInFolder(realPath)
+    files?.delete(path)
   },
 )
 
@@ -591,6 +623,12 @@ ipcMain.handle(
 )
 
 function installNavigationGuards(window: BrowserWindow): void {
+  window.webContents.on(
+    'did-start-navigation',
+    (_event, _url, _isInPlace, isMainFrame) => {
+      if (isMainFrame !== false) exportedFiles.delete(window.webContents)
+    },
+  )
   window.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
   })

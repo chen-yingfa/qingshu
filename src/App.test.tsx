@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import App, { formatShortcut } from './App'
+import App, { formatShortcut, showExportLabel } from './App'
 import type { MenuCommand, QingshuApi } from './types/electron'
 
 let menuListener: ((command: MenuCommand) => void) | undefined
@@ -190,6 +190,8 @@ describe('application safety controls', () => {
     await waitFor(() =>
       expect(screen.queryByLabelText('Active Markdown block')).not.toBeNull(),
     )
+    fireEvent.click(await screen.findByRole('button', { name: /Show in/ }))
+    expect(api.showItemInFolder).toHaveBeenCalledWith('/notes/export.pdf')
   })
 
   it('waits for fonts and current image completion before requesting PDF', async () => {
@@ -257,6 +259,12 @@ describe('application safety controls', () => {
 })
 
 describe('commands and operation feedback', () => {
+  it('uses platform-specific file manager labels', () => {
+    expect(showExportLabel('MacIntel')).toBe('Show in Finder')
+    expect(showExportLabel('Win32')).toBe('Show in File Explorer')
+    expect(showExportLabel('Linux x86_64')).toBe('Show in folder')
+  })
+
   it('formats command shortcut labels for the active platform', () => {
     expect(formatShortcut('Ctrl+Shift+S', false)).toBe('Ctrl+Shift+S')
     expect(formatShortcut('Ctrl+Shift+S', true)).toBe('⌘⇧S')

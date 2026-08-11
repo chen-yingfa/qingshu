@@ -770,18 +770,85 @@ describe('desktop IPC', () => {
       .get('qingshu:export-html')
       ?.(event, { html: '<h1>Reveal</h1>' })
 
-    expect(() =>
+    await expect(
       mocks.handlers
         .get('qingshu:show-item-in-folder')
         ?.(event, '/exports/reveal.html'),
-    ).not.toThrow()
+    ).resolves.toBeUndefined()
     expect(mocks.showItemInFolder).toHaveBeenCalledWith('/exports/reveal.html')
 
-    expect(() =>
+    await expect(
       mocks.handlers
         .get('qingshu:show-item-in-folder')
         ?.(event, '/private/unexported.txt'),
-    ).toThrow('File was not exported by Qingshu')
+    ).rejects.toThrow('File was not exported by Qingshu')
+    await expect(
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(event, '/exports/reveal.html'),
+    ).rejects.toThrow('File was not exported by Qingshu')
+  })
+
+  it('rejects cross-renderer and replaced exported files', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/stale.pdf',
+    })
+    event.sender.printToPDF.mockResolvedValue(Buffer.from('pdf'))
+    await mocks.handlers.get('qingshu:export-pdf')?.(event)
+
+    const otherEvent = {
+      ...event,
+      sender: {
+        ...event.sender,
+        mainFrame: senderFrame,
+      },
+    }
+    await expect(
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(otherEvent, '/exports/stale.pdf'),
+    ).rejects.toThrow('File was not exported by Qingshu')
+
+    mocks.stat.mockResolvedValue({
+      dev: 1,
+      ino: 99,
+      mode: 0o100644,
+      mtimeMs: 999,
+      size: 99,
+    })
+    await expect(
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(event, '/exports/stale.pdf'),
+    ).rejects.toThrow('Exported file has changed or no longer exists')
+  })
+
+  it('clears reveal authorization when the renderer navigates', async () => {
+    await main.createWindow()
+    const window = mocks.browserWindows.at(-1)
+    window.webContents.mainFrame = senderFrame
+    const windowEvent = {
+      senderFrame,
+      sender: window.webContents,
+    }
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/reload.html',
+    })
+    await mocks.handlers
+      .get('qingshu:export-html')
+      ?.(windowEvent, { html: '<h1>Reload</h1>' })
+
+    mocks.webContentsListeners
+      .get('did-start-navigation')
+      ?.({}, 'file:///workspace/dist/index.html', false, true)
+
+    await expect(
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(windowEvent, '/exports/reload.html'),
+    ).rejects.toThrow('File was not exported by Qingshu')
   })
 
   it('rejects renderer-supplied export paths instead of bypassing native dialogs', async () => {
@@ -840,6 +907,7 @@ describe('desktop IPC', () => {
       ['qingshu:save-file', { content: 42 }],
       ['qingshu:export-html', { html: 42 }],
       ['qingshu:export-pdf', {}],
+      ['qingshu:show-item-in-folder', 42],
       ['qingshu:window-action', 'destroy'],
       ['qingshu:close-response', 'true'],
     ]

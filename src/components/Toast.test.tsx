@@ -50,6 +50,7 @@ describe('ToastRegion', () => {
   })
 
   it('runs an export action and dismisses its notification', () => {
+    vi.useFakeTimers()
     const onDismiss = vi.fn()
     const onAction = vi.fn()
     render(
@@ -66,6 +67,8 @@ describe('ToastRegion', () => {
       />,
     )
 
+    vi.advanceTimersByTime(60_000)
+    expect(onDismiss).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Show in folder' }))
     expect(onAction).toHaveBeenCalledOnce()
     expect(onDismiss).toHaveBeenCalledWith(9)

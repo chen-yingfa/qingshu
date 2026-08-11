@@ -18,8 +18,8 @@ interface ToastProps {
 
 function Toast({ toast, duration, onDismiss }: ToastProps) {
   useEffect(() => {
-    const visibleFor = toast.action ? Math.max(duration, 8000) : duration
-    const timer = window.setTimeout(() => onDismiss(toast.id), visibleFor)
+    if (toast.action) return undefined
+    const timer = window.setTimeout(() => onDismiss(toast.id), duration)
     return () => window.clearTimeout(timer)
   }, [duration, onDismiss, toast.action, toast.id])
 

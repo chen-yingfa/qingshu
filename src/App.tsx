@@ -24,9 +24,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function showExportLabel(): string {
-  if (/Mac|iPhone|iPad/u.test(navigator.platform)) return 'Show in Finder'
-  if (/Win/u.test(navigator.platform)) return 'Show in File Explorer'
+export function showExportLabel(
+  platform = navigator.platform,
+): string {
+  if (/Mac|iPhone|iPad/u.test(platform)) return 'Show in Finder'
+  if (/Win/u.test(platform)) return 'Show in File Explorer'
   return 'Show in folder'
 }
 
