@@ -838,6 +838,47 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).not.toHaveBeenCalled()
   })
 
+  it.each([
+    [
+      'fenced code',
+      '- preceding\n- item\n    ```md\n    - \n    ```',
+    ],
+    [
+      'display math',
+      '- preceding\n- item\n    $$\n    - \n    $$',
+    ],
+    [
+      'HTML',
+      '- preceding\n- item\n    <aside>\n    - \n    </aside>',
+    ],
+    [
+      'indented code',
+      '- preceding\n- item\n\n        - \n\n    continuation',
+    ],
+  ])('leaves an empty marker-shaped line inside nested %s untouched', (
+    _name,
+    source,
+  ) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const caret = source.indexOf('- ', source.indexOf('- item') + 1) + 2
+    editor.setSelectionRange(caret, caret)
+
+    for (const key of ['Enter', 'Backspace', 'Tab']) {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        bubbles: true,
+        cancelable: true,
+      })
+      fireEvent(editor, event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    expect(result.onChange).not.toHaveBeenCalled()
+    expect(editor.value).toBe(source)
+  })
+
   it('indents complete selected items with continuations and nested children', async () => {
     const onSelectionChange = vi.fn()
     const source = [
@@ -1242,6 +1283,68 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect((result.onChange.mock.calls.at(-1)?.[0] as string).includes('\r\n')).toBe(
       true,
     )
+  })
+
+  it.each([
+    {
+      name: 'unordered',
+      source: '- parent\r\n\r\n- child',
+      nested: '- parent\r\n\r\n  - child',
+      caret: 14,
+    },
+    {
+      name: 'ordered',
+      source: '1. parent\r\n\r\n2. child',
+      nested: '1. parent\r\n\r\n   2. child',
+      caret: 16,
+    },
+    {
+      name: 'task',
+      source: '- [ ] parent\r\n\r\n- [x] child',
+      nested: '- [ ] parent\r\n\r\n  - [x] child',
+      caret: 18,
+    },
+  ])('preserves user-authored loose-list CRLF separators through $name indent, outdent, and undo', async ({
+    source,
+    nested,
+    caret,
+  }) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.focus()
+    editor.setSelectionRange(caret, caret)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(nested)
+    expect(nested).toContain('\r\n\r\n')
+    expect(markdown.parseDocument(nested).ast.children[0]).toMatchObject({
+      type: 'list',
+      children: [{
+        type: 'listItem',
+        children: [
+          { type: 'paragraph' },
+          { type: 'list', children: [{ type: 'listItem' }] },
+        ],
+      }],
+    })
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    expect(source).toContain('\r\n\r\n')
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith(nested)
+    await waitFor(() => expect(editor.value).toContain('\n\n'))
   })
 
   it.each([

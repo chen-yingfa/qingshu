@@ -80,6 +80,10 @@ interface EditorUndoSnapshot {
     blocks: InsertedBlock[]
   }
   editingBoundary: EditingBoundary | null
+  syntheticListSeparator: {
+    draft: string
+    offset: number
+  } | null
   readonly expectedContent: string
   readonly expectedActiveBlock: number
   readonly expectedDraft: string
@@ -1158,6 +1162,10 @@ export function LiveEditor({
   const interactionGenerationRef = useRef(0)
   const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
   const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
+  const syntheticListSeparatorRef = useRef<{
+    draft: string
+    offset: number
+  } | null>(null)
   const insertedBlocksRef = useRef(insertedBlocks)
   const editingBoundaryRef = useRef(editingBoundary)
   const selectionRef = useRef({
@@ -1323,6 +1331,7 @@ export function LiveEditor({
     setInsertedBlocks(snapshot.insertedBlocks)
     setEditingBoundary(snapshot.editingBoundary)
     setDraft(snapshot.draft)
+    syntheticListSeparatorRef.current = snapshot.syntheticListSeparator
     mathEnterTokenRef.current = null
     deferredSelectionRef.current = {
       start: snapshot.selection.start,
@@ -1536,6 +1545,9 @@ export function LiveEditor({
         start: previous.start,
         end: previous.start + sourceValue.length,
       },
+      syntheticListSeparator: syntheticListSeparatorRef.current
+        ? { ...syntheticListSeparatorRef.current }
+        : null,
       expectedContent: '',
       expectedActiveBlock: safeActive,
       expectedDraft: '',
@@ -1565,6 +1577,9 @@ export function LiveEditor({
       },
       editingBoundary: editingBoundaryRef.current
         ? { ...editingBoundaryRef.current }
+        : null,
+      syntheticListSeparator: syntheticListSeparatorRef.current
+        ? { ...syntheticListSeparatorRef.current }
         : null,
       expectedContent: '',
       expectedActiveBlock: safeActive,
@@ -1602,6 +1617,7 @@ export function LiveEditor({
     setInsertedBlocks(snapshot.insertedBlocks)
     setEditingBoundary(snapshot.editingBoundary)
     setDraft(snapshot.draft)
+    syntheticListSeparatorRef.current = snapshot.syntheticListSeparator
     rangeRef.current = { ...snapshot.range }
     contentRef.current = snapshot.content
     pendingAcknowledgementRef.current = snapshot.content
@@ -2150,6 +2166,31 @@ export function LiveEditor({
     const firstLineIndent = /^[ \t]*$/u.test(sourcePrefix)
       ? sourcePrefix
       : ''
+    const lineStart =
+      draft.lastIndexOf('\n', Math.max(0, textarea.selectionStart - 1)) + 1
+    const nextLineBreak = draft.indexOf('\n', textarea.selectionStart)
+    const lineEnd = nextLineBreak < 0 ? draft.length : nextLineBreak
+    const currentSource = contentRef.current.slice(
+      rangeRef.current.start,
+      rangeRef.current.end,
+    )
+    const absoluteCurrentLine = {
+      start:
+        rangeRef.current.start +
+        sourceOffsetForEditorOffset(currentSource, lineStart),
+      end:
+        rangeRef.current.start +
+        sourceOffsetForEditorOffset(currentSource, lineEnd),
+    }
+    const currentProtectedRanges =
+      contentRef.current === content
+        ? protectedRanges
+        : remapProtectedRanges(content, contentRef.current, protectedRanges)
+    const currentLineIsProtected = currentProtectedRanges.some(
+      range =>
+        absoluteCurrentLine.start < range.end &&
+        absoluteCurrentLine.end > range.start,
+    )
     const semanticListBlock = model.blocks.find(
       (block) =>
         block.type === 'list' &&
@@ -2163,6 +2204,7 @@ export function LiveEditor({
       active.type === 'list' &&
       semanticListBlock !== undefined
     const listLine = inSemanticList
+      && !currentLineIsProtected
       ? listLineAt(
           draft,
           textarea.selectionStart,
@@ -2232,6 +2274,7 @@ export function LiveEditor({
 
     if (
       inSemanticList &&
+      !currentLineIsProtected &&
       event.key === 'Tab' &&
       !event.ctrlKey &&
       !event.metaKey &&
@@ -2278,15 +2321,15 @@ export function LiveEditor({
           selectedRange.start === 0 && sourcePrefix.length > 0
             ? sourcePrefix.slice(0, sourcePrefix.length - width)
             : sourcePrefix
+        const syntheticSeparator = syntheticListSeparatorRef.current
+        const syntheticSeparatorOffset = selectedRange.start - 1
         if (
-          selectedRange.start > 0 &&
-          draft.slice(
-            Math.max(0, selectedRange.start - 2),
-            selectedRange.start,
-          ) === '\n\n'
+          syntheticSeparator?.draft === draft &&
+          syntheticSeparator.offset === syntheticSeparatorOffset &&
+          draft[syntheticSeparatorOffset] === '\n'
         ) {
           outdentEdits.push({
-            start: selectedRange.start - 1,
+            start: syntheticSeparatorOffset,
             remove: 1,
             insert: '',
           })
@@ -2316,7 +2359,9 @@ export function LiveEditor({
             nextDraft,
             nextStart,
             nextEnd,
-            undefined,
+            () => {
+              syntheticListSeparatorRef.current = null
+            },
             snapshot,
           )
           setEditorSelection(textarea, nextStart, nextEnd, direction)
@@ -2376,12 +2421,22 @@ export function LiveEditor({
           snapshot,
         )
       } else {
+        const insertedSeparator = edits.some(
+          edit =>
+            edit.start === selectedRange.start &&
+            edit.remove === 0 &&
+            edit.insert === '\n',
+        )
         applyControlledTextareaEdit(
           draft,
           nextDraft,
           nextStart,
           nextEnd,
-          undefined,
+          () => {
+            syntheticListSeparatorRef.current = insertedSeparator
+              ? { draft: nextDraft, offset: selectedRange.start }
+              : null
+          },
           snapshot,
         )
         setEditorSelection(textarea, nextStart, nextEnd, direction)
