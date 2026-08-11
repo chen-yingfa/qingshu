@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as markdown from '../markdown/markdown'
 import * as markdownCjk from '../markdown/cjk'
+import * as markdownParser from '../markdown/parser'
 import { LiveEditor } from './LiveEditor'
 
 afterEach(() => {
@@ -542,7 +543,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
   })
 
   it('reuses the math-detection parse for live rendering', async () => {
-    const parse = vi.spyOn(markdown, 'parseDocument')
+    const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
     const result = renderEditor('$x_t$')
 
     await waitFor(() =>
