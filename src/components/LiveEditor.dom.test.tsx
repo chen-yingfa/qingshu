@@ -848,6 +848,28 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('Current!')
   })
 
+  it('restores the first block boundary without synchronously reparsing', () => {
+    const parse = vi.spyOn(markdown, 'parseDocument')
+    const result = renderEditor('Current')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(0, 0)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'\n\nCurrent'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    parse.mockClear()
+
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+
+    expect(parse).not.toHaveBeenCalled()
+  })
+
   it('does not intercept Backspace for a non-empty selection at block start', () => {
     renderEditor('First\n\nSecond', { activeBlock: 1 })
     const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
@@ -926,6 +948,19 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith(
       '# Heading\nInserted\n\nParagraph',
     )
+  })
+
+  it('derives heading Enter separation without another document parse', () => {
+    const parse = vi.spyOn(markdown, 'parseDocument')
+    renderEditor('# Heading\nParagraph')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(parse).toHaveBeenCalledOnce()
   })
 
   it('does not invent an editable paragraph inside three natural paragraph newlines', () => {
@@ -1304,6 +1339,18 @@ describe('LiveEditor keyboard and composition behavior', () => {
 })
 
 describe('LiveEditor block reordering', () => {
+  it('reuses the current document model when beginning a block move', () => {
+    const parse = vi.spyOn(markdown, 'parseDocument')
+    renderEditor('First\n\nSecond\n\nThird')
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 1' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+
+    expect(parse).toHaveBeenCalledTimes(2)
+  })
+
   it('shows a blue drop boundary and moves a dragged block there', () => {
     const result = renderEditor('First\n\nSecond\n\nThird')
     const handle = screen.getByRole('button', { name: 'Move block 2' })

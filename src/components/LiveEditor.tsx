@@ -97,8 +97,8 @@ function mappedTransformOffset(
   return transformedIndex
 }
 
-function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
-  return parseDocument(`${source}${eol}qingshu-empty-probe`).blocks.length > 1
+function separatesParagraphWithOneEol(block: MarkdownBlock) {
+  return block.type !== 'paragraph' && block.type !== 'list'
 }
 
 interface LiveEditorBaseProps {
@@ -1476,12 +1476,12 @@ export function LiveEditor({
         onChange(mergedContent)
         const targetIndex = Math.max(0, safeActive - 1)
         if (safeActive === 0) {
-          const first = parseDocument(mergedContent).blocks[0]
+          const first = blocks.find((_block, index) => index !== safeActive)
           rotateEditorSession()
           setDraft(toEditorValue(first?.source ?? ''))
           rangeRef.current = {
-            start: first?.start ?? 0,
-            end: first?.end ?? 0,
+            start: Math.max(0, (first?.start ?? removedLength) - removedLength),
+            end: Math.max(0, (first?.end ?? removedLength) - removedLength),
           }
         }
         onActiveBlockChange(targetIndex)
@@ -1553,7 +1553,7 @@ export function LiveEditor({
       const insertionPoint = rangeRef.current.end
       const eol = nearestEol(contentRef.current, insertionPoint)
       const insertion = `${eol}${eol}`
-      const leftSeparators = separatesParagraphWithOneEol(active.source, eol)
+      const leftSeparators = separatesParagraphWithOneEol(active)
         ? 1
         : 2
       const emptyOffset = insertionPoint + leftSeparators * eol.length
@@ -1610,11 +1610,12 @@ export function LiveEditor({
     focus: 'editor' | 'handle' = 'editor',
   ) => {
     const currentContent = contentRef.current
-    const currentModel = parseDocument(currentContent)
-    const protectedEnd = frontMatterEnd(currentContent)
-    const currentBlocks = currentModel.blocks.filter(
-      (block) => block.start >= protectedEnd,
-    )
+    const currentBlocks =
+      currentContent === content
+        ? movableBlocks
+        : parseDocument(currentContent).blocks.filter(
+            (block) => block.start >= frontMatterEnd(currentContent),
+          )
     const reordered = reorderMarkdownBlocks(
       currentContent,
       currentBlocks,
