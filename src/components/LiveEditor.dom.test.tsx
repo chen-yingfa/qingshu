@@ -399,6 +399,76 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
   })
 
+  it('inserts and focuses a new block before the current block on leading Enter', () => {
+    const result = renderEditor('First\n\nSecond', { activeBlock: 1 })
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\n\n\nSecond')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('')
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Inserted before' },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'First\n\nInserted before\n\nSecond',
+    )
+  })
+
+  it('inserts a focused block before the first document block', () => {
+    const result = renderEditor('Current')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith('\n\nCurrent')
+    result.rerender(
+      <LiveEditor
+        content={'\n\nCurrent'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'New first' },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('New first\n\nCurrent')
+  })
+
+  it('removes a still-empty block inserted before current content', () => {
+    const result = renderEditor('First\n\nSecond', { activeBlock: 1 })
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), {
+      key: 'Backspace',
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+  })
+
   it('inserts a block after a heading separated from content by one newline', () => {
     const result = renderEditor('# Heading\nParagraph')
     const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement

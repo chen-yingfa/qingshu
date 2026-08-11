@@ -38,6 +38,7 @@ interface InsertedBlock {
   offset: number
   length: number
   leftPadding: number
+  rightPadding: number
 }
 
 interface FormatRequest {
@@ -611,7 +612,15 @@ export function LiveEditor({
       const tracked =
         previous.start === previous.end &&
         !existing.some((block) => block.offset === previous.start)
-          ? [...existing, { offset: previous.start, length: 0, leftPadding: 0 }]
+          ? [
+              ...existing,
+              {
+                offset: previous.start,
+                length: 0,
+                leftPadding: 0,
+                rightPadding: 0,
+              },
+            ]
           : existing
       return {
         content: nextContent,
@@ -743,6 +752,52 @@ export function LiveEditor({
       return
     }
 
+    if (
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      draft.length > 0 &&
+      textarea.selectionStart === 0 &&
+      textarea.selectionEnd === 0
+    ) {
+      event.preventDefault()
+      const insertionPoint = rangeRef.current.start
+      const eol = nearestEol(contentRef.current, insertionPoint)
+      const insertion = `${eol}${eol}`
+      const previousContent = contentRef.current
+      const nextContent =
+        previousContent.slice(0, insertionPoint) +
+        insertion +
+        previousContent.slice(insertionPoint)
+      setInsertedBlocks((current) => ({
+        content: nextContent,
+        blocks: [
+          ...(current.content === previousContent ? current.blocks : []).map(
+            (block) =>
+              block.offset >= insertionPoint
+                ? { ...block, offset: block.offset + insertion.length }
+                : block,
+          ),
+          {
+            offset: insertionPoint,
+            length: 0,
+            leftPadding: 0,
+            rightPadding: insertion.length,
+          },
+        ],
+      }))
+      setDraft('')
+      rangeRef.current = { start: insertionPoint, end: insertionPoint }
+      contentRef.current = nextContent
+      pendingAcknowledgementRef.current = nextContent
+      onChange(nextContent)
+      onActiveBlockChange(safeActive)
+      afterPaint(() => {
+        textareaRef.current?.focus()
+        textareaRef.current?.setSelectionRange(0, 0)
+      })
+      return
+    }
+
     if (fencedCode && event.key === 'Escape') {
       codeTabEscapeRef.current = true
       return
@@ -829,10 +884,16 @@ export function LiveEditor({
       const inserted = (
         insertedBlocks.content === previousContent ? insertedBlocks.blocks : []
       ).find((block) => block.offset === blockStart)
-      if (inserted?.leftPadding && !draft.trim()) {
+      if (
+        inserted &&
+        (inserted.leftPadding || inserted.rightPadding) &&
+        !draft.trim()
+      ) {
         const removeStart = blockStart - inserted.leftPadding
-        const removeEnd = blockStart + inserted.length
-        const removedLength = inserted.leftPadding + inserted.length
+        const removeEnd =
+          blockStart + inserted.length + inserted.rightPadding
+        const removedLength =
+          inserted.leftPadding + inserted.length + inserted.rightPadding
         const mergedContent =
           previousContent.slice(0, removeStart) +
           previousContent.slice(removeEnd)
@@ -934,6 +995,7 @@ export function LiveEditor({
             offset: emptyOffset,
             length: 0,
             leftPadding: emptyOffset - insertionPoint,
+            rightPadding: 0,
           },
         ].filter(
           (block, index, blocks) =>
