@@ -158,6 +158,57 @@ describe('LiveEditor state synchronization', () => {
     ).toBe('- One\n\n-\n\n- Three')
   })
 
+  it('includes explicit empty rows when remapping a collapsed list index', async () => {
+    const before = 'Intro\n\n- One\n\nCurrent\n\n- Three\n\nOutro'
+    const withEmpty = 'Intro\n\n\n\n- One\n\nCurrent\n\n- Three\n\nOutro'
+    const after = 'Intro\n\n\n\n- One\n\n-\n\n- Three\n\nOutro'
+    const result = renderEditor(before)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={withEmpty}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content={withEmpty}
+        activeBlock={3}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '-', selectionStart: 1, selectionEnd: 1 },
+    })
+    result.rerender(
+      <LiveEditor
+        content={after}
+        activeBlock={3}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    result.rerender(
+      <LiveEditor
+        content={after}
+        activeBlock={4}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2),
+    )
+  })
+
   it('does not duplicate content when a tight list becomes loose while active', () => {
     const result = renderEditor('- First\n- Second')
     const editor = screen.getByLabelText(
