@@ -115,11 +115,12 @@ export function loadSettings(
       const used = new Set<string>()
       for (const { id } of SHORTCUT_ACTIONS) {
         const shortcut = (value.shortcuts as Record<string, unknown>)[id]
-        const candidate =
-          typeof shortcut === 'string' && isValidShortcut(shortcut)
-            ? shortcut
-            : settings.shortcuts[id]
-        const effective = shortcutLabel(candidate, isMac)
+        const persisted =
+          typeof shortcut === 'string'
+            ? canonicalizeShortcut(shortcut)
+            : undefined
+        const candidate = persisted ?? settings.shortcuts[id]
+        const effective = shortcutSignature(candidate, isMac)
         settings.shortcuts[id] =
           effective && used.has(effective) ? '' : candidate
         if (effective && settings.shortcuts[id]) used.add(effective)
@@ -149,13 +150,14 @@ function normalizedKey(key: string): string {
 export function eventToShortcut(event: ShortcutEvent): string | undefined {
   if (['Control', 'Meta', 'Shift', 'Alt'].includes(event.key)) return undefined
   if (!event.ctrlKey && !event.metaKey && !event.altKey) return undefined
+  if (event.ctrlKey && event.metaKey) return undefined
   const parts: string[] = []
   if (event.metaKey) parts.push('Cmd')
   if (event.ctrlKey) parts.push('Ctrl')
   if (event.shiftKey) parts.push('Shift')
   if (event.altKey) parts.push('Alt')
   parts.push(normalizedKey(event.key))
-  return parts.join('+')
+  return canonicalizeShortcut(parts.join('+'))
 }
 
 export function matchesShortcut(
@@ -164,8 +166,9 @@ export function matchesShortcut(
   isMac = typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad/u.test(navigator.platform),
 ): boolean {
-  if (!isValidShortcut(shortcut) || !shortcut) return false
-  const parts = shortcut.split('+')
+  const canonical = canonicalizeShortcut(shortcut)
+  if (!canonical) return false
+  const parts = canonical.split('+')
   const key = parts.at(-1) ?? ''
   const mod = parts.includes('Mod')
   const ctrl = parts.includes('Ctrl') || (mod && !isMac)
@@ -182,8 +185,9 @@ export function matchesShortcut(
 }
 
 export function shortcutLabel(shortcut: string, isMac: boolean): string {
-  if (!shortcut) return ''
-  const parts = shortcut.split('+')
+  const canonical = canonicalizeShortcut(shortcut)
+  if (!canonical) return ''
+  const parts = canonical.split('+')
   const key = parts.pop() ?? ''
   if (!isMac) {
     return [
@@ -205,21 +209,55 @@ export function shortcutLabel(shortcut: string, isMac: boolean): string {
 }
 
 export function isValidShortcut(shortcut: string): boolean {
-  if (shortcut === '') return true
+  return canonicalizeShortcut(shortcut) !== undefined
+}
+
+export function canonicalizeShortcut(
+  shortcut: string,
+): string | undefined {
+  if (shortcut === '') return ''
   const parts = shortcut.split('+')
-  if (parts.length < 2 || parts.some((part) => !part)) return false
-  const key = parts.at(-1)!
+  if (parts.length < 2 || parts.some((part) => !part)) return undefined
+  const key = normalizedKey(parts.at(-1)!)
   const modifiers = parts.slice(0, -1)
   const allowed = new Set(['Mod', 'Cmd', 'Ctrl', 'Shift', 'Alt'])
+  const primaryCount = modifiers.filter((modifier) =>
+    ['Mod', 'Cmd', 'Ctrl'].includes(modifier),
+  ).length
   if (
     modifiers.some((modifier) => !allowed.has(modifier)) ||
     new Set(modifiers).size !== modifiers.length ||
     !key ||
-    allowed.has(key)
+    allowed.has(key) ||
+    primaryCount > 1
   ) {
-    return false
+    return undefined
   }
-  return modifiers.some((modifier) =>
+  if (!modifiers.some((modifier) =>
     ['Mod', 'Cmd', 'Ctrl', 'Alt'].includes(modifier),
+  )) {
+    return undefined
+  }
+  const ordered = ['Mod', 'Cmd', 'Ctrl', 'Shift', 'Alt'].filter((modifier) =>
+    modifiers.includes(modifier),
   )
+  return [...ordered, key].join('+')
+}
+
+export function shortcutSignature(
+  shortcut: string,
+  isMac: boolean,
+): string {
+  const canonical = canonicalizeShortcut(shortcut)
+  if (!canonical) return ''
+  const parts = canonical.split('+')
+  const key = parts.at(-1)
+  const mod = parts.includes('Mod')
+  return [
+    parts.includes('Ctrl') || (mod && !isMac) ? 'ctrl' : '',
+    parts.includes('Cmd') || (mod && isMac) ? 'meta' : '',
+    parts.includes('Shift') ? 'shift' : '',
+    parts.includes('Alt') ? 'alt' : '',
+    key,
+  ].join(':')
 }

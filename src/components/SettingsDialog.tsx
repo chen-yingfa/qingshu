@@ -5,6 +5,7 @@ import {
   eventToShortcut,
   loadSettings,
   shortcutLabel,
+  shortcutSignature,
   type AppSettings,
   type ShortcutAction,
 } from '../settings'
@@ -31,7 +32,7 @@ export function SettingsDialog({
     const owners = new Map<string, ShortcutAction[]>()
     for (const { id } of SHORTCUT_ACTIONS) {
       const shortcut = settings.shortcuts[id]
-      const effective = shortcutLabel(shortcut, isMac)
+      const effective = shortcutSignature(shortcut, isMac)
       if (effective) {
         owners.set(effective, [...(owners.get(effective) ?? []), id])
       }
@@ -63,8 +64,8 @@ export function SettingsDialog({
       (action) =>
         action.id !== id &&
         shortcut &&
-        shortcutLabel(settings.shortcuts[action.id], isMac) ===
-          shortcutLabel(shortcut, isMac),
+        shortcutSignature(settings.shortcuts[action.id], isMac) ===
+          shortcutSignature(shortcut, isMac),
     )
     if (owner) {
       setShortcutConflict({
@@ -224,16 +225,16 @@ export function SettingsDialog({
                         aria-label={`Shortcut for ${label}`}
                         value={shortcutLabel(shortcut, isMac)}
                         className={
-                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                          duplicates.has(shortcutSignature(shortcut, isMac)) ||
                           shortcutConflict?.id === id
                             ? 'has-conflict'
                             : ''
                         }
                         aria-invalid={
-                          duplicates.has(shortcutLabel(shortcut, isMac))
+                          duplicates.has(shortcutSignature(shortcut, isMac))
                         }
                         aria-describedby={
-                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                          duplicates.has(shortcutSignature(shortcut, isMac)) ||
                           shortcutConflict?.id === id
                             ? `shortcut-conflict-${id}`
                             : undefined
@@ -256,7 +257,7 @@ export function SettingsDialog({
                           if (recorded) updateShortcut(id, recorded)
                         }}
                       />
-                      {(duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                      {(duplicates.has(shortcutSignature(shortcut, isMac)) ||
                         shortcutConflict?.id === id) && (
                         <small id={`shortcut-conflict-${id}`} role="alert">
                           {shortcutConflict?.id === id

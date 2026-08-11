@@ -81,7 +81,15 @@ function initialSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     const loaded = loadSettings(raw)
-    if (!raw) {
+    let migrateLegacy = !raw
+    if (raw) {
+      try {
+        JSON.parse(raw)
+      } catch {
+        migrateLegacy = true
+      }
+    }
+    if (migrateLegacy) {
       const legacyFont = window.localStorage.getItem('qingshu:document-font')
       if (
         legacyFont === 'sans' ||

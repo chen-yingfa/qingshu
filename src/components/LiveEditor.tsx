@@ -668,7 +668,12 @@ function formattedValue(
       )
       const delimiter = '`'.repeat(longestRun + 1)
       const padding =
-        selection.startsWith('`') || selection.endsWith('`') ? ' ' : ''
+        selection.startsWith('`') ||
+        selection.endsWith('`') ||
+        (selection.trim() &&
+          (/^\s/u.test(selection) || /\s$/u.test(selection)))
+          ? ' '
+          : ''
       return applyInlineFormat(
         value,
         start,
@@ -679,7 +684,11 @@ function formattedValue(
     }
     case 'math': {
       const selection = value.slice(start, end)
-      const escaped = selection.replace(/(?<!\\)\$/gu, '\\$')
+      const escaped = selection.replace(
+        /(\\*)\$/gu,
+        (match, slashes: string) =>
+          slashes.length % 2 === 0 ? `${slashes}\\$` : match,
+      )
       return {
         value: value.slice(0, start) + '$' + escaped + '$' + value.slice(end),
         selectionStart: start + 1,

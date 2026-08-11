@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canonicalizeShortcut,
   DEFAULT_SETTINGS,
   eventToShortcut,
   loadSettings,
   matchesShortcut,
   shortcutLabel,
+  shortcutSignature,
 } from './settings'
 
 describe('settings', () => {
@@ -142,5 +144,16 @@ describe('settings', () => {
         true,
       ).shortcuts.italic,
     ).toBe('')
+  })
+
+  it('canonicalizes modifier order and compares effective bindings', () => {
+    expect(canonicalizeShortcut('Shift+Ctrl+b')).toBe('Ctrl+Shift+B')
+    expect(canonicalizeShortcut('Mod+Ctrl+B')).toBeUndefined()
+    expect(shortcutSignature('Mod+B', false)).toBe(
+      shortcutSignature('Ctrl+B', false),
+    )
+    expect(shortcutSignature('Mod+B', true)).toBe(
+      shortcutSignature('Cmd+B', true),
+    )
   })
 })
