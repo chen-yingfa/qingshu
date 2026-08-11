@@ -40,14 +40,14 @@ interface SourceRange {
   end: number
 }
 
-interface InsertedBlock {
+export interface InsertedBlock {
   offset: number
   length: number
   leftPadding: number
   rightPadding: number
 }
 
-interface EditingBoundary {
+export interface EditingBoundary {
   content: string
   start: number
   end: number
@@ -170,6 +170,16 @@ interface LiveEditorBaseProps {
   onActiveBlockChange(index: number): void
   selection?: EditorSelection
   onSelectionChange?(selection: EditorSelection): void
+  initialEphemeralState?: EditorEphemeralState
+  onEphemeralStateChange?(state: EditorEphemeralState): void
+}
+
+export interface EditorEphemeralState {
+  insertedBlocks: {
+    content: string
+    blocks: InsertedBlock[]
+  }
+  editingBoundary: EditingBoundary | null
 }
 
 type LiveEditorProps = LiveEditorBaseProps &
@@ -771,6 +781,7 @@ function DocumentSourceEditor({
   const [draft, setDraft] = useState(toEditorValue(content))
   const parentContentRef = useRef(content)
   const canonicalContentRef = useRef(content)
+  const nativeInputValueRef = useRef<string | null>(null)
   const lastParentRevisionRef = useRef(contentRevision)
   const nextLocalRevisionRef = useRef(contentRevision)
   const pendingAcknowledgementsRef = useRef(
@@ -868,10 +879,10 @@ function DocumentSourceEditor({
     const change = textReplacement(draft, result.value)
     textarea.focus()
     textarea.setSelectionRange(change.start, change.end)
+    nativeInputValueRef.current = null
     const nativeApplied =
       typeof document.execCommand === 'function' &&
-      document.execCommand('insertText', false, change.replacement) &&
-      textarea.value === result.value
+      document.execCommand('insertText', false, change.replacement)
     if (!nativeApplied) {
       textarea.setRangeText(
         change.replacement,
@@ -880,7 +891,13 @@ function DocumentSourceEditor({
         'preserve',
       )
       commit(textarea.value, result.selectionEnd)
+    } else if (nativeInputValueRef.current !== result.value) {
+      // Chromium dispatches input synchronously for insertText. If a host
+      // reports success without doing so, still commit the requested canonical
+      // edit while leaving the native command in the browser undo stack.
+      commit(result.value, result.selectionEnd)
     }
+    nativeInputValueRef.current = null
     afterPaint(() => {
       textarea.focus()
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
@@ -915,6 +932,7 @@ function DocumentSourceEditor({
       spellCheck={false}
       value={draft}
       onChange={(event) => {
+        nativeInputValueRef.current = event.target.value
         commit(event.target.value, event.target.selectionStart)
         reportSelection(event.currentTarget)
       }}
@@ -1028,6 +1046,8 @@ export function LiveEditor({
   onActiveBlockChange,
   selection,
   onSelectionChange,
+  initialEphemeralState,
+  onEphemeralStateChange,
 }: LiveEditorProps) {
   if (
     sourceMode &&
@@ -1040,9 +1060,11 @@ export function LiveEditor({
   const [insertedBlocks, setInsertedBlocks] = useState<{
     content: string
     blocks: InsertedBlock[]
-  }>({ content, blocks: [] })
+  }>(initialEphemeralState?.insertedBlocks ?? { content, blocks: [] })
   const [editingBoundary, setEditingBoundary] =
-    useState<EditingBoundary | null>(null)
+    useState<EditingBoundary | null>(
+      initialEphemeralState?.editingBoundary ?? null,
+    )
   const [draggedBlock, setDraggedBlock] = useState<number | null>(null)
   const [dropBoundary, setDropBoundary] = useState<number | null>(null)
   const draggedBlockRef = useRef<number | null>(null)
@@ -1100,6 +1122,14 @@ export function LiveEditor({
     activationRef.current(index)
   }, [])
   contentRef.current = content
+
+  useEffect(() => {
+    onEphemeralStateChange?.({ insertedBlocks, editingBoundary })
+  }, [
+    editingBoundary,
+    insertedBlocks,
+    onEphemeralStateChange,
+  ])
 
   const rotateEditorSession = () => {
     composingRef.current = false

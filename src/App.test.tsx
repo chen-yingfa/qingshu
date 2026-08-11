@@ -282,6 +282,37 @@ describe('document tabs', () => {
     )
   })
 
+  it('preserves a synthetic empty block when switching tabs', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    fireEvent.change(screen.getByLabelText('Markdown source'), {
+      target: { value: 'First\n\nSecond' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange('First'.length, 'First'.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect((screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value)
+      .toBe('')
+
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+    fireEvent.click(screen.getAllByRole('tab')[0])
+    const restored = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(restored.value).toBe('')
+    restored.setSelectionRange(0, 0)
+    fireEvent.keyDown(restored, { key: 'Backspace' })
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('First'),
+    )
+    expect(screen.getByText('Second')).not.toBeNull()
+  })
+
   it('ignores stale recent refresh responses and surfaces persistence warnings', async () => {
     let resolveOlder!: (value: {
       paths: string[]
@@ -789,6 +820,34 @@ describe('commands and operation feedback', () => {
 
     fireEvent.keyDown(source, { key: ',', ctrlKey: true })
     expect(screen.getByRole('dialog', { name: 'Settings' })).not.toBeNull()
+  })
+
+  it('does not run global shortcuts from non-editor form controls', () => {
+    render(<App />)
+    const font = screen.getByRole('combobox', {
+      name: 'Document font',
+    })
+
+    fireEvent.keyDown(font, { key: 'n', ctrlKey: true })
+    fireEvent.keyDown(font, { key: 'e', ctrlKey: true, shiftKey: true })
+
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(screen.queryByLabelText('Markdown source')).toBeNull()
+  })
+
+  it('applies the source-mode default only to subsequently created tabs', () => {
+    render(<App />)
+    expect(screen.getByLabelText('Active Markdown block')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    fireEvent.click(screen.getByLabelText('Use source mode by default'))
+
+    expect(screen.getByLabelText('Active Markdown block')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+
+    expect(screen.getByLabelText('Markdown source')).not.toBeNull()
+    fireEvent.click(screen.getAllByRole('tab')[0])
+    expect(screen.getByLabelText('Active Markdown block')).not.toBeNull()
   })
 
   it('keeps formatting request IDs monotonic across source-mode round trips', async () => {

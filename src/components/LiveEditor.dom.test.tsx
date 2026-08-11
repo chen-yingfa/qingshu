@@ -1562,6 +1562,47 @@ describe('LiveEditor block reordering', () => {
 })
 
 describe('LiveEditor source mode', () => {
+  it('commits one canonical edit when native insertText dispatches input', async () => {
+    const execCommand = vi.fn((_command: string, _ui: boolean, replacement: string) => {
+      const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+      source.setRangeText(
+        replacement,
+        source.selectionStart,
+        source.selectionEnd,
+        'end',
+      )
+      fireEvent.input(source, { target: { value: source.value } })
+      return true
+    })
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    })
+    const result = renderEditor('first\r\nword', {
+      sourceMode: true,
+      contentRevision: 0,
+    })
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    source.setSelectionRange('first\n'.length, source.value.length)
+
+    result.rerender(
+      <LiveEditor
+        content={'first\r\nword'}
+        contentRevision={0}
+        activeBlock={0}
+        sourceMode
+        formatRequest={{ id: 1, command: 'bold' }}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => expect(source.value).toBe('first\n**word**'))
+    expect(result.onChange).toHaveBeenLastCalledWith('first\r\n**word**')
+    expect(result.onChange).toHaveBeenCalledOnce()
+    expect(execCommand).toHaveBeenCalledOnce()
+  })
+
   it('lets modified Tab bubble out of source mode for tab switching', () => {
     const result = renderEditor('source', {
       sourceMode: true,

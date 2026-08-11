@@ -11,7 +11,11 @@ import {
   CommandPalette,
   type PaletteCommand,
 } from './components/CommandPalette'
-import { LiveEditor, type FormatCommand } from './components/LiveEditor'
+import {
+  LiveEditor,
+  type EditorEphemeralState,
+  type FormatCommand,
+} from './components/LiveEditor'
 import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -140,6 +144,7 @@ export default function App() {
   const toastId = useRef(0)
   const settingsStorageWarned = useRef(false)
   const activePdfExport = useRef<ActivePdfExport | null>(null)
+  const editorStateByTab = useRef(new Map<string, EditorEphemeralState>())
   const formatRequestId = useRef(0)
   const recentRefreshGeneration = useRef(0)
   const [formatRequest, setFormatRequest] = useState<
@@ -152,6 +157,12 @@ export default function App() {
       command,
     })
   }, [])
+  const retainEditorState = useCallback(
+    (editorState: EditorEphemeralState) => {
+      editorStateByTab.current.set(activeTabId, editorState)
+    },
+    [activeTabId],
+  )
 
   const addToast = useCallback(
     (
@@ -432,11 +443,6 @@ export default function App() {
     (next: AppSettings) => {
       setSettings(next)
       if (next.theme !== settings.theme) setDark(resolvesDark(next.theme))
-      if (next.defaultA4 !== settings.defaultA4) setA4(next.defaultA4)
-      if (next.defaultSourceMode !== settings.defaultSourceMode) {
-        setFormatRequest(undefined)
-        dispatch({ type: 'source-mode', enabled: next.defaultSourceMode })
-      }
       if (
         next.autoSpacing !== settings.autoSpacing &&
         next.autoSpacing &&
@@ -770,14 +776,23 @@ export default function App() {
       const action = SHORTCUT_ACTIONS.find(({ id }) =>
         matchesShortcut(event, settings.shortcuts[id]),
       )?.id
+      const target = event.target
+      const editorTextarea =
+        target instanceof HTMLTextAreaElement &&
+        (target.classList.contains('source-block') ||
+          target.classList.contains('source-document'))
+      if (
+        (target instanceof HTMLInputElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement) &&
+        !editorTextarea
+      ) {
+        return
+      }
       if (!action || (paletteOpen && action !== 'palette')) return
       if (
         ['bold', 'italic', 'inlineCode', 'inlineMath'].includes(action) &&
-        !(
-          event.target instanceof HTMLTextAreaElement &&
-          (event.target.classList.contains('source-block') ||
-            event.target.classList.contains('source-document'))
-        )
+        !editorTextarea
       ) {
         return
       }
@@ -879,6 +894,8 @@ export default function App() {
             selection={state.selection}
             previewAll={printPreview}
             onPreviewReady={handlePreviewReady}
+            initialEphemeralState={editorStateByTab.current.get(activeTabId)}
+            onEphemeralStateChange={retainEditorState}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
             onSelectionChange={(selection) =>
