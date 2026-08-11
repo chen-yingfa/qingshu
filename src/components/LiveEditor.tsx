@@ -289,9 +289,13 @@ function preserveEditingBoundary(
   if (containingIndex < 0) return blocks
   const containing = blocks[containingIndex]
   const beforeRaw = content.slice(containing.start, boundary.start)
-  const beforeSource = beforeRaw.replace(/\s+$/u, '')
+  const beforeSource = beforeRaw.replace(
+    /(?:\r?\n[ \t]*){2,}$/u,
+    '',
+  )
   const afterRaw = content.slice(boundary.end, containing.end)
-  const afterLeading = afterRaw.match(/^\s+/u)?.[0].length ?? 0
+  const afterLeading =
+    afterRaw.match(/^(?:[ \t]*\r?\n){2,}/u)?.[0].length ?? 0
   const afterSource = afterRaw.slice(afterLeading)
   const activeSource = content.slice(boundary.start, boundary.end)
   const activeType =
@@ -822,13 +826,31 @@ export function LiveEditor({
     }
     const externalChange = parentChanged && !acknowledged
     if (activeChanged || externalChange) {
+      const semanticActive =
+        activeChanged && editingBoundary?.content === content
+          ? model.blocks.find(
+              (block) =>
+                block.start <= active.start && block.end >= active.end,
+            )
+          : undefined
       rotateEditorSession()
-      setDraft(toEditorValue(active.source))
-      rangeRef.current = { start: active.start, end: active.end }
+      setDraft(toEditorValue(semanticActive?.source ?? active.source))
+      rangeRef.current = {
+        start: semanticActive?.start ?? active.start,
+        end: semanticActive?.end ?? active.end,
+      }
     }
     if (externalChange) setInsertedBlocks({ content, blocks: [] })
     previousActiveRef.current = safeActive
-  }, [active.end, active.source, active.start, content, safeActive])
+  }, [
+    active.end,
+    active.source,
+    active.start,
+    content,
+    editingBoundary,
+    model.blocks,
+    safeActive,
+  ])
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current)
@@ -1439,7 +1461,18 @@ export function LiveEditor({
       ) : (
         <>
           {blocks.map((block, index) => {
-            const realIndex = realBlockIndexes.get(block.id)
+            const directRealIndex = realBlockIndexes.get(block.id)
+            const containingRealIndex =
+              directRealIndex === undefined
+                ? movableBlocks.findIndex(
+                    (candidate) =>
+                      candidate.start === block.start &&
+                      candidate.end >= block.end,
+                  )
+                : -1
+            const realIndex =
+              directRealIndex ??
+              (containingRealIndex >= 0 ? containingRealIndex : undefined)
             return (
               <Fragment
                 key={

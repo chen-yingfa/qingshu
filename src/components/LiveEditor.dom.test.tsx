@@ -89,6 +89,39 @@ describe('LiveEditor state synchronization', () => {
     expect(current).toBe(editor)
     expect(current.value).toBe('-')
     expect(current.selectionStart).toBe(1)
+    expect(screen.getByRole('button', { name: 'Move block 1' })).not.toBeNull()
+  })
+
+  it('restores the full semantic list when switching to its preceding item', async () => {
+    const result = renderEditor('- Previous item  \n\nCurrent', {
+      activeBlock: 1,
+    })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '-', selectionStart: 1, selectionEnd: 1 },
+    })
+    result.rerender(
+      <LiveEditor
+        content={'- Previous item  \n\n-'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    result.rerender(
+      <LiveEditor
+        content={'- Previous item  \n\n-'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('- Previous item  \n\n-'),
+    )
   })
 
   it('does not duplicate content when a tight list becomes loose while active', () => {
