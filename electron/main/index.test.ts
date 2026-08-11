@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   showMessageBox: vi.fn(),
   showItemInFolder: vi.fn(),
   setApplicationMenu: vi.fn(),
+  isPackaged: false,
   fromWebContents: vi.fn(),
   browserWindows: [] as any[],
   browserWindowOptions: [] as any[],
@@ -66,7 +67,9 @@ vi.mock('electron', () => ({
     disableHardwareAcceleration: vi.fn(),
     getName: () => 'Qingshu',
     getPath: () => '/user-data',
-    isPackaged: false,
+    get isPackaged() {
+      return mocks.isPackaged
+    },
     on: vi.fn((name: string, listener: (...args: any[]) => unknown) => {
       mocks.appListeners.set(name, listener)
     }),
@@ -156,6 +159,7 @@ function documentExclusiveOpenCalls() {
 describe('desktop IPC', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.isPackaged = false
     for (const mock of [
       mocks.readFile,
       mocks.writeFile,
@@ -1450,6 +1454,17 @@ describe('browser window security', () => {
     expect(openHandler({ url: 'https://evil.example/popup' })).toEqual({
       action: 'deny',
     })
+  })
+
+  it('wires the packaged dist icon into BrowserWindow creation', async () => {
+    mocks.isPackaged = true
+
+    await main.createWindow()
+
+    expect(mocks.browserWindowOptions.at(-1).icon).toMatch(
+      /dist[\\/]icon\.png$/u,
+    )
+    mocks.isPackaged = false
   })
 })
 

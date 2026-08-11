@@ -55,22 +55,38 @@ describe('desktop package metadata', () => {
     expect(publicPng.readUInt32BE(16)).toBe(256)
     expect(publicPng.readUInt32BE(20)).toBe(256)
     expect(ico.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]))
+    const icoCount = ico.readUInt16LE(4)
+    const icoSizes = Array.from({ length: icoCount }, (_, index) => {
+      const width = ico[6 + index * 16]
+      return width === 0 ? 256 : width
+    }).sort((left, right) => left - right)
+    expect(icoSizes).toEqual([16, 32, 48, 256])
+
     expect(icns.subarray(0, 4).toString('ascii')).toBe('icns')
-    for (const type of [
-      'icp4',
-      'icp5',
-      'icp6',
-      'ic07',
-      'ic08',
-      'ic09',
-      'ic10',
-      'ic11',
-      'ic12',
-      'ic13',
-      'ic14',
-    ]) {
-      expect(icns.includes(Buffer.from(type))).toBe(true)
+    const icnsEntries = new Map<string, number>()
+    for (let offset = 8; offset < icns.length; ) {
+      const type = icns.subarray(offset, offset + 4).toString('ascii')
+      const length = icns.readUInt32BE(offset + 4)
+      expect(
+        icns.subarray(offset + 8, offset + 16),
+        `${type} PNG signature`,
+      ).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      icnsEntries.set(type, icns.readUInt32BE(offset + 24))
+      offset += length
     }
+    expect(Object.fromEntries(icnsEntries)).toEqual({
+      icp4: 16,
+      icp5: 32,
+      icp6: 64,
+      ic07: 128,
+      ic08: 256,
+      ic09: 512,
+      ic10: 1024,
+      ic11: 32,
+      ic12: 64,
+      ic13: 256,
+      ic14: 512,
+    })
     expect(generator).toContain("['ic10', 1024]")
   }, 15_000)
 })
