@@ -38,7 +38,7 @@ No commit was amended and no branch was pushed.
 | Tracked repository bytes | 5,806,849 | 3,680,206 before this report | -2,126,643 (-36.62%) |
 | Tracked duplicate 1024px PNGs | 2 | 1 canonical source | -852,206 bytes |
 
-The resulting AppImage is 129,545,540 bytes. Its Electron runtime dominates that
+The resulting AppImage is 129,545,526 bytes. Its Electron runtime dominates that
 artifact; application content in the asar is 1.99 MB.
 
 The asar module list is now:
@@ -77,7 +77,7 @@ references to the removed prototype paths, legacy style paths,
 - `npm run clean && npm ci` — passed; exact lock install completed with 0
   vulnerabilities.
 - `npm run typecheck` — passed both TypeScript projects.
-- `npm test` — passed 28 files and 343 tests.
+- `npm test` — passed 28 files and 351 tests.
 - `npm run build` — passed typecheck, renderer/main/preload production builds,
   Linux x64 packaging, and AppImage generation.
 - `npx electron-builder --win --x64 --dir --publish never` — passed Windows x64
@@ -96,10 +96,28 @@ the brace-expanded exclusion glob as comment syntax. Commit `18e1470` replaced i
 with the equivalent `!node_modules/**` pattern; the complete suite was then rerun
 and passed.
 
+## Final Review Remediation
+
+Five follow-up commits close the final renderer and Electron review findings:
+
+- `2691eaf` — keep sole source-tab content revisions monotonic across reset.
+- `aa2e4fa` — retain document/export grants for in-place fragment navigation.
+- `ab308fb` — make tab and native all-tab close scopes atomic against edits and
+  save starts while cancellation settles.
+- `a219cd5` — serialize HTML and PDF commits through a shared canonical-path
+  queue.
+- `92f4dfa` — normalize only the active block using protected ranges cached from
+  the existing document AST.
+
+Focused regressions cover source reset plus subsequent input, footnote hash
+navigation, tab/native-close interleavings, cross-renderer HTML/PDF queueing and
+queue recovery, and bounded CJK parser/transform work with code and URL
+protection. The final full verification above was rerun after these commits.
+
 ## Concerns
 
 - Vite reports the existing renderer chunk-size advisory: the minified renderer
-  JS is 763.74 kB (233.62 kB gzip).
+  JS is 765.69 kB (234.23 kB gzip).
 - `npm ci` reports deprecation warnings in transitive packaging dependencies,
   while its audit reports 0 vulnerabilities.
 - The Linux smoke environment has no session D-Bus, so Electron logged expected
