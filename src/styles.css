@@ -327,7 +327,7 @@ button {
 }
 
 .block-drop-zone.is-dragging {
-  height: 12px;
+  height: 24px;
   margin: -6px 0;
   pointer-events: auto;
 }

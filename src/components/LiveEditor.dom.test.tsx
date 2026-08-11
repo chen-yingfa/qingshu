@@ -988,4 +988,26 @@ describe('LiveEditor block reordering', () => {
     )
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
   })
+
+  it('commits the hovered move on dragend when Electron omits drop', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const dataTransfer = {
+      dropEffect: 'none',
+      effectAllowed: 'none',
+      setData: vi.fn(),
+    }
+    const handle = screen.getByRole('button', { name: 'Move block 3' })
+    const target = result.container.querySelector(
+      '[data-drop-boundary="0"]',
+    ) as HTMLElement
+
+    fireEvent.dragStart(handle, { dataTransfer })
+    fireEvent.dragOver(target, { dataTransfer })
+    expect(dataTransfer.dropEffect).toBe('move')
+    fireEvent.dragEnd(handle, { dataTransfer })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Third\n\nFirst\n\nSecond',
+    )
+  })
 })

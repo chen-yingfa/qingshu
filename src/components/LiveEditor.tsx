@@ -538,7 +538,7 @@ function BlockDragHandle({
 }: {
   index: number
   onDragStart(event: DragEvent<HTMLButtonElement>): void
-  onDragEnd(): void
+  onDragEnd(event: DragEvent<HTMLButtonElement>): void
   onMove(direction: -1 | 1): void
 }) {
   return (
@@ -623,6 +623,8 @@ export function LiveEditor({
   }>({ content, blocks: [] })
   const [draggedBlock, setDraggedBlock] = useState<number | null>(null)
   const [dropBoundary, setDropBoundary] = useState<number | null>(null)
+  const draggedBlockRef = useRef<number | null>(null)
+  const dropBoundaryRef = useRef<number | null>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(() => parseDocument(content), [content])
@@ -1122,8 +1124,15 @@ export function LiveEditor({
   }
 
   const clearDragState = () => {
+    draggedBlockRef.current = null
+    dropBoundaryRef.current = null
     setDraggedBlock(null)
     setDropBoundary(null)
+  }
+
+  const targetDropBoundary = (boundary: number) => {
+    dropBoundaryRef.current = boundary
+    setDropBoundary(boundary)
   }
 
   const moveBlock = (fromIndex: number, boundary: number) => {
@@ -1166,7 +1175,7 @@ export function LiveEditor({
                     boundary={realIndex}
                     dragging={draggedBlock !== null}
                     active={dropBoundary === realIndex}
-                    onTarget={setDropBoundary}
+                    onTarget={targetDropBoundary}
                     onDrop={(boundary) => {
                       if (draggedBlock !== null) {
                         moveBlock(draggedBlock, boundary)
@@ -1187,10 +1196,24 @@ export function LiveEditor({
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = 'move'
                         event.dataTransfer.setData('text/plain', block.id)
+                        draggedBlockRef.current = realIndex
+                        dropBoundaryRef.current = realIndex
                         setDraggedBlock(realIndex)
                         setDropBoundary(realIndex)
                       }}
-                      onDragEnd={clearDragState}
+                      onDragEnd={(event) => {
+                        const from = draggedBlockRef.current
+                        const boundary = dropBoundaryRef.current
+                        if (
+                          event.dataTransfer.dropEffect === 'move' &&
+                          from !== null &&
+                          boundary !== null
+                        ) {
+                          moveBlock(from, boundary)
+                        } else {
+                          clearDragState()
+                        }
+                      }}
                       onMove={(direction) => {
                         if (direction < 0 && realIndex > 0) {
                           moveBlock(realIndex, realIndex - 1)
@@ -1273,7 +1296,7 @@ export function LiveEditor({
               boundary={model.blocks.length}
               dragging={draggedBlock !== null}
               active={dropBoundary === model.blocks.length}
-              onTarget={setDropBoundary}
+              onTarget={targetDropBoundary}
               onDrop={(boundary) => {
                 if (draggedBlock !== null) moveBlock(draggedBlock, boundary)
               }}
