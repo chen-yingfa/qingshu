@@ -18,7 +18,7 @@ afterEach(() => {
 })
 
 describe('waitForPrintReadiness', () => {
-  it('waits for full render, fonts, and every current image load or error', async () => {
+  it('waits for full render, fonts, and every current image load', async () => {
     const render = deferred()
     const fonts = deferred()
     const root = document.createElement('div')
@@ -51,9 +51,31 @@ describe('waitForPrintReadiness', () => {
     await Promise.resolve()
     expect(ready).toBe(false)
 
-    broken.dispatchEvent(new Event('error'))
+    broken.dispatchEvent(new Event('load'))
     await waiting
     expect(ready).toBe(true)
+  })
+
+  it('rejects failed images and marks them visibly for preview and PDF', async () => {
+    const root = document.createElement('div')
+    const broken = document.createElement('img')
+    broken.alt = 'Architecture diagram'
+    Object.defineProperty(broken, 'complete', { configurable: true, value: false })
+    root.append(broken)
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: undefined,
+    })
+
+    const waiting = waitForPrintReadiness(Promise.resolve(), root)
+    await Promise.resolve()
+    broken.dispatchEvent(new Event('error'))
+
+    await expect(waiting).rejects.toThrow(
+      'Failed to load image "Architecture diagram" before PDF export',
+    )
+    expect(broken.dataset.imageError).toBe('true')
+    expect(broken.title).toContain('Failed to load image')
   })
 
   it('does not wait for images already complete or a missing FontFaceSet', async () => {

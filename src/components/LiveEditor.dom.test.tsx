@@ -421,6 +421,36 @@ describe('LiveEditor state synchronization', () => {
     await waitFor(() => expect(screen.getByText('Third').closest('.preview-block')).toBe(thirdBlock))
   })
 
+  it('retains the last good block HTML and displays a render failure', async () => {
+    const original = markdown.renderMarkdownBlock
+    const result = renderEditor(
+      'Active\n\nPreviously rendered [link][ref]\n\n[ref]: https://example.com/old',
+    )
+    expect(await screen.findByText('Previously rendered')).not.toBeNull()
+    vi.spyOn(markdown, 'renderMarkdownBlock').mockImplementation(
+      (block, context) =>
+        block.source.includes('Previously rendered')
+          ? Promise.reject(new Error('renderer exploded'))
+          : original(block, context),
+    )
+
+    result.rerender(
+      <LiveEditor
+        content={
+          'Active\n\nPreviously rendered [link][ref]\n\n[ref]: https://example.com/new'
+        }
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Unable to render this block: renderer exploded',
+    )
+    expect(screen.getByText('Previously rendered')).not.toBeNull()
+  })
+
   it('activates the current block index after insertion before a memoized block', async () => {
     const result = renderEditor('Active\n\nTarget')
     await screen.findByText('Target')
@@ -509,6 +539,25 @@ describe('LiveEditor keyboard and composition behavior', () => {
       return element
     })
     expect(preview?.querySelector('.katex-html')).not.toBeNull()
+  })
+
+  it('reuses the math-detection parse for live rendering', async () => {
+    const parse = vi.spyOn(markdown, 'parseDocument')
+    const result = renderEditor('$x_t$')
+
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+    // One full-document editor parse and one active-source parse. Rendering
+    // consumes the latter model instead of parsing the active source again.
+    expect(parse).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not treat ordinary currency prose as a math live preview', async () => {
+    const result = renderEditor('Price is $5 and $10')
+
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+    expect(result.container.querySelector('.active-math-preview')).toBeNull()
   })
 
   it('hides the active live preview when its input block loses focus', async () => {
@@ -1273,6 +1322,15 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.blur(textarea)
     expect(result.onChange).toHaveBeenLastCalledWith('中文 text')
+  })
+
+  it('ignores IME Process key events', () => {
+    const result = renderEditor('Current')
+    const textarea = screen.getByLabelText('Active Markdown block')
+    fireEvent.keyDown(textarea, { key: 'Process' })
+
+    expect(result.onChange).not.toHaveBeenCalled()
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
   })
 
   it('extends selection for Ctrl+Shift+Arrow CJK movement', () => {

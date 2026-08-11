@@ -6,6 +6,7 @@ import {
 } from 'react'
 
 import type { EditorSelection } from '../hooks/useDocument'
+import { normalizeCjkInput } from '../markdown/cjk'
 
 export type FormatCommand =
   | 'heading'
@@ -99,6 +100,23 @@ export function sourceOffsetForEditorOffset(
     visibleOffset += 1
   }
   return sourceOffset
+}
+
+function mappedTransformOffset(before: string, after: string, offset: number): number {
+  let sourceIndex = 0
+  let transformedIndex = 0
+  while (sourceIndex < offset && transformedIndex < after.length) {
+    if (before[sourceIndex] === after[transformedIndex]) {
+      sourceIndex += 1
+      transformedIndex += 1
+    } else if (after[transformedIndex] === ' ' && before[sourceIndex] !== ' ') {
+      transformedIndex += 1
+    } else {
+      sourceIndex += 1
+      transformedIndex += 1
+    }
+  }
+  return transformedIndex
 }
 
 export function applyInlineFormat(
@@ -220,6 +238,7 @@ export function DocumentSourceEditor({
   content,
   contentRevision,
   formatRequest,
+  autoSpacing = false,
   onChange,
   selection,
   onSelectionChange,
@@ -227,6 +246,7 @@ export function DocumentSourceEditor({
   content: string
   contentRevision: number
   formatRequest?: FormatRequest
+  autoSpacing?: boolean
   onChange(content: string): void
   selection?: EditorSelection
   onSelectionChange?(selection: EditorSelection): void
@@ -240,6 +260,7 @@ export function DocumentSourceEditor({
   const lastParentRevisionRef = useRef(contentRevision)
   const nextLocalRevisionRef = useRef(contentRevision)
   const pendingAcknowledgementsRef = useRef(new Map<number, string>())
+  const composingRef = useRef(false)
 
   const reportSelection = (textarea: HTMLTextAreaElement) => {
     onSelectionChange?.({
@@ -311,6 +332,24 @@ export function DocumentSourceEditor({
     onChange(canonical)
   }
 
+  const normalizeDraft = (
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+  ) => {
+    if (composingRef.current) return
+    const canonical = canonicalContentRef.current
+    const normalizedCanonical = normalizeCjkInput(canonical, undefined, autoSpacing)
+    const normalized = toEditorValue(normalizedCanonical)
+    if (normalized === value) return
+    const nextStart = mappedTransformOffset(value, normalized, selectionStart)
+    const nextEnd = mappedTransformOffset(value, normalized, selectionEnd)
+    commit(normalized, nextEnd)
+    afterPaint(() => {
+      textareaRef.current?.setSelectionRange(nextStart, nextEnd)
+    })
+  }
+
   const applyNativeEdit = (result: ReturnType<typeof formattedValue>) => {
     const textarea = textareaRef.current
     if (!textarea) return
@@ -371,7 +410,27 @@ export function DocumentSourceEditor({
         reportSelection(event.currentTarget)
       }}
       onSelect={(event) => reportSelection(event.currentTarget)}
+      onBlur={(event) => {
+        composingRef.current = false
+        normalizeDraft(
+          event.currentTarget.value,
+          event.currentTarget.selectionStart,
+          event.currentTarget.selectionEnd,
+        )
+      }}
+      onCompositionStart={() => {
+        composingRef.current = true
+      }}
+      onCompositionEnd={(event) => {
+        composingRef.current = false
+        normalizeDraft(
+          event.currentTarget.value,
+          event.currentTarget.selectionStart,
+          event.currentTarget.selectionEnd,
+        )
+      }}
       onKeyDown={(event) => {
+        if (event.key === 'Process' || composingRef.current) return
         if (
           event.key !== 'Tab' ||
           event.shiftKey ||

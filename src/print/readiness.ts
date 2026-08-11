@@ -39,15 +39,18 @@ function waitForImages(
   if (pending.size === 0) return Promise.resolve()
 
   return new Promise((resolve, reject) => {
-    const listeners = new Map<HTMLImageElement, () => void>()
+    const listeners = new Map<
+      HTMLImageElement,
+      { load: () => void; error: () => void }
+    >()
     let timer: ReturnType<typeof setTimeout> | undefined
 
     const cleanup = () => {
       if (timer !== undefined) clearTimeout(timer)
       signal?.removeEventListener('abort', cancel)
-      for (const [image, finish] of listeners) {
-        image.removeEventListener('load', finish)
-        image.removeEventListener('error', finish)
+      for (const [image, listener] of listeners) {
+        image.removeEventListener('load', listener.load)
+        image.removeEventListener('error', listener.error)
       }
       listeners.clear()
     }
@@ -72,9 +75,19 @@ function waitForImages(
         pending.delete(image)
         if (pending.size === 0) succeed()
       }
-      listeners.set(image, finish)
+      const error = () => {
+        const label = image.alt || image.currentSrc || image.src || 'image'
+        image.dataset.imageError = 'true'
+        image.title = `Failed to load image "${label}"`
+        fail(
+          new Error(
+            `Failed to load image "${label}" before PDF export`,
+          ),
+        )
+      }
+      listeners.set(image, { load: finish, error })
       image.addEventListener('load', finish, { once: true })
-      image.addEventListener('error', finish, { once: true })
+      image.addEventListener('error', error, { once: true })
       if (image.complete) finish()
     }
 

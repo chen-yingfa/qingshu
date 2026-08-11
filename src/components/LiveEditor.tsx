@@ -15,12 +15,14 @@ import type { EditorSelection } from '../hooks/useDocument'
 import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
   frontMatterEnd,
+  hasRenderableMath,
   parseDocument,
   renderDocumentFootnotes,
   renderMarkdown,
   renderMarkdownBlock,
   type DocumentRenderContext,
   type MarkdownBlock,
+  type MarkdownDocumentModel,
 } from '../markdown/markdown'
 import { reorderMarkdownBlocks } from '../markdown/reorder'
 import {
@@ -67,6 +69,12 @@ const EMPTY_RENDER_CONTEXT: DocumentRenderContext = {
   footnoteSource: '',
   references: [],
   signature: '',
+  eol: '\n',
+}
+const EMPTY_DOCUMENT_MODEL: MarkdownDocumentModel = {
+  blocks: [],
+  renderContext: EMPTY_RENDER_CONTEXT,
+  ast: { type: 'root', children: [] },
 }
 
 
@@ -356,15 +364,22 @@ function reorderInsertedBlocks(
   })
 }
 
-function containsMath(source: string): boolean {
-  return (
-    /(^|[^\\])\$\$[\s\S]+?\$\$/u.test(source) ||
-    /(^|[^\\])\$(?!\$)(?:\\.|[^$\n])+\$/u.test(source)
-  )
+function markImageFailure(target: EventTarget | null): Error | undefined {
+  if (!(target instanceof HTMLImageElement)) return undefined
+  const label = target.alt || target.currentSrc || target.src || 'image'
+  const error = new Error(`Failed to load image "${label}"`)
+  target.dataset.imageError = 'true'
+  target.title = error.message
+  return error
 }
 
 function ActiveBlockPreview({ source }: { source: string }) {
   const code = useMemo(() => parseFencedCode(source), [source])
+  const model = useMemo(
+    () => (code || !source.includes('$') ? undefined : parseDocument(source)),
+    [code, source],
+  )
+  const containsMath = model ? hasRenderableMath(source, model) : false
   const [mathHtml, setMathHtml] = useState('')
   const [codeHtml, setCodeHtml] = useState('')
 
@@ -374,9 +389,9 @@ function ActiveBlockPreview({ source }: { source: string }) {
       if (code) {
         setMathHtml('')
         setCodeHtml(highlightCode(code.code, code.language))
-      } else if (containsMath(source)) {
+      } else if (containsMath) {
         setCodeHtml('')
-        void renderMarkdown(source).then(
+        void renderMarkdown(source, model).then(
           (html) => {
             if (current) setMathHtml(html)
           },
@@ -393,7 +408,7 @@ function ActiveBlockPreview({ source }: { source: string }) {
       current = false
       window.clearTimeout(timer)
     }
-  }, [code, source])
+  }, [code, containsMath, model, source])
 
   if (code) {
     return (
@@ -411,12 +426,13 @@ function ActiveBlockPreview({ source }: { source: string }) {
     )
   }
 
-  if (!containsMath(source) || !mathHtml) return null
+  if (!containsMath || !mathHtml) return null
   return (
     <div className="active-live-preview active-math-preview" aria-label="Live math preview">
       <div className="preview-label">Math · live preview</div>
       <div
         className="rendered-block"
+        onError={(event) => markImageFailure(event.target)}
         dangerouslySetInnerHTML={{ __html: mathHtml }}
       />
     </div>
@@ -462,6 +478,10 @@ function FullDocumentPreview({
     >
       <div
         className="rendered-block"
+        onError={(event) => {
+          const error = markImageFailure(event.target)
+          if (error) onReady?.(error)
+        }}
         dangerouslySetInnerHTML={{ __html: ready ? rendered.html : '' }}
       />
     </div>
@@ -491,13 +511,24 @@ const RenderedBlock = memo(function RenderedBlock({
   editable: boolean
 }) {
   const [html, setHtml] = useState('')
+  const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
     let current = true
     const cancel = deferWork(() => {
-      void renderMarkdownBlock(block, context).then((rendered) => {
-        if (current) setHtml(rendered)
-      })
+      void renderMarkdownBlock(block, context).then(
+        (rendered) => {
+          if (current) {
+            setHtml(rendered)
+            setError(null)
+          }
+        },
+        (reason: unknown) => {
+          if (current) {
+            setError(reason instanceof Error ? reason : new Error(String(reason)))
+          }
+        },
+      )
     })
     return () => {
       current = false
@@ -509,6 +540,7 @@ const RenderedBlock = memo(function RenderedBlock({
     <div className="preview-block" data-block-id={block.id}>
       <div
         className="rendered-block"
+        onError={(event) => markImageFailure(event.target)}
         onClick={(event) => {
           if (
             editable &&
@@ -521,6 +553,11 @@ const RenderedBlock = memo(function RenderedBlock({
         }}
         dangerouslySetInnerHTML={{ __html: html }}
       />
+      {error && (
+        <div className="block-render-error" role="alert">
+          Unable to render this block: {error.message}
+        </div>
+      )}
       {editable && (
         <button
           type="button"
@@ -702,7 +739,7 @@ export function LiveEditor({
   const model = useMemo(
     () =>
       sourceMode
-        ? { blocks: [], renderContext: EMPTY_RENDER_CONTEXT }
+        ? EMPTY_DOCUMENT_MODEL
         : parseDocument(content),
     [content, sourceMode],
   )
@@ -999,7 +1036,11 @@ export function LiveEditor({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing || composingRef.current) return
+    if (
+      event.key === 'Process' ||
+      event.nativeEvent.isComposing ||
+      composingRef.current
+    ) return
     const textarea = event.currentTarget
 
     if (
@@ -1474,6 +1515,7 @@ export function LiveEditor({
           content={content}
           contentRevision={contentRevision!}
           formatRequest={formatRequest}
+          autoSpacing={autoSpacing}
           onChange={onChange}
           selection={selection}
           onSelectionChange={onSelectionChange}
