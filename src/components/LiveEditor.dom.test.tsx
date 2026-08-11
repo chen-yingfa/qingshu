@@ -541,6 +541,35 @@ describe('LiveEditor keyboard and composition behavior', () => {
     outside.remove()
   })
 
+  it('restores a focused live preview after a print-preview round trip', async () => {
+    const result = renderEditor('$x_t$')
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+    result.rerender(
+      <LiveEditor
+        content="$x_t$"
+        activeBlock={0}
+        previewAll
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(result.container.querySelector('.active-live-preview')).toBeNull()
+
+    result.rerender(
+      <LiveEditor
+        content="$x_t$"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+  })
+
   it('shows a live preview for standard multiline display math', async () => {
     const result = renderEditor('$$\n\\left(\\frac{x_i}{\\mathbb R}\\right)\n$$')
 

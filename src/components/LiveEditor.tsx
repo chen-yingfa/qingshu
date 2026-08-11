@@ -1072,7 +1072,7 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
-    setActiveInputFocused(false)
+    setActiveInputFocused(document.activeElement === textareaRef.current)
     setEditingBoundary(null)
     setActiveSession((session) => session + 1)
   }
@@ -1144,7 +1144,7 @@ export function LiveEditor({
       previous.sourceMode !== sourceMode ||
       previous.previewAll !== previewAll
     ) {
-      setActiveInputFocused(false)
+      setActiveInputFocused(document.activeElement === textareaRef.current)
       previousDisplayModeRef.current = { sourceMode, previewAll }
     }
   }, [previewAll, sourceMode])
