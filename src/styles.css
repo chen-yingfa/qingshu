@@ -78,15 +78,6 @@ button {
   user-select: none;
 }
 
-.title-bar-native-mac {
-  /* Keep content clear of hiddenInset's three native traffic-light buttons. */
-  grid-template-columns: 116px 1fr 116px;
-}
-
-.title-bar-native-mac .brand-mark {
-  margin-left: 82px;
-}
-
 .brand-mark {
   width: 22px;
   height: 22px;

@@ -19,8 +19,17 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
       className={
         usesNativeControls ? 'title-bar title-bar-native-mac' : 'title-bar'
       }
+      style={
+        usesNativeControls
+          ? { gridTemplateColumns: '116px 1fr 116px' }
+          : undefined
+      }
     >
-      <div className="brand-mark" aria-hidden="true">
+      <div
+        className="brand-mark"
+        aria-hidden="true"
+        style={usesNativeControls ? { marginLeft: 82 } : undefined}
+      >
         Q
       </div>
       <div className="document-title" title={path ?? 'Untitled document'}>
