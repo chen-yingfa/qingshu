@@ -2,7 +2,6 @@ import {
   Fragment,
   memo,
   type KeyboardEvent,
-  type PointerEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -24,16 +23,27 @@ import {
   type MarkdownBlock,
 } from '../markdown/markdown'
 import { reorderMarkdownBlocks } from '../markdown/reorder'
+import {
+  BlockDragHandle as ExtractedBlockDragHandle,
+  BlockDropZone as ExtractedBlockDropZone,
+} from './BlockDragControls'
+import {
+  applyInlineFormat,
+  DocumentSourceEditor as ExtractedDocumentSourceEditor,
+  nearestEol,
+  restoreSourceEols,
+  sourceOffsetForEditorOffset,
+  textReplacement,
+  toEditorValue,
+  type FormatCommand,
+  type FormatRequest,
+} from './DocumentSourceEditor'
 
-export type FormatCommand =
-  | 'heading'
-  | 'bold'
-  | 'italic'
-  | 'link'
-  | 'code'
-  | 'math'
-  | 'quote'
-  | 'unordered-list'
+export type { FormatCommand } from './DocumentSourceEditor'
+export {
+  applyInlineFormat,
+  textReplacement,
+} from './DocumentSourceEditor'
 
 interface SourceRange {
   start: number
@@ -60,100 +70,6 @@ const EMPTY_RENDER_CONTEXT: DocumentRenderContext = {
   signature: '',
 }
 
-interface FormatRequest {
-  id: number
-  command: FormatCommand
-}
-
-function preferredEol(source: string): '\n' | '\r\n' {
-  return source.includes('\r\n') ? '\r\n' : '\n'
-}
-
-function nearestEol(source: string, offset: number): '\n' | '\r\n' {
-  const before = Array.from(source.slice(0, offset).matchAll(/\r\n|\n/gu)).at(-1)?.[0]
-  if (before) return before as '\n' | '\r\n'
-  const after = source.slice(offset).match(/\r\n|\n/u)?.[0]
-  return (after as '\n' | '\r\n' | undefined) ?? preferredEol(source)
-}
-
-function toEditorValue(source: string): string {
-  return source.replaceAll('\r\n', '\n')
-}
-
-function restoreSourceEols(
-  value: string,
-  previousSource: string,
-  fallbackEol: '\n' | '\r\n',
-): string {
-  const previous = toEditorValue(previousSource)
-  const previousEndings = Array.from(previousSource.matchAll(/\r\n|\n/gu), (match) =>
-    match[0] as '\n' | '\r\n',
-  )
-  const nextEndingCount = Array.from(value.matchAll(/\n/gu)).length
-  if (previousEndings.length === nextEndingCount) {
-    let endingIndex = 0
-    return value.replaceAll('\n', () => previousEndings[endingIndex++])
-  }
-  const endings = new Map<number, '\n' | '\r\n'>()
-  let normalizedOffset = 0
-  for (const part of previousSource.split(/(\r\n|\n)/u)) {
-    if (part === '\n' || part === '\r\n') {
-      endings.set(normalizedOffset, part)
-      normalizedOffset += 1
-    } else {
-      normalizedOffset += part.length
-    }
-  }
-
-  let prefix = 0
-  while (
-    prefix < previous.length &&
-    prefix < value.length &&
-    previous[prefix] === value[prefix]
-  ) {
-    prefix += 1
-  }
-  let suffix = 0
-  while (
-    suffix < previous.length - prefix &&
-    suffix < value.length - prefix &&
-    previous[previous.length - 1 - suffix] === value[value.length - 1 - suffix]
-  ) {
-    suffix += 1
-  }
-
-  let restored = ''
-  for (let index = 0; index < value.length; index += 1) {
-    if (value[index] !== '\n') {
-      restored += value[index]
-      continue
-    }
-    const previousIndex =
-      index < prefix
-        ? index
-        : index >= value.length - suffix
-          ? previous.length - (value.length - index)
-          : undefined
-    restored +=
-      (previousIndex === undefined ? undefined : endings.get(previousIndex)) ??
-      fallbackEol
-  }
-  return restored
-}
-
-function sourceOffsetForEditorOffset(
-  sourceValue: string,
-  editorOffset: number,
-): number {
-  let sourceOffset = 0
-  let visibleOffset = 0
-  while (sourceOffset < sourceValue.length && visibleOffset < editorOffset) {
-    if (sourceValue.startsWith('\r\n', sourceOffset)) sourceOffset += 2
-    else sourceOffset += 1
-    visibleOffset += 1
-  }
-  return sourceOffset
-}
 
 function mappedTransformOffset(
   before: string,
@@ -232,49 +148,6 @@ export function mergeBlockAtStart(
   const right = source.slice(blockStart).replace(/^[ \t]+/u, '')
   const separator = left && right ? nearestEol(source, blockStart) : ''
   return { content: left + separator + right, caret: left.length + separator.length }
-}
-
-export function applyInlineFormat(
-  value: string,
-  start: number,
-  end: number,
-  before: string,
-  after: string,
-): { value: string; selectionStart: number; selectionEnd: number } {
-  const selection = value.slice(start, end)
-  return {
-    value: value.slice(0, start) + before + selection + after + value.slice(end),
-    selectionStart: start + before.length,
-    selectionEnd: end + before.length,
-  }
-}
-
-export function textReplacement(before: string, after: string): {
-  start: number
-  end: number
-  replacement: string
-} {
-  let start = 0
-  while (
-    start < before.length &&
-    start < after.length &&
-    before[start] === after[start]
-  ) {
-    start += 1
-  }
-  let suffix = 0
-  while (
-    suffix < before.length - start &&
-    suffix < after.length - start &&
-    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
-  ) {
-    suffix += 1
-  }
-  return {
-    start,
-    end: before.length - suffix,
-    replacement: after.slice(start, after.length - suffix),
-  }
 }
 
 export function moveByCjkWord(
@@ -1869,7 +1742,7 @@ export function LiveEditor({
       {previewAll ? (
         <FullDocumentPreview content={content} onReady={onPreviewReady} />
       ) : sourceMode ? (
-        <DocumentSourceEditor
+        <ExtractedDocumentSourceEditor
           content={content}
           contentRevision={contentRevision!}
           formatRequest={formatRequest}
@@ -1901,7 +1774,7 @@ export function LiveEditor({
                 }
               >
                 {realIndex !== undefined && (
-                  <BlockDropZone
+                  <ExtractedBlockDropZone
                     boundary={realIndex}
                     dragging={draggedBlock !== null}
                     pointerId={dragPointerRef.current}
@@ -1917,7 +1790,7 @@ export function LiveEditor({
                   }
                 >
                   {realIndex !== undefined && (
-                    <BlockDragHandle
+                    <ExtractedBlockDragHandle
                       index={realIndex}
                       onPointerDown={(event) => {
                         if (
@@ -2020,7 +1893,7 @@ export function LiveEditor({
             )
           })}
           {movableBlocks.length > 0 && (
-            <BlockDropZone
+            <ExtractedBlockDropZone
               boundary={movableBlocks.length}
               dragging={draggedBlock !== null}
               pointerId={dragPointerRef.current}
