@@ -79,9 +79,9 @@ interface EditorUndoSnapshot {
     blocks: InsertedBlock[]
   }
   editingBoundary: EditingBoundary | null
-  expectedContent: string
-  expectedActiveBlock: number
-  expectedDraft: string
+  readonly expectedContent: string
+  readonly expectedActiveBlock: number
+  readonly expectedDraft: string
 }
 
 export interface InsertedBlock {
@@ -1126,11 +1126,6 @@ export function LiveEditor({
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
     pendingAcknowledgementRef.current = nextContent
-    const pendingUndo = editorUndoRef.current.at(-1)
-    if (pendingUndo && pendingUndo.expectedActiveBlock === safeActive) {
-      pendingUndo.expectedContent = nextContent
-      pendingUndo.expectedDraft = value
-    }
     onChange(nextContent)
   }
 
@@ -1239,12 +1234,6 @@ export function LiveEditor({
     expectedActiveBlock = safeActive,
     expectedDraft = draft,
   ) => {
-    const previous = editorUndoRef.current.at(-1)
-    if (previous) {
-      previous.expectedContent = snapshot.content
-      previous.expectedActiveBlock = snapshot.activeBlock
-      previous.expectedDraft = snapshot.draft
-    }
     editorUndoRef.current = [
       ...editorUndoRef.current,
       { ...snapshot, expectedContent, expectedActiveBlock, expectedDraft },
@@ -1256,21 +1245,12 @@ export function LiveEditor({
     if (
       !snapshot ||
       snapshot.expectedActiveBlock !== safeActive ||
-      (snapshot.expectedContent !== contentRef.current &&
-        !(
-          snapshot.expectedActiveBlock === snapshot.activeBlock &&
-          snapshot.expectedDraft === draft
-        ))
+      snapshot.expectedContent !== contentRef.current ||
+      snapshot.expectedDraft !== draft
     ) {
       return false
     }
     editorUndoRef.current = editorUndoRef.current.slice(0, -1)
-    const previous = editorUndoRef.current.at(-1)
-    if (previous) {
-      previous.expectedContent = snapshot.content
-      previous.expectedActiveBlock = snapshot.activeBlock
-      previous.expectedDraft = snapshot.draft
-    }
     invalidateMathInteraction()
     pendingUndoRestoreRef.current = snapshot
     insertedBlocksRef.current = snapshot.insertedBlocks

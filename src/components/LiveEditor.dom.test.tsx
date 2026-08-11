@@ -825,7 +825,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(restored.selectionEnd).toBe(2)
   })
 
-  it('keeps generated auto-close undo available after ordinary math typing', async () => {
+  it('lets native undo restore generated auto-close state before custom undo restores the opener', async () => {
     const result = renderEditor('')
     const editor = screen.getByLabelText(
       'Active Markdown block',
@@ -837,40 +837,84 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.change(math, {
       target: { value: '$$\nx\n$$', selectionStart: 4, selectionEnd: 4 },
     })
-    const undo = new KeyboardEvent('keydown', {
+    const nativeUndo = new KeyboardEvent('keydown', {
       key: 'z',
       ctrlKey: true,
       bubbles: true,
       cancelable: true,
     })
 
-    fireEvent(math, undo)
+    fireEvent(math, nativeUndo)
 
-    expect(undo.defaultPrevented).toBe(true)
+    expect(nativeUndo.defaultPrevented).toBe(false)
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n$$')
+    fireEvent.input(math, {
+      inputType: 'historyUndo',
+      target: { value: '$$\n\n$$', selectionStart: 3, selectionEnd: 3 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\n\n$$')
+
+    const customUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, customUndo)
+
+    expect(customUndo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith('$$')
     expect(
       (await screen.findByLabelText('Active Markdown block') as HTMLTextAreaElement)
-        .selectionStart,
-    ).toBe(2)
+        .value,
+    ).toBe('$$')
   })
 
-  it('repeatedly undoes grouped exit, first Enter, and auto-close across remounts', async () => {
-    const result = renderEditor('')
-    let editor = screen.getByLabelText(
-      'Active Markdown block',
-    ) as HTMLTextAreaElement
-    editor.focus()
-    fireEvent.change(editor, {
-      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+  it('lets native undo remove typing after first Enter before custom undo removes Enter', () => {
+    const source = '$$\nx\n$$'
+    const result = renderEditor(source)
+    const math = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    math.setSelectionRange(4, 4)
+    fireEvent.keyDown(math, { key: 'Enter' })
+    fireEvent.change(math, {
+      target: { value: '$$\nx\ny\n$$', selectionStart: 6, selectionEnd: 6 },
     })
-    editor = screen.getByLabelText('Active math block') as HTMLTextAreaElement
-    fireEvent.change(editor, {
-      target: { value: '$$\nx\n$$', selectionStart: 4, selectionEnd: 4 },
-    })
-    fireEvent.keyDown(editor, { key: 'Enter' })
-    fireEvent.keyDown(editor, { key: 'Enter' })
-    const exited = result.onChange.mock.calls.at(-1)?.[0] as string
 
+    const nativeUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, nativeUndo)
+    expect(nativeUndo.defaultPrevented).toBe(false)
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\ny\n$$')
+
+    fireEvent.input(math, {
+      inputType: 'historyUndo',
+      target: { value: '$$\nx\n\n$$', selectionStart: 5, selectionEnd: 5 },
+    })
+    const customUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, customUndo)
+
+    expect(customUndo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    expect(math.value).toBe(source)
+    expect(math.selectionStart).toBe(4)
+  })
+
+  it('lets native undo remove later next-block typing before custom undo restores grouped exit', () => {
+    const result = renderEditor('$$\nx\n$$')
+    const math = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    math.setSelectionRange(4, 4)
+    fireEvent.keyDown(math, { key: 'Enter' })
+    fireEvent.keyDown(math, { key: 'Enter' })
+    const exited = '$$\nx\n$$\n\n'
     result.rerender(
       <LiveEditor
         content={exited}
@@ -879,43 +923,39 @@ describe('LiveEditor keyboard and composition behavior', () => {
         onActiveBlockChange={result.onActiveBlockChange}
       />,
     )
-    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), {
+    const next = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(next, {
+      target: { value: 'later', selectionStart: 5, selectionEnd: 5 },
+    })
+
+    const nativeUndo = new KeyboardEvent('keydown', {
       key: 'z',
       ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
     })
+    fireEvent(next, nativeUndo)
+    expect(nativeUndo.defaultPrevented).toBe(false)
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n$$\nlater\n')
+
+    fireEvent.input(next, {
+      inputType: 'historyUndo',
+      target: { value: '', selectionStart: 0, selectionEnd: 0 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith(exited)
+    const customUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(next, customUndo)
+
+    expect(customUndo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n\n$$')
-
-    result.rerender(
-      <LiveEditor
-        content={'$$\nx\n\n$$'}
-        activeBlock={0}
-        onChange={result.onChange}
-        onActiveBlockChange={result.onActiveBlockChange}
-      />,
-    )
-    fireEvent.keyDown(screen.getByLabelText('Active math block'), {
-      key: 'z',
-      ctrlKey: true,
-    })
-    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n$$')
-
-    result.rerender(
-      <LiveEditor
-        content={'$$\nx\n$$'}
-        activeBlock={0}
-        onChange={result.onChange}
-        onActiveBlockChange={result.onActiveBlockChange}
-      />,
-    )
-    fireEvent.keyDown(screen.getByLabelText('Active math block'), {
-      key: 'z',
-      metaKey: true,
-    })
-    expect(result.onChange).toHaveBeenLastCalledWith('$$')
-    expect(
-      (await screen.findByLabelText('Active Markdown block') as HTMLTextAreaElement)
-        .selectionStart,
-    ).toBe(2)
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
   })
 
   it('preserves a CRLF middle-block undo chain through grouped exit', () => {
@@ -1005,7 +1045,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     outside.remove()
   })
 
-  it('undoes fallback first Enter with its exact CRLF content and selection', async () => {
+  it('orders native typing undo before fallback first-Enter undo with CRLF', async () => {
     Object.defineProperty(document, 'execCommand', {
       configurable: true,
       value: vi.fn(() => false),
@@ -1019,9 +1059,31 @@ describe('LiveEditor keyboard and composition behavior', () => {
     math.setSelectionRange(4, 4, 'backward')
     fireEvent.keyDown(math, { key: 'Enter' })
     await waitFor(() => expect(math.selectionStart).toBe(5))
+    fireEvent.change(math, {
+      target: { value: '$$\nx\ny\n$$', selectionStart: 6, selectionEnd: 6 },
+    })
 
-    fireEvent.keyDown(math, { key: 'z', metaKey: true })
+    const nativeUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, nativeUndo)
+    expect(nativeUndo.defaultPrevented).toBe(false)
+    fireEvent.input(math, {
+      inputType: 'historyUndo',
+      target: { value: '$$\nx\n\n$$', selectionStart: 5, selectionEnd: 5 },
+    })
 
+    const customUndo = new KeyboardEvent('keydown', {
+      key: 'z',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, customUndo)
+    expect(customUndo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith(source)
     expect(math.value).toBe('$$\nx\n$$')
     expect(math.selectionStart).toBe(4)
