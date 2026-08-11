@@ -316,3 +316,67 @@ Status: DONE_WITH_CONCERNS
 - Vite still reports the pre-existing renderer chunk-size warning.
 - The user-provided plan remains untracked and untouched.
 - No push was performed.
+
+## Final review remediation
+
+Status: DONE_WITH_CONCERNS
+
+### Fixes delivered
+
+- Normal Open and Recent Open now install or reuse one
+  `AuthorizedDocument` before reading. Reads are enqueued on that document's
+  existing `saveQueue`, update its revision in place, and never replace the
+  authorization object.
+- A deterministic Save A / duplicate Open / Save B interleaving proves that
+  Open waits for Save A, reads Save A's committed content/revision, Save B
+  remains behind that read, and Save B is the final disk content.
+- The renderer regression proves that the duplicate Open response only
+  activates the existing owner and cannot replace newer dirty buffer content
+  or falsely mark it clean.
+- Closing a real tab removes its lifetime entry. Resetting the sole tab
+  removes the old generation and installs one fresh generation for the
+  replacement, preserving stale-operation invalidation without accumulating
+  closed-tab entries.
+- Recent warnings are deduplicated and capped at the newest 10 distinct
+  messages, preventing repeated read/unavailable failures from growing the
+  queue without bound.
+
+### TDD red/green evidence
+
+1. Main-process queue interleaving:
+   - RED: `npm test -- --run electron/main/index.test.ts` failed the new
+     interleaving regression while duplicate Open replaced authorization
+     during Save A; Save B used the detached object and revision consistency
+     failed.
+   - GREEN: the focused Electron suite passed all 63 tests.
+2. Recent warning queue:
+   - RED: the same initial focused run failed the warning bound/deduplication
+     regression. The assertion was refined to exercise the queue operation
+     independently of suite-global recent state before production code was
+     changed.
+   - GREEN: the focused Electron suite passed all 63 tests.
+3. Renderer overlap:
+   - The renderer already ignored duplicate-open content for an owned path;
+     the new cross-layer regression was added after the main queue fix and
+     passed all 14 hook DOM tests. No renderer behavior change was needed.
+
+### Commit
+
+- `477aeea` — `fix: serialize duplicate document opens`
+
+### Verification
+
+- `npm test -- --run electron/main/index.test.ts`: exit 0; 63 tests passed.
+- `npm test -- --run src/hooks/useDocument.dom.test.tsx`: exit 0; 14 tests
+  passed.
+- `npm test`: exit 0; 23 files passed; 295 tests passed.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0; typecheck, renderer, Electron main/preload,
+  packaging, and AppImage generation passed.
+- Artifact: `release/2.1.0/Qingshu-2.1.0.AppImage`.
+
+### Concerns
+
+- Vite still reports the pre-existing renderer chunk over 500 kB.
+- The user-provided plan remains untracked and untouched.
+- No push was performed.
