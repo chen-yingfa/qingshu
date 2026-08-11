@@ -638,8 +638,9 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
   })
 
-  it('turns a lone empty list marker back into a paragraph', () => {
-    const result = renderEditor('- ')
+  it('turns a lone empty list marker into an explicit paragraph', async () => {
+    const onEphemeralStateChange = vi.fn()
+    const result = renderEditor('- ', { onEphemeralStateChange })
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
@@ -649,6 +650,19 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(result.onChange).toHaveBeenLastCalledWith('')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+    await waitFor(() => {
+      expect(
+        onEphemeralStateChange.mock.calls.at(-1)?.[0].insertedBlocks,
+      ).toEqual({
+        content: '',
+        blocks: [{
+          offset: 0,
+          length: 0,
+          leftPadding: 0,
+          rightPadding: 0,
+        }],
+      })
+    })
   })
 
   it('splits a list around an empty middle item and focuses a paragraph', () => {

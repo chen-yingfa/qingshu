@@ -1977,7 +1977,7 @@ export function LiveEditor({
           offset: emptyOffset,
           length: 0,
           leftPadding: before ? 2 * eol.length : 0,
-          rightPadding: before ? 0 : 2 * eol.length,
+          rightPadding: !before && after ? 2 * eol.length : 0,
         },
       ],
     }
