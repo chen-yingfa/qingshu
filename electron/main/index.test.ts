@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   showSaveDialog: vi.fn(),
   showMessageBox: vi.fn(),
   showItemInFolder: vi.fn(),
+  setApplicationMenu: vi.fn(),
   fromWebContents: vi.fn(),
   browserWindows: [] as any[],
   browserWindowOptions: [] as any[],
@@ -115,6 +116,9 @@ vi.mock('electron', () => ({
     handle: (channel: string, handler: (...args: any[]) => unknown) => {
       mocks.handlers.set(channel, handler)
     },
+  },
+  Menu: {
+    setApplicationMenu: mocks.setApplicationMenu,
   },
   shell: {
     openExternal: vi.fn(),
@@ -245,6 +249,11 @@ describe('desktop IPC', () => {
       'qingshu:show-item-in-folder',
       'qingshu:window-action',
     ])
+  })
+
+  it('removes native menu accelerators so tab shortcuts reach the renderer', () => {
+    main.disableApplicationMenu()
+    expect(mocks.setApplicationMenu).toHaveBeenCalledWith(null)
   })
 
   it('persists canonical recents, removes missing entries, and opens only stored paths', async () => {

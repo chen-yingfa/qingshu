@@ -642,6 +642,21 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
   })
 
+  it('lets modified Tab bubble out of fenced code for tab switching', () => {
+    const result = renderEditor('```ts\nvalue\n```')
+    const editor = screen.getByLabelText('Active code block')
+    const tab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    editor.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
   it('supports CRLF fenced code without changing the source line endings', async () => {
     const result = renderEditor('```ts\r\nconst value = 1\r\n```')
     const editor = screen.getByLabelText('Active code block')
@@ -1547,6 +1562,24 @@ describe('LiveEditor block reordering', () => {
 })
 
 describe('LiveEditor source mode', () => {
+  it('lets modified Tab bubble out of source mode for tab switching', () => {
+    const result = renderEditor('source', {
+      sourceMode: true,
+      contentRevision: 0,
+    })
+    const source = screen.getByLabelText('Markdown source')
+    const tab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    source.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
   it('preserves CRLF line endings while editing normalized textarea content', () => {
     const result = renderEditor('first\r\nsecond', {
       sourceMode: true,

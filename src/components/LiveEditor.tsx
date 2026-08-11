@@ -923,6 +923,9 @@ function DocumentSourceEditor({
         if (
           event.key !== 'Tab' ||
           event.shiftKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
           event.nativeEvent.isComposing
         ) {
           return
@@ -1421,7 +1424,13 @@ export function LiveEditor({
     }
     if (event.key !== 'Tab') codeTabEscapeRef.current = false
 
-    if (fencedCode && event.key === 'Tab') {
+    if (
+      fencedCode &&
+      event.key === 'Tab' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
       if (codeTabEscapeRef.current) {
         codeTabEscapeRef.current = false
         return

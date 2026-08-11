@@ -18,6 +18,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   shell,
   type IpcMainInvokeEvent,
 } from 'electron'
@@ -983,13 +984,20 @@ export async function createWindow(): Promise<void> {
 
 }
 
+export function disableApplicationMenu(): void {
+  Menu.setApplicationMenu(null)
+}
+
 if (release().startsWith('6.1')) app.disableHardwareAcceleration()
 if (process.platform === 'win32') app.setAppUserModelId(app.getName())
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  void app.whenReady().then(createWindow)
+  void app.whenReady().then(() => {
+    disableApplicationMenu()
+    return createWindow()
+  })
 
   app.on('before-quit', event => {
     if (allowAppQuit) return

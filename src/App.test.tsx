@@ -183,17 +183,24 @@ describe('document tabs', () => {
     const tabs = screen.getAllByRole('tab')
     expect(tabs).toHaveLength(3)
 
-    fireEvent.keyDown(window, {
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    fireEvent.keyDown(screen.getByLabelText('Markdown source'), {
       key: 'Tab',
       ctrlKey: true,
       shiftKey: true,
     })
     expect(tabs[1].getAttribute('aria-selected')).toBe('true')
 
-    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), {
+      key: 'Tab',
+      ctrlKey: true,
+    })
     expect(tabs[2].getAttribute('aria-selected')).toBe('true')
 
-    fireEvent.keyDown(window, { key: 'w', ctrlKey: true })
+    fireEvent.keyDown(screen.getByLabelText('Markdown source'), {
+      key: 'w',
+      ctrlKey: true,
+    })
     expect(screen.getAllByRole('tab')).toHaveLength(2)
   })
 
