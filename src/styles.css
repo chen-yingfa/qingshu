@@ -393,7 +393,14 @@ button {
   padding: 0.45em 0;
 }
 
-.rendered-block .katex .msupsub .size3 {
+.rendered-block
+  .katex
+  .msupsub
+  > .vlist-t
+  > .vlist-r
+  > .vlist
+  > span
+  > .katex-sizing.reset-size6.size3 {
   font-size: 0.6em;
 }
 

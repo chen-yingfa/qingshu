@@ -469,6 +469,56 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
   })
 
+  it('removes an empty block inserted before the first block', () => {
+    const result = renderEditor('Current')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(0, 0)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'\n\nCurrent'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+    expect(result.onChange).toHaveBeenLastCalledWith('Current')
+    expect(editor().value).toBe('Current')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+  })
+
+  it('does not intercept Backspace for a non-empty selection at block start', () => {
+    renderEditor('First\n\nSecond', { activeBlock: 1 })
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, editor.value.length)
+    const backspace = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      bubbles: true,
+      cancelable: true,
+    })
+
+    editor.dispatchEvent(backspace)
+    expect(backspace.defaultPrevented).toBe(false)
+  })
+
+  it('leaves modified Enter shortcuts untouched at block start', () => {
+    renderEditor('Current')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    editor.dispatchEvent(enter)
+    expect(enter.defaultPrevented).toBe(false)
+  })
+
   it('inserts a block after a heading separated from content by one newline', () => {
     const result = renderEditor('# Heading\nParagraph')
     const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement

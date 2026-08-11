@@ -19,7 +19,8 @@ describe('KaTeX application styling', () => {
 
   it('scales superscript and subscript content below surrounding math', () => {
     expect(styles).toMatch(
-      /\.katex \.msupsub \.size3\s*\{[^}]*font-size:\s*0\.6em;/su,
+      /\.msupsub\s*>\s*\.vlist-t\s*>\s*\.vlist-r\s*>\s*\.vlist\s*>\s*span\s*>\s*\.katex-sizing\.reset-size6\.size3\s*\{[^}]*font-size:\s*0\.6em;/su,
     )
+    expect(styles).not.toMatch(/\.msupsub \.size3\s*\{/u)
   })
 })

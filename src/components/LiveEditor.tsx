@@ -755,6 +755,9 @@ export function LiveEditor({
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
       draft.length > 0 &&
       textarea.selectionStart === 0 &&
       textarea.selectionEnd === 0
@@ -877,8 +880,11 @@ export function LiveEditor({
       return
     }
 
-    if (event.key === 'Backspace' && textarea.selectionStart === 0 && safeActive > 0) {
-      event.preventDefault()
+    if (
+      event.key === 'Backspace' &&
+      textarea.selectionStart === 0 &&
+      textarea.selectionEnd === 0
+    ) {
       const previousContent = contentRef.current
       const blockStart = rangeRef.current.start
       const inserted = (
@@ -889,6 +895,7 @@ export function LiveEditor({
         (inserted.leftPadding || inserted.rightPadding) &&
         !draft.trim()
       ) {
+        event.preventDefault()
         const removeStart = blockStart - inserted.leftPadding
         const removeEnd =
           blockStart + inserted.length + inserted.rightPadding
@@ -910,14 +917,26 @@ export function LiveEditor({
         contentRef.current = mergedContent
         pendingAcknowledgementRef.current = mergedContent
         onChange(mergedContent)
-        onActiveBlockChange(safeActive - 1)
+        const targetIndex = Math.max(0, safeActive - 1)
+        if (safeActive === 0) {
+          const first = parseDocument(mergedContent).blocks[0]
+          setDraft(toEditorValue(first?.source ?? ''))
+          rangeRef.current = {
+            start: first?.start ?? 0,
+            end: first?.end ?? 0,
+          }
+        }
+        onActiveBlockChange(targetIndex)
         afterPaint(() => {
-          const previousStart = blocks[safeActive - 1].start
-          const caret = Math.max(0, removeStart - previousStart)
+          const previousStart = blocks[safeActive - 1]?.start ?? 0
+          const caret =
+            safeActive === 0 ? 0 : Math.max(0, removeStart - previousStart)
           textareaRef.current?.setSelectionRange(caret, caret)
         })
         return
       }
+      if (safeActive === 0) return
+      event.preventDefault()
       const merged = mergeBlockAtStart(previousContent, blockStart)
       const delta = merged.content.length - previousContent.length
       const previousStart = blocks[safeActive - 1].start
