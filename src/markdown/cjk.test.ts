@@ -230,6 +230,12 @@ describe('normalizeCjkInput', () => {
     expect(normalized).toContain('www.example.com/路径/￥x￥')
   })
 
+  it('restores nested offsets correctly after a leading BOM', () => {
+    expect(
+      normalizeCjkInput('\uFEFF[中文A](./pathA)', undefined, true),
+    ).toBe('\uFEFF[中文 A](./pathA)')
+  })
+
   it('preserves realistic Marp front matter, directives, and HTML', () => {
     const source = [
       '---',
