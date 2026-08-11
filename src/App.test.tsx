@@ -176,6 +176,27 @@ describe('document tabs', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(1)
   })
 
+  it('switches and closes tabs with standard keyboard shortcuts', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(3)
+
+    fireEvent.keyDown(window, {
+      key: 'Tab',
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    expect(tabs[2].getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.keyDown(window, { key: 'w', ctrlKey: true })
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+  })
+
   it('loads vertical tab placement and persists changes from Settings', () => {
     window.localStorage.setItem(
       'qingshu:settings:v1',
