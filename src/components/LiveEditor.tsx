@@ -64,6 +64,13 @@ interface MathEnterToken {
   session: number
 }
 
+interface SyntheticListSeparator {
+  readonly editorLifetime: object
+  readonly originatingBlock: object
+  readonly session: number
+  offset: number
+}
+
 interface EditorUndoSnapshot {
   content: string
   draft: string
@@ -80,10 +87,7 @@ interface EditorUndoSnapshot {
     blocks: InsertedBlock[]
   }
   editingBoundary: EditingBoundary | null
-  syntheticListSeparator: {
-    draft: string
-    offset: number
-  } | null
+  syntheticListSeparators: SyntheticListSeparator[]
   readonly expectedContent: string
   readonly expectedActiveBlock: number
   readonly expectedDraft: string
@@ -1159,13 +1163,12 @@ export function LiveEditor({
   const mathEnterTokenRef = useRef<MathEnterToken | null>(null)
   const draftRevisionRef = useRef(0)
   const editorSessionRef = useRef(0)
+  const editorLifetimeRef = useRef<object>({})
+  const activeBlockIdentityRef = useRef<object>({})
   const interactionGenerationRef = useRef(0)
   const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
   const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
-  const syntheticListSeparatorRef = useRef<{
-    draft: string
-    offset: number
-  } | null>(null)
+  const syntheticListSeparatorsRef = useRef<SyntheticListSeparator[]>([])
   const insertedBlocksRef = useRef(insertedBlocks)
   const editingBoundaryRef = useRef(editingBoundary)
   const selectionRef = useRef({
@@ -1194,6 +1197,54 @@ export function LiveEditor({
     interactionGenerationRef.current += 1
     mathEnterTokenRef.current = null
     deferredSelectionRef.current = null
+  }
+
+  const separatorHasCurrentOrigin = (
+    separator: SyntheticListSeparator,
+  ): boolean =>
+    separator.editorLifetime === editorLifetimeRef.current &&
+    separator.originatingBlock === activeBlockIdentityRef.current &&
+    separator.session === editorSessionRef.current
+
+  const clearSyntheticListSeparators = () => {
+    syntheticListSeparatorsRef.current = []
+  }
+
+  const transformSyntheticListSeparators = (
+    before: string,
+    after: string,
+  ) => {
+    const change = textReplacement(before, after)
+    const delta = change.replacement.length - (change.end - change.start)
+    syntheticListSeparatorsRef.current =
+      syntheticListSeparatorsRef.current.flatMap((separator) => {
+        if (!separatorHasCurrentOrigin(separator)) return []
+        const nextOffset =
+          separator.offset < change.start
+            ? separator.offset
+            : separator.offset >= change.end
+              ? separator.offset + delta
+              : -1
+        return nextOffset >= 0 && after[nextOffset] === '\n'
+          ? [{ ...separator, offset: nextOffset }]
+          : []
+      })
+  }
+
+  const trackSyntheticListSeparator = (offset: number) => {
+    const separator: SyntheticListSeparator = {
+      editorLifetime: editorLifetimeRef.current,
+      originatingBlock: activeBlockIdentityRef.current,
+      session: editorSessionRef.current,
+      offset,
+    }
+    syntheticListSeparatorsRef.current = [
+      ...syntheticListSeparatorsRef.current.filter(
+        (candidate) =>
+          separatorHasCurrentOrigin(candidate) && candidate.offset !== offset,
+      ),
+      separator,
+    ]
   }
 
   const setEditorSelection = (
@@ -1237,12 +1288,18 @@ export function LiveEditor({
     onEphemeralStateChange,
   ])
 
-  const rotateEditorSession = (preserveBoundary = false) => {
+  const rotateEditorSession = (
+    preserveBoundary = false,
+    preservePendingUndo = false,
+  ) => {
     composingRef.current = false
     codeTabEscapeRef.current = false
     invalidateMathInteraction()
+    if (!preservePendingUndo) pendingUndoRestoreRef.current = null
     draftRevisionRef.current += 1
     editorSessionRef.current += 1
+    activeBlockIdentityRef.current = {}
+    clearSyntheticListSeparators()
     setActiveInputFocused(document.activeElement === textareaRef.current)
     if (!preserveBoundary) {
       editingBoundaryRef.current = null
@@ -1263,6 +1320,7 @@ export function LiveEditor({
       pendingAcknowledgementRef.current = undefined
     }
     if (sourceMode) {
+      if (sourceModeChanged) rotateEditorSession()
       previousActiveRef.current = safeActive
       previousSourceModeRef.current = true
       return
@@ -1291,7 +1349,11 @@ export function LiveEditor({
               block.end === semanticActive.end,
           )
         : -1
-      rotateEditorSession(retainBoundary)
+      const preservePendingUndo =
+        activeChanged &&
+        !externalChange &&
+        pendingUndoRestoreRef.current?.activeBlock === safeActive
+      rotateEditorSession(retainBoundary, preservePendingUndo)
       setDraft(toEditorValue(semanticActive?.source ?? active.source))
       rangeRef.current = {
         start: semanticActive?.start ?? active.start,
@@ -1331,7 +1393,8 @@ export function LiveEditor({
     setInsertedBlocks(snapshot.insertedBlocks)
     setEditingBoundary(snapshot.editingBoundary)
     setDraft(snapshot.draft)
-    syntheticListSeparatorRef.current = snapshot.syntheticListSeparator
+    syntheticListSeparatorsRef.current =
+      snapshot.syntheticListSeparators.filter(separatorHasCurrentOrigin)
     mathEnterTokenRef.current = null
     deferredSelectionRef.current = {
       start: snapshot.selection.start,
@@ -1390,8 +1453,12 @@ export function LiveEditor({
       previous.sourceMode !== sourceMode ||
       previous.previewAll !== previewAll
     ) {
-      invalidateMathInteraction()
-      setActiveInputFocused(document.activeElement === textareaRef.current)
+      if (previous.previewAll !== previewAll) {
+        rotateEditorSession()
+      } else {
+        invalidateMathInteraction()
+        setActiveInputFocused(document.activeElement === textareaRef.current)
+      }
       previousDisplayModeRef.current = { sourceMode, previewAll }
     }
   }, [previewAll, sourceMode])
@@ -1429,6 +1496,7 @@ export function LiveEditor({
   }
 
   function commitDraft(value: string) {
+    transformSyntheticListSeparators(draft, value)
     const previousContent = contentRef.current
     const previous = { ...rangeRef.current }
     const previousSource = previousContent.slice(previous.start, previous.end)
@@ -1545,9 +1613,9 @@ export function LiveEditor({
         start: previous.start,
         end: previous.start + sourceValue.length,
       },
-      syntheticListSeparator: syntheticListSeparatorRef.current
-        ? { ...syntheticListSeparatorRef.current }
-        : null,
+      syntheticListSeparators: syntheticListSeparatorsRef.current.map(
+        (separator) => ({ ...separator }),
+      ),
       expectedContent: '',
       expectedActiveBlock: safeActive,
       expectedDraft: '',
@@ -1578,9 +1646,9 @@ export function LiveEditor({
       editingBoundary: editingBoundaryRef.current
         ? { ...editingBoundaryRef.current }
         : null,
-      syntheticListSeparator: syntheticListSeparatorRef.current
-        ? { ...syntheticListSeparatorRef.current }
-        : null,
+      syntheticListSeparators: syntheticListSeparatorsRef.current.map(
+        (separator) => ({ ...separator }),
+      ),
       expectedContent: '',
       expectedActiveBlock: safeActive,
       expectedDraft: '',
@@ -1617,7 +1685,8 @@ export function LiveEditor({
     setInsertedBlocks(snapshot.insertedBlocks)
     setEditingBoundary(snapshot.editingBoundary)
     setDraft(snapshot.draft)
-    syntheticListSeparatorRef.current = snapshot.syntheticListSeparator
+    syntheticListSeparatorsRef.current =
+      snapshot.syntheticListSeparators.filter(separatorHasCurrentOrigin)
     rangeRef.current = { ...snapshot.range }
     contentRef.current = snapshot.content
     pendingAcknowledgementRef.current = snapshot.content
@@ -1830,6 +1899,7 @@ export function LiveEditor({
       selectionEnd,
       selectionDirection,
     )
+    transformSyntheticListSeparators(draft, value)
     setDraft(value)
     draftRevisionRef.current += 1
     rangeRef.current = nextRange
@@ -2321,13 +2391,14 @@ export function LiveEditor({
           selectedRange.start === 0 && sourcePrefix.length > 0
             ? sourcePrefix.slice(0, sourcePrefix.length - width)
             : sourcePrefix
-        const syntheticSeparator = syntheticListSeparatorRef.current
         const syntheticSeparatorOffset = selectedRange.start - 1
-        if (
-          syntheticSeparator?.draft === draft &&
-          syntheticSeparator.offset === syntheticSeparatorOffset &&
-          draft[syntheticSeparatorOffset] === '\n'
-        ) {
+        const syntheticSeparator =
+          syntheticListSeparatorsRef.current.find(
+            (candidate) =>
+              separatorHasCurrentOrigin(candidate) &&
+              candidate.offset === syntheticSeparatorOffset,
+          )
+        if (syntheticSeparator && draft[syntheticSeparatorOffset] === '\n') {
           outdentEdits.push({
             start: syntheticSeparatorOffset,
             remove: 1,
@@ -2359,9 +2430,7 @@ export function LiveEditor({
             nextDraft,
             nextStart,
             nextEnd,
-            () => {
-              syntheticListSeparatorRef.current = null
-            },
+            undefined,
             snapshot,
           )
           setEditorSelection(textarea, nextStart, nextEnd, direction)
@@ -2433,9 +2502,9 @@ export function LiveEditor({
           nextStart,
           nextEnd,
           () => {
-            syntheticListSeparatorRef.current = insertedSeparator
-              ? { draft: nextDraft, offset: selectedRange.start }
-              : null
+            if (insertedSeparator) {
+              trackSyntheticListSeparator(selectedRange.start)
+            }
           },
           snapshot,
         )
@@ -2841,7 +2910,7 @@ export function LiveEditor({
       content: reordered.content,
       blocks: reorderedInsertions,
     })
-    if (Math.max(0, editorIndex) === safeActive) rotateEditorSession()
+    rotateEditorSession()
     setDraft(toEditorValue(moved?.source ?? ''))
     rangeRef.current = {
       start: moved?.start ?? 0,

@@ -1347,6 +1347,311 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => expect(editor.value).toContain('\n\n'))
   })
 
+  it('tracks synthetic separators for multiple nested ordered-list operations', () => {
+    const source = '1. root\n2. first\n3. second'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    editor.setSelectionRange(
+      source.indexOf('2. first'),
+      source.indexOf('2. first'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '1. root\n\n   2. first\n3. second',
+    )
+
+    editor.setSelectionRange(
+      editor.value.indexOf('3. second'),
+      editor.value.indexOf('3. second'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '1. root\n\n   2. first\n\n   3. second',
+    )
+
+    editor.setSelectionRange(
+      editor.value.indexOf('2. first'),
+      editor.value.indexOf('2. first'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '1. root\n2. first\n\n   3. second',
+    )
+
+    editor.setSelectionRange(
+      editor.value.indexOf('3. second'),
+      editor.value.indexOf('3. second'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+  })
+
+  it('restores earlier separator provenance when undoing a later nesting operation', () => {
+    const source = '1. root\n2. first\n3. second'
+    const onceNested = '1. root\n\n   2. first\n3. second'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. first'),
+      editor.value.indexOf('2. first'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    editor.setSelectionRange(
+      editor.value.indexOf('3. second'),
+      editor.value.indexOf('3. second'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith(onceNested)
+
+    editor.setSelectionRange(
+      editor.value.indexOf('2. first'),
+      editor.value.indexOf('2. first'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+  })
+
+  it('does not remove a real separator from an identical loose-list block after switching blocks', () => {
+    const tight = '1. parent\n2. child'
+    const loose = '1. parent\n\n   2. child'
+    const divider = '\n\nDivider\n\n'
+    const result = renderEditor(`${tight}${divider}${loose}`)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. child'),
+      editor.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(`${loose}${divider}${loose}`)
+
+    result.rerender(
+      <LiveEditor
+        content={`${loose}${divider}${loose}`}
+        activeBlock={2}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const second = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(second.value).toBe(loose)
+    second.setSelectionRange(
+      second.value.indexOf('2. child'),
+      second.value.indexOf('2. child'),
+    )
+
+    fireEvent.keyDown(second, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      `${loose}${divider}1. parent\n\n2. child`,
+    )
+  })
+
+  it.each([
+    ['external replacement', false, false],
+    ['source-mode round trip', true, false],
+    ['print-mode round trip', false, true],
+  ])('does not carry synthetic separator provenance through %s', (
+    name,
+    sourceMode,
+    previewAll,
+  ) => {
+    const tight = '1. parent\n2. child'
+    const loose = '1. parent\n\n   2. child'
+    const replacementContent =
+      name === 'external replacement' ? `${loose}\n\nExternal` : loose
+    const result = renderEditor(tight)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. child'),
+      editor.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    result.rerender(
+      <LiveEditor
+        content={replacementContent}
+        contentRevision={sourceMode ? 1 : 0}
+        sourceMode={sourceMode}
+        previewAll={previewAll}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    if (sourceMode || previewAll) {
+      result.rerender(
+        <LiveEditor
+          content={replacementContent}
+          contentRevision={2}
+          sourceMode={false}
+          previewAll={false}
+          activeBlock={0}
+          onChange={result.onChange}
+          onActiveBlockChange={result.onActiveBlockChange}
+        />,
+      )
+    }
+    const replacement = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    replacement.setSelectionRange(
+      replacement.value.indexOf('2. child'),
+      replacement.value.indexOf('2. child'),
+    )
+
+    fireEvent.keyDown(replacement, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      name === 'external replacement'
+        ? '1. parent\n\n2. child\n\nExternal'
+        : '1. parent\n\n2. child',
+    )
+  })
+
+  it('does not carry separator provenance across a tab remount', () => {
+    const tight = '1. parent\n2. child'
+    const loose = '1. parent\n\n   2. child'
+    const first = renderEditor(tight)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. child'),
+      editor.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    first.unmount()
+
+    const second = renderEditor(loose)
+    const remounted = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    remounted.setSelectionRange(
+      remounted.value.indexOf('2. child'),
+      remounted.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(remounted, { key: 'Tab', shiftKey: true })
+
+    expect(second.onChange).toHaveBeenLastCalledWith('1. parent\n\n2. child')
+  })
+
+  it('does not transfer separator provenance to an identical block moved by drag controls', () => {
+    const tight = '1. parent\n2. child'
+    const loose = '1. parent\n\n   2. child'
+    const result = renderEditor(
+      `${tight}\n\n# Divider\n\n${loose}\n\n# After`,
+    )
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. child'),
+      editor.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    result.rerender(
+      <LiveEditor
+        content={`${loose}\n\n# Divider\n\n${loose}\n\n# After`}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 3' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+    const reordered = `${loose}\n\n# Divider\n\n# After\n\n${loose}`
+    expect(result.onChange).toHaveBeenLastCalledWith(reordered)
+    result.rerender(
+      <LiveEditor
+        content={reordered}
+        activeBlock={3}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const moved = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(moved.value).toBe(loose)
+    moved.setSelectionRange(
+      moved.value.indexOf('2. child'),
+      moved.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(moved, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      `${loose}\n\n# Divider\n\n# After\n\n1. parent\n\n2. child`,
+    )
+  })
+
+  it('does not remove a real CRLF separator after undo rotates list history', async () => {
+    const tight = '1. parent\r\n2. child'
+    const loose = '1. parent\r\n\r\n   2. child'
+    const result = renderEditor(tight)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      editor.value.indexOf('2. child'),
+      editor.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+    expect(undo.defaultPrevented).toBe(true)
+    await waitFor(() => expect(editor.value).toBe('1. parent\n2. child'))
+
+    result.rerender(
+      <LiveEditor
+        content={loose}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const replacement = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    replacement.setSelectionRange(
+      replacement.value.indexOf('2. child'),
+      replacement.value.indexOf('2. child'),
+    )
+    fireEvent.keyDown(replacement, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '1. parent\r\n\r\n2. child',
+    )
+  })
+
   it.each([
     {
       name: 'continuation',
