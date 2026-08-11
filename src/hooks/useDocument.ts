@@ -1,4 +1,4 @@
-import { useCallback, useReducer, useRef } from 'react'
+import { useCallback, useReducer, useRef, useState } from 'react'
 
 export interface DocumentState {
   content: string
@@ -232,6 +232,9 @@ export function useDocument(defaultSourceMode = false) {
   const latestSaveRequests = useRef(new Map<string, number>())
   const activeSaveTokens = useRef(new Map<string, Set<string>>())
   const tabLifetimes = useRef(new Map<string, number>([['tab-1', 0]]))
+  const closingTabs = useRef(new Set<string>())
+  const closingAllTabs = useRef(false)
+  const [closingVersion, setClosingVersion] = useState(0)
   const tabsRef = useRef(tabsState)
   const pathOwners = useRef(new Map<string, string>())
   const pathReservations = useRef(
@@ -272,6 +275,12 @@ export function useDocument(defaultSourceMode = false) {
     tabsState.tabs[0]
   const dispatch = useCallback((action: DocumentAction) => {
     const activeTabId = tabsState.activeTabId
+    if (
+      (action.type === 'edit' || action.type === 'load') &&
+      (closingAllTabs.current || closingTabs.current.has(activeTabId))
+    ) {
+      return
+    }
     if (action.type === 'edit' || action.type === 'load') {
       contentRevisions.current.set(
         activeTabId,
@@ -384,6 +393,9 @@ export function useDocument(defaultSourceMode = false) {
       if (!origin) {
         return { status: 'error', message: 'Document tab no longer exists.' } as const
       }
+      if (closingAllTabs.current || closingTabs.current.has(activeTabId)) {
+        return { status: 'superseded' } as const
+      }
       const content = origin.content
       const originLifetime = tabLifetimes.current.get(activeTabId)
       const savedContentRevision =
@@ -409,10 +421,17 @@ export function useDocument(defaultSourceMode = false) {
       if (tabLifetimes.current.get(activeTabId) !== originLifetime) {
         return { status: 'superseded' } as const
       }
+      if (closingAllTabs.current || closingTabs.current.has(activeTabId)) {
+        return { status: 'superseded' } as const
+      }
       const reservation = reservePath(savePath, activeTabId)
       if (!reservation) {
         const message = `${filename(savePath)} is already being saved or opened in another tab. Choose a different path.`
-        if (tabsRef.current.tabs.some((tab) => tab.id === activeTabId)) {
+        if (
+          !closingAllTabs.current &&
+          !closingTabs.current.has(activeTabId) &&
+          tabsRef.current.tabs.some((tab) => tab.id === activeTabId)
+        ) {
           dispatchTabs({
             type: 'document',
             tabId: activeTabId,
@@ -494,11 +513,16 @@ export function useDocument(defaultSourceMode = false) {
         if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           return { status: 'superseded' } as const
         }
-        dispatchTabs({
-          type: 'document',
-          tabId: activeTabId,
-          action: { type: 'save-error', message, requestId: currentRequest },
-        })
+        if (
+          !closingAllTabs.current &&
+          !closingTabs.current.has(activeTabId)
+        ) {
+          dispatchTabs({
+            type: 'document',
+            tabId: activeTabId,
+            action: { type: 'save-error', message, requestId: currentRequest },
+          })
+        }
         return { status: 'error', message } as const
       } finally {
         const remainingTokens = activeSaveTokens.current.get(activeTabId)
@@ -529,9 +553,20 @@ export function useDocument(defaultSourceMode = false) {
     await Promise.all(tokens.map(token => window.qingshu.cancelSave(token)))
   }, [])
 
-  const closeTab = useCallback(async (tabId: string) => {
+  const closeTab = useCallback(async (
+    tabId: string,
+    confirmDiscard: (tab: DocumentTab) => boolean = () => true,
+  ): Promise<boolean> => {
+    if (closingAllTabs.current || closingTabs.current.has(tabId)) return false
     const closing = tabsRef.current.tabs.find((tab) => tab.id === tabId)
-    if (!closing) return
+    if (!closing) return false
+    closingTabs.current.add(tabId)
+    setClosingVersion(version => version + 1)
+    if (closing.dirty && !confirmDiscard(closing)) {
+      closingTabs.current.delete(tabId)
+      setClosingVersion(version => version + 1)
+      return false
+    }
     const resetsOnlyTab = tabsRef.current.tabs.length === 1 && Boolean(closing)
     const resetRevision = resetsOnlyTab
       ? (contentRevisions.current.get(tabId) ?? closing.contentRevision) + 1
@@ -539,8 +574,23 @@ export function useDocument(defaultSourceMode = false) {
     const nextLifetime = (tabLifetimes.current.get(tabId) ?? 0) + 1
     tabLifetimes.current.set(tabId, nextLifetime)
     latestSaveRequests.current.delete(tabId)
-    await cancelTabSaves(tabId)
-    if (!tabsRef.current.tabs.some(tab => tab.id === tabId)) return
+    try {
+      await cancelTabSaves(tabId)
+    } catch {
+      closingTabs.current.delete(tabId)
+      setClosingVersion(version => version + 1)
+      return false
+    }
+    const current = tabsRef.current.tabs.find(tab => tab.id === tabId)
+    if (
+      !current ||
+      current.contentRevision !== closing.contentRevision ||
+      tabLifetimes.current.get(tabId) !== nextLifetime
+    ) {
+      closingTabs.current.delete(tabId)
+      setClosingVersion(version => version + 1)
+      return false
+    }
     if (closing?.path && pathOwners.current.get(closing.path) === tabId) {
       pathOwners.current.delete(closing.path)
     }
@@ -558,19 +608,70 @@ export function useDocument(defaultSourceMode = false) {
       contentRevisions.current.set(tabId, resetRevision!)
       tabLifetimes.current.set(tabId, nextLifetime)
     }
+    closingTabs.current.delete(tabId)
+    setClosingVersion(version => version + 1)
+    return true
   }, [cancelTabSaves, defaultSourceMode, dispatchTabs])
+
+  const requestCloseAll = useCallback(async (
+    confirmDiscard: (tabs: DocumentTab[]) => boolean,
+  ): Promise<boolean> => {
+    if (closingAllTabs.current) return false
+    closingAllTabs.current = true
+    setClosingVersion(version => version + 1)
+    const snapshot = tabsRef.current.tabs.map(tab => ({
+      id: tab.id,
+      contentRevision: tab.contentRevision,
+      lifetime: tabLifetimes.current.get(tab.id),
+    }))
+    if (
+      tabsRef.current.tabs.some(tab => tab.dirty) &&
+      !confirmDiscard(tabsRef.current.tabs)
+    ) {
+      closingAllTabs.current = false
+      setClosingVersion(version => version + 1)
+      return false
+    }
+    try {
+      await cancelAllSaves()
+    } catch {
+      closingAllTabs.current = false
+      setClosingVersion(version => version + 1)
+      return false
+    }
+    const current = tabsRef.current.tabs
+    const unchanged =
+      current.length === snapshot.length &&
+      snapshot.every(expected => {
+        const tab = current.find(candidate => candidate.id === expected.id)
+        return (
+          tab?.contentRevision === expected.contentRevision &&
+          tabLifetimes.current.get(expected.id) === expected.lifetime
+        )
+      })
+    if (!unchanged) {
+      closingAllTabs.current = false
+      setClosingVersion(version => version + 1)
+      return false
+    }
+    return true
+  }, [cancelAllSaves])
 
   return {
     state,
     dispatch,
     tabs: tabsState.tabs,
     activeTabId: tabsState.activeTabId,
+    closing:
+      closingVersion >= 0 &&
+      (closingAllTabs.current || closingTabs.current.has(tabsState.activeTabId)),
     activateTab,
     cancelAllSaves,
     closeTab,
     newDocument,
     openDocument,
     openRecentDocument,
+    requestCloseAll,
     saveDocument,
   }
 }

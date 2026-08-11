@@ -125,12 +125,13 @@ export default function App() {
     dispatch,
     tabs,
     activeTabId,
+    closing,
     activateTab,
-    cancelAllSaves,
     closeTab,
     newDocument,
     openDocument,
     openRecentDocument,
+    requestCloseAll,
     saveDocument,
   } = useDocument(settings.defaultSourceMode)
   const [systemDark, setSystemDark] = useState(
@@ -257,27 +258,15 @@ export default function App() {
     return () => media.removeEventListener?.('change', update)
   }, [settings.theme])
 
-  const canDiscard = useCallback(
-    () =>
-      !tabs.some((tab) => tab.dirty) ||
-      window.confirm('Discard the unsaved changes in all open documents?'),
-    [tabs],
-  )
-
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((candidate) => candidate.id === tabId)
-      if (
-        tab?.dirty &&
-        !window.confirm(
+      void closeTab(tabId, tab =>
+        window.confirm(
           `Discard the unsaved changes in ${tab.path ? filename(tab.path) : 'Untitled'}?`,
-        )
-      ) {
-        return
-      }
-      closeTab(tabId)
+        ),
+      )
     },
-    [closeTab, tabs],
+    [closeTab],
   )
 
   const openRecent = useCallback(
@@ -778,17 +767,14 @@ export default function App() {
   useEffect(
     () =>
       window.qingshu.onCloseIntent(() => {
-        const confirmed = canDiscard()
-        if (!confirmed) {
-          void window.qingshu.respondToClose(false)
-          return
-        }
-        void cancelAllSaves().then(
-          () => window.qingshu.respondToClose(true),
+        void requestCloseAll(() =>
+          window.confirm('Discard the unsaved changes in all open documents?'),
+        ).then(
+          confirmed => window.qingshu.respondToClose(confirmed),
           () => window.qingshu.respondToClose(false),
         )
       }),
-    [canDiscard, cancelAllSaves],
+    [requestCloseAll],
   )
 
   useEffect(() => {
@@ -924,6 +910,7 @@ export default function App() {
             activeBlock={state.activeBlock}
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
+            readOnly={closing}
             sourceMode={sourceMode}
             selection={state.selection}
             previewAll={printPreview}

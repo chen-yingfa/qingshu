@@ -112,6 +112,7 @@ interface LiveEditorBaseProps {
   activeBlock: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
+  readOnly?: boolean
   previewAll?: boolean
   onPreviewReady?(error?: Error): void
   onChange(content: string): void
@@ -701,6 +702,7 @@ export function LiveEditor({
   activeBlock,
   formatRequest,
   autoSpacing = false,
+  readOnly = false,
   previewAll = false,
   sourceMode = false,
   onPreviewReady,
@@ -951,6 +953,7 @@ export function LiveEditor({
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || !formatRequest || formatRequest.id === handledFormatRef.current) return
+    if (readOnly) return
     handledFormatRef.current = formatRequest.id
     const result = formattedValue(
       formatRequest.command,
@@ -1036,6 +1039,7 @@ export function LiveEditor({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (readOnly) return
     if (
       event.key === 'Process' ||
       event.nativeEvent.isComposing ||
@@ -1376,6 +1380,7 @@ export function LiveEditor({
     boundary: number,
     focus: 'editor' | 'handle' = 'editor',
   ) => {
+    if (readOnly) return
     const currentContent = contentRef.current
     const currentBlocks =
       currentContent === content
@@ -1516,6 +1521,7 @@ export function LiveEditor({
           contentRevision={contentRevision!}
           formatRequest={formatRequest}
           autoSpacing={autoSpacing}
+          readOnly={readOnly}
           onChange={onChange}
           selection={selection}
           onSelectionChange={onSelectionChange}
@@ -1607,9 +1613,11 @@ export function LiveEditor({
                         }
                         autoFocus
                         spellCheck={!fencedCode}
+                        readOnly={readOnly}
                         value={draft}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
+                          if (readOnly) return
                           const textarea = event.currentTarget
                           commitDraft(textarea.value)
                           reportSelection(textarea)

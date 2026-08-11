@@ -239,6 +239,7 @@ export function DocumentSourceEditor({
   contentRevision,
   formatRequest,
   autoSpacing = false,
+  readOnly = false,
   onChange,
   selection,
   onSelectionChange,
@@ -247,6 +248,7 @@ export function DocumentSourceEditor({
   contentRevision: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
+  readOnly?: boolean
   onChange(content: string): void
   selection?: EditorSelection
   onSelectionChange?(selection: EditorSelection): void
@@ -382,6 +384,7 @@ export function DocumentSourceEditor({
     const textarea = textareaRef.current
     if (
       !textarea ||
+      readOnly ||
       !formatRequest ||
       formatRequest.id === handledFormatRef.current
     ) return
@@ -403,8 +406,10 @@ export function DocumentSourceEditor({
       aria-label="Markdown source"
       autoFocus
       spellCheck={false}
+      readOnly={readOnly}
       value={draft}
       onChange={(event) => {
+        if (readOnly) return
         nativeInputValueRef.current = event.target.value
         commit(event.target.value, event.target.selectionStart)
         reportSelection(event.currentTarget)
@@ -430,6 +435,7 @@ export function DocumentSourceEditor({
         )
       }}
       onKeyDown={(event) => {
+        if (readOnly) return
         if (event.key === 'Process' || composingRef.current) return
         if (
           event.key !== 'Tab' ||

@@ -175,7 +175,7 @@ describe('useDocument save lifecycle', () => {
     })
     await waitFor(() => expect(window.qingshu.saveFile).toHaveBeenCalledOnce())
     const request = vi.mocked(window.qingshu.saveFile).mock.calls[0][0]
-    let close!: Promise<void>
+    let close!: Promise<boolean>
     act(() => {
       close = result.current.closeTab('tab-2')
     })
@@ -190,6 +190,66 @@ describe('useDocument save lifecycle', () => {
 
     finishSave({ canceled: false, path: '/notes/discarded.md' })
     await expect(save).resolves.toEqual({ status: 'superseded' })
+  })
+
+  it('rejects edits and new saves while a tab close awaits cancellation', async () => {
+    let finishCancellation!: () => void
+    window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/closing.md',
+      }),
+      saveFile: vi.fn(() => new Promise(() => undefined)),
+      cancelSave: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishCancellation = resolve
+          }),
+      ),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: 'Before close' }))
+    act(() => {
+      void result.current.saveDocument()
+    })
+    await waitFor(() => expect(window.qingshu.saveFile).toHaveBeenCalledOnce())
+
+    let close!: Promise<boolean>
+    act(() => {
+      close = result.current.closeTab('tab-1', () => true)
+    })
+    act(() => result.current.dispatch({ type: 'edit', content: 'Late edit' }))
+    let lateSave!: Awaited<ReturnType<typeof result.current.saveDocument>>
+    await act(async () => {
+      lateSave = await result.current.saveDocument()
+    })
+
+    expect(result.current.state.content).toBe('Before close')
+    expect(lateSave!).toEqual({ status: 'superseded' })
+    expect(window.qingshu.saveFile).toHaveBeenCalledOnce()
+    finishCancellation()
+    await act(async () => {
+      await close
+    })
+    expect(result.current.state.content).toBe('')
+  })
+
+  it('marks a dirty tab closing before invoking its discard confirmation', async () => {
+    window.qingshu = {} as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: 'Original' }))
+
+    let close!: Promise<boolean>
+    act(() => {
+      close = result.current.closeTab('tab-1', () => {
+        result.current.dispatch({ type: 'edit', content: 'Prompt edit' })
+        return false
+      })
+    })
+
+    await expect(close).resolves.toBe(false)
+    expect(result.current.state.content).toBe('Original')
+    expect(result.current.state.dirty).toBe(true)
   })
 
   it('deduplicates simultaneous opens before allocating tab resources', async () => {

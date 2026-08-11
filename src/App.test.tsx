@@ -185,7 +185,7 @@ describe('document tabs', () => {
 
     closeIntentListener?.()
     expect(confirm).toHaveBeenCalledOnce()
-    expect(api.respondToClose).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(api.respondToClose).toHaveBeenCalledWith(false))
 
     fireEvent.click(
       screen.getAllByRole('button', { name: 'Close Untitled' })[0],
@@ -545,7 +545,7 @@ describe('application safety controls', () => {
     )
   })
 
-  it('routes a custom close through the native dirty handshake', () => {
+  it('routes a custom close through the native dirty handshake', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App />)
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
@@ -558,7 +558,7 @@ describe('application safety controls', () => {
 
     closeIntentListener?.()
     expect(confirm).toHaveBeenCalledTimes(1)
-    expect(api.respondToClose).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(api.respondToClose).toHaveBeenCalledWith(false))
   })
 
   it('distinguishes rejected and confirmed native close intents', async () => {
@@ -570,13 +570,51 @@ describe('application safety controls', () => {
 
     closeIntentListener?.()
     expect(confirm).toHaveBeenCalledTimes(1)
-    expect(api.respondToClose).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(api.respondToClose).toHaveBeenCalledWith(false))
 
     confirm.mockReturnValue(true)
     closeIntentListener?.()
     await waitFor(() =>
       expect(api.respondToClose).toHaveBeenLastCalledWith(true),
     )
+  })
+
+  it('blocks edits and new saves while native all-tab close cancels active saves', async () => {
+    let finishCancellation!: () => void
+    api.saveFile.mockImplementation(() => new Promise(() => undefined))
+    api.cancelSave.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCancellation = resolve
+        }),
+    )
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'First dirty tab' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.saveFile).toHaveBeenCalledOnce())
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Second dirty tab' },
+    })
+
+    closeIntentListener?.()
+    await waitFor(() => expect(api.cancelSave).toHaveBeenCalledOnce())
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Edit during close' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .readOnly,
+    ).toBe(true)
+    expect(api.saveFile).toHaveBeenCalledOnce()
+    expect(api.respondToClose).not.toHaveBeenCalled()
+    finishCancellation()
+    await waitFor(() => expect(api.respondToClose).toHaveBeenCalledWith(true))
   })
 
   it('switches to one full-document preview before PDF export', async () => {
