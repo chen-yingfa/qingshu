@@ -247,6 +247,86 @@ describe('LiveEditor state synchronization', () => {
 })
 
 describe('LiveEditor keyboard and composition behavior', () => {
+  it('shows a rendered KaTeX preview while editing inline and display math', async () => {
+    const result = renderEditor(
+      'Let $x_t \\in \\mathbb R$ and $$y_t=\\left(\\frac{q_tK_t^\\top}{\\sqrt d}\\right)VW_o^\\top$$',
+    )
+
+    const preview = await waitFor(() => {
+      const element = result.container.querySelector('.active-live-preview')
+      expect(element?.querySelectorAll('.katex')).toHaveLength(2)
+      return element
+    })
+    expect(preview?.querySelector('.katex-html')).not.toBeNull()
+  })
+
+  it('enters fenced code mode with a highlighted live preview', async () => {
+    const result = renderEditor('```ts\nconst total = value + 1\n```')
+
+    const editor = screen.getByLabelText('Active code block')
+    expect(editor.classList.contains('source-block-code')).toBe(true)
+    await waitFor(() => {
+      expect(result.container.querySelector('.active-code-preview .hljs-keyword')).not.toBeNull()
+    })
+    expect(result.container.querySelector('.active-code-preview')?.textContent).toContain(
+      'const total = value + 1',
+    )
+  })
+
+  it('creates and indents a fenced code body from an opening fence', async () => {
+    const result = renderEditor('```ts')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('```ts\n\n```')
+    expect(editor.value).toBe('```ts\n\n```')
+    await waitFor(() => expect(editor.selectionStart).toBe('```ts\n'.length))
+  })
+
+  it('supports Tab and indentation-preserving Enter in fenced code mode', async () => {
+    const result = renderEditor('```ts\n  const value = 1\n```')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    const lineEnd = editor.value.indexOf('\n```')
+    editor.setSelectionRange(lineEnd, lineEnd)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '```ts\n  const value = 1\n  \n```',
+    )
+
+    await waitFor(() =>
+      expect(editor.selectionStart).toBe('```ts\n  const value = 1\n  '.length),
+    )
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '```ts\n  const value = 1\n    \n```',
+    )
+  })
+
+  it('inserts an editable block between blocks when Enter is pressed at the end', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\n\n\nSecond')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect((screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value).toBe(
+      '',
+    )
+  })
+
   it('applies automatic spacing after IME composition completes', async () => {
     const result = renderEditor('中文', { autoSpacing: true })
     const textarea = screen.getByLabelText('Active Markdown block')

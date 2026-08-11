@@ -39,6 +39,10 @@ button {
   --line: #d9d4cc;
   --hover: #e8e3dc;
   --code: #f4f1eb;
+  --syntax-keyword: #9a3e58;
+  --syntax-string: #557548;
+  --syntax-number: #9a5d2d;
+  --syntax-comment: #8b857d;
   display: grid;
   position: relative;
   grid-template-rows: 38px 46px minmax(0, 1fr) 30px;
@@ -58,6 +62,10 @@ button {
   --line: #403d38;
   --hover: #36332f;
   --code: #302e2b;
+  --syntax-keyword: #e08aa4;
+  --syntax-string: #a8cc94;
+  --syntax-number: #e0a46e;
+  --syntax-comment: #8f8981;
 }
 
 .title-bar {
@@ -189,6 +197,30 @@ button {
   flex: 1;
 }
 
+.font-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.font-picker select {
+  height: 30px;
+  padding: 0 24px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--paper);
+  font: 12px/1 ui-sans-serif, sans-serif;
+}
+
+.font-picker select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .workspace {
   overflow: auto;
   padding: clamp(24px, 5vw, 64px) max(20px, calc((100vw - 900px) / 2));
@@ -217,11 +249,23 @@ button {
   margin: 0 auto;
   padding: clamp(38px, 7vw, 84px) clamp(26px, 8vw, 88px);
   font-family:
-    "Iowan Old Style", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC",
-    STSong, Georgia, serif;
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   font-size: 17px;
   line-height: 1.85;
   overflow-wrap: anywhere;
+}
+
+.font-serif .editor {
+  font-family:
+    "Iowan Old Style", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC",
+    STSong, Georgia, serif;
+}
+
+.font-mono .editor {
+  font-family:
+    "SFMono-Regular", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC",
+    "Microsoft YaHei", monospace;
 }
 
 .preview-block {
@@ -249,7 +293,9 @@ button {
 
 .preview-block + .preview-block,
 .source-block + .preview-block,
-.preview-block + .source-block {
+.preview-block + .source-block,
+.preview-block + .active-block,
+.active-block + .preview-block {
   margin-top: 1.15em;
 }
 
@@ -341,28 +387,14 @@ button {
   border-radius: 6px;
 }
 
-.rendered-block .katex {
-  font: inherit;
-}
-
-.rendered-block .katex-html {
-  display: none;
-}
-
-.rendered-block .katex-mathml {
-  display: inline;
-}
-
 .rendered-block .katex-display {
-  display: block;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0.45em 0;
-  text-align: center;
 }
 
-.rendered-block .katex-display .katex-mathml {
-  display: block;
+.active-block {
+  min-width: 0;
 }
 
 .source-block {
@@ -379,6 +411,95 @@ button {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 50%, transparent);
   font-size: 0.91em;
   line-height: 1.65;
+}
+
+.source-block-code {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+  background: var(--code);
+  tab-size: 2;
+}
+
+.active-live-preview {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  background: color-mix(in srgb, var(--code) 58%, var(--paper));
+}
+
+.active-math-preview {
+  margin-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 7px;
+}
+
+.preview-label {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font: 10px/1.3 ui-sans-serif, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.active-math-preview .rendered-block {
+  padding: 10px 14px;
+  cursor: default;
+}
+
+.active-math-preview .rendered-block:hover {
+  background: transparent;
+}
+
+.active-math-preview .rendered-block > p {
+  margin: 0;
+}
+
+.active-code-preview pre {
+  margin: 0;
+  padding: 12px 14px 14px;
+  overflow: auto;
+  background: transparent;
+  font-size: 0.9em;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.active-code-preview code {
+  font-family:
+    "SFMono-Regular", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC",
+    monospace;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-type {
+  color: var(--syntax-keyword);
+  font-weight: 600;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-template-variable {
+  color: var(--syntax-string);
+}
+
+.hljs-number,
+.hljs-literal {
+  color: var(--syntax-number);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-function .hljs-title {
+  color: var(--accent);
 }
 
 .status-bar {

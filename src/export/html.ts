@@ -4,7 +4,7 @@ const exportStyles = `
 :root{color-scheme:light;--ink:#292622;--muted:#736d65;--accent:#9b6039;--line:#ddd7ce;--wash:#f6f2eb}
 *{box-sizing:border-box}
 html{background:#ece8e1}
-body{max-width:850px;min-height:100vh;margin:0 auto;padding:72px clamp(28px,8vw,88px);color:var(--ink);background:#fffefa;box-shadow:0 0 60px rgba(41,34,27,.10);font:17px/1.82 "Iowan Old Style","Noto Serif CJK SC","Source Han Serif SC","Songti SC",STSong,Georgia,serif;overflow-wrap:anywhere}
+body{max-width:850px;min-height:100vh;margin:0 auto;padding:72px clamp(28px,8vw,88px);color:var(--ink);background:#fffefa;box-shadow:0 0 60px rgba(41,34,27,.10);font:17px/1.82 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}
 h1,h2,h3,h4,h5,h6{margin:1.7em 0 .65em;line-height:1.28;letter-spacing:-.018em}
 h1{margin-top:0;font-size:2.35em}h2{padding-bottom:.24em;border-bottom:1px solid var(--line);font-size:1.7em}h3{font-size:1.32em}
 p,ul,ol,blockquote,pre,table{margin:1.05em 0}

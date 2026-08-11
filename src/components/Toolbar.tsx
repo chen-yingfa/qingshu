@@ -1,13 +1,17 @@
 import type { FormatCommand } from './LiveEditor'
 import { Icon, type IconName } from './Icons'
 
+export type DocumentFont = 'sans' | 'serif' | 'mono'
+
 interface ToolbarProps {
   dark: boolean
   focus: boolean
   a4: boolean
   autoSpacing: boolean
+  documentFont: DocumentFont
   onFile(command: 'new' | 'open' | 'save' | 'save-as' | 'export-html' | 'export-pdf'): void
   onFormat(command: FormatCommand): void
+  onFontChange(font: DocumentFont): void
   onToggle(option: 'dark' | 'focus' | 'a4' | 'spacing'): void
 }
 
@@ -51,8 +55,10 @@ export function Toolbar({
   focus,
   a4,
   autoSpacing,
+  documentFont,
   onFile,
   onFormat,
+  onFontChange,
   onToggle,
 }: ToolbarProps) {
   return (
@@ -80,6 +86,18 @@ export function Toolbar({
       </div>
       <span className="toolbar-spacer" />
       <div className="tool-group view-tools">
+        <label className="font-picker">
+          <span>Font</span>
+          <select
+            aria-label="Document font"
+            value={documentFont}
+            onChange={(event) => onFontChange(event.target.value as DocumentFont)}
+          >
+            <option value="sans">Sans</option>
+            <option value="serif">Serif</option>
+            <option value="mono">Monospace</option>
+          </select>
+        </label>
         <ToolButton
           label="Toggle automatic CJK spacing"
           icon="spacing"

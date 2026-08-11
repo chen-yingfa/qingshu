@@ -10,7 +10,14 @@ in the repository.
 - Source-backed block editing with sanitized live preview.
 - GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks, and
   footnotes.
-- Inline and display mathematics rendered with KaTeX.
+- Inline and display mathematics rendered with bundled KaTeX typography,
+  including a live preview while editing math source.
+- Fenced-code input mode with automatic closing fences, Tab/Enter indentation,
+  and live syntax highlighting for common web, scripting, data, and markup languages.
+- Sans-serif document typography by default, with persistent serif and monospace
+  choices in the toolbar.
+- Enter at the end of a block inserts a new editable block before the following
+  content.
 - Light/dark themes, distraction-free focus mode, and an A4 page preview.
 - Markdown open/save/save-as through a sandboxed Electron preload bridge.
 - Attractive A4 PDF export through Chromium.
@@ -99,8 +106,9 @@ application identity, desktop metadata, and local platform icons.
 
 - Qingshu edits one document/window at a time and has no autosave, tabs, workspace,
   plugin, or knowledge-base layer.
-- Syntax highlighting, table manipulation, image importing/embedding, and
-  Marp/Slidev-specific tooling are not implemented.
+- Table manipulation, image importing/embedding, and Marp/Slidev-specific tooling
+  are not implemented. Languages outside the built-in syntax-highlighting set use
+  automatic or plain-text highlighting.
 - HTML styling and MathML equations are self-contained, but images referenced by the
   Markdown remain referenced URLs or file paths rather than embedded data.
 - PDF appearance relies on the host Chromium print engine and installed fallback CJK

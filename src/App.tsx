@@ -9,7 +9,7 @@ import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
 import { TitleBar } from './components/TitleBar'
 import { ToastRegion, type ToastMessage } from './components/Toast'
-import { Toolbar } from './components/Toolbar'
+import { Toolbar, type DocumentFont } from './components/Toolbar'
 import { createHtmlDocument } from './export/html'
 import { useDocument } from './hooks/useDocument'
 import { spaceCjkLatin } from './markdown/cjk'
@@ -46,6 +46,11 @@ type ActivePdfExport = ReturnType<typeof createPreviewBarrier> & {
   controller: AbortController
 }
 
+function storedDocumentFont(): DocumentFont {
+  const value = window.localStorage.getItem('qingshu:document-font')
+  return value === 'serif' || value === 'mono' ? value : 'sans'
+}
+
 export default function App() {
   const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
   const [dark, setDark] = useState(
@@ -54,6 +59,9 @@ export default function App() {
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(false)
   const [autoSpacing, setAutoSpacing] = useState(false)
+  const [documentFont, setDocumentFont] = useState<DocumentFont>(
+    storedDocumentFont,
+  )
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
@@ -83,6 +91,10 @@ export default function App() {
     },
     [],
   )
+
+  useEffect(() => {
+    window.localStorage.setItem('qingshu:document-font', documentFont)
+  }, [documentFont])
 
   const canDiscard = useCallback(
     () =>
@@ -363,6 +375,7 @@ export default function App() {
         dark ? 'theme-dark' : 'theme-light',
         focus ? 'focus-mode' : '',
         a4 ? 'a4-mode' : '',
+        `font-${documentFont}`,
       ].join(' ')}
     >
       <TitleBar
@@ -375,10 +388,12 @@ export default function App() {
         focus={focus}
         a4={a4}
         autoSpacing={autoSpacing}
+        documentFont={documentFont}
         onFile={(command) => void runCommand(command)}
         onFormat={(command) =>
           setFormatRequest((request) => ({ id: (request?.id ?? 0) + 1, command }))
         }
+        onFontChange={setDocumentFont}
         onToggle={toggleOption}
       />
       {focus && !printPreview && (

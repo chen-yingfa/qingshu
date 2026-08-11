@@ -18,6 +18,7 @@ let api: {
 beforeEach(() => {
   menuListener = undefined
   closeIntentListener = undefined
+  window.localStorage.clear()
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(() => ({ matches: false })),
@@ -82,6 +83,28 @@ describe('document replacement', () => {
 })
 
 describe('application safety controls', () => {
+  it('uses sans-serif by default and persists document font choices', () => {
+    const first = render(<App />)
+    const selector = screen.getByRole('combobox', {
+      name: 'Document font',
+    }) as HTMLSelectElement
+
+    expect(selector.value).toBe('sans')
+    expect(first.container.querySelector('.app-shell')?.classList).toContain('font-sans')
+
+    fireEvent.change(selector, { target: { value: 'serif' } })
+    expect(first.container.querySelector('.app-shell')?.classList).toContain('font-serif')
+    expect(window.localStorage.getItem('qingshu:document-font')).toBe('serif')
+
+    first.unmount()
+    const second = render(<App />)
+    expect(
+      (screen.getByRole('combobox', { name: 'Document font' }) as HTMLSelectElement)
+        .value,
+    ).toBe('serif')
+    expect(second.container.querySelector('.app-shell')?.classList).toContain('font-serif')
+  })
+
   it('keeps focus mode escapable by both UI and Escape', () => {
     const { container } = render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Toggle focus mode' }))

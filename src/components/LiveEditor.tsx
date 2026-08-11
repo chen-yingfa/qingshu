@@ -10,6 +10,7 @@ import {
 } from 'react'
 
 import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
+import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
   parseDocument,
   renderDocumentFootnotes,
@@ -104,8 +105,8 @@ function editorBlocks(
   content: string,
   parsedBlocks: MarkdownBlock[],
 ): MarkdownBlock[] {
-  if (parsedBlocks.length === 0 || /\n\s*\n$/u.test(content)) {
-    return [...parsedBlocks, {
+  if (parsedBlocks.length === 0) {
+    return [{
       id: 'empty-tail',
       type: 'paragraph',
       source: '',
@@ -113,7 +114,90 @@ function editorBlocks(
       end: content.length,
     }]
   }
-  return parsedBlocks
+
+  const editable: MarkdownBlock[] = []
+  for (const [index, block] of parsedBlocks.entries()) {
+    editable.push(block)
+    const next = parsedBlocks[index + 1]
+    if (!next) continue
+    const gap = content.slice(block.end, next.start)
+    const endings = Array.from(gap.matchAll(/\r?\n/gu))
+    for (let empty = 2; empty + 1 < endings.length; empty += 2) {
+      const offset = block.end + endings[empty - 1].index! + endings[empty - 1][0].length
+      editable.push({
+        id: `empty-gap-${offset}`,
+        type: 'paragraph',
+        source: '',
+        start: offset,
+        end: offset,
+      })
+    }
+  }
+
+  if (/\n\s*\n$/u.test(content)) {
+    editable.push({
+      id: 'empty-tail',
+      type: 'paragraph',
+      source: '',
+      start: content.length,
+      end: content.length,
+    })
+  }
+  return editable
+}
+
+function containsMath(source: string): boolean {
+  return /(^|[^\\])\${1,2}(?=\S)[\s\S]*?\${1,2}/u.test(source)
+}
+
+function ActiveBlockPreview({ source }: { source: string }) {
+  const code = useMemo(() => parseFencedCode(source), [source])
+  const [mathHtml, setMathHtml] = useState('')
+
+  useEffect(() => {
+    if (code || !containsMath(source)) {
+      setMathHtml('')
+      return
+    }
+    let current = true
+    const timer = window.setTimeout(() => {
+      void renderMarkdown(source).then((html) => {
+        if (current) setMathHtml(html)
+      })
+    }, 80)
+    return () => {
+      current = false
+      window.clearTimeout(timer)
+    }
+  }, [code, source])
+
+  if (code) {
+    const html = highlightCode(code.code, code.language)
+    return (
+      <div className="active-live-preview active-code-preview" aria-label="Live code preview">
+        <div className="preview-label">
+          {code.language || 'Plain text'} · live preview
+        </div>
+        <pre>
+          <code
+            className={`hljs${code.language ? ` language-${code.language}` : ''}`}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        </pre>
+      </div>
+    )
+  }
+
+  if (!mathHtml) return null
+  return (
+    <div className="active-live-preview active-math-preview" aria-label="Live math preview">
+      <div className="preview-label">Math · live preview</div>
+      <div
+        className="rendered-block"
+        dangerouslySetInnerHTML={{ __html: mathHtml }}
+      />
+    </div>
+  )
 }
 
 function FullDocumentPreview({
@@ -337,6 +421,7 @@ export function LiveEditor({
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(active.source)
+  const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
@@ -479,6 +564,59 @@ export function LiveEditor({
       return
     }
 
+    if (fencedCode && event.key === 'Tab') {
+      event.preventDefault()
+      const result = applyInlineFormat(
+        draft,
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        '  ',
+        '',
+      )
+      commitDraft(result.value)
+      afterPaint(() => {
+        textareaRef.current?.setSelectionRange(
+          result.selectionStart,
+          result.selectionEnd,
+        )
+      })
+      return
+    }
+
+    if (
+      fencedCode &&
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !(
+        fencedCode.closed &&
+        textarea.selectionStart === draft.length &&
+        textarea.selectionEnd === draft.length
+      )
+    ) {
+      event.preventDefault()
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      if (!fencedCode.closed && !draft.includes('\n') && start === draft.length) {
+        const nextDraft = `${draft}\n\n${fencedCode.fence}`
+        commitDraft(nextDraft)
+        afterPaint(() => {
+          const caret = draft.length + 1
+          textareaRef.current?.setSelectionRange(caret, caret)
+        })
+        return
+      }
+      const lineStart = draft.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+      const indentation = draft.slice(lineStart, start).match(/^[ \t]*/u)?.[0] ?? ''
+      const insertion = `\n${indentation}`
+      const nextDraft = draft.slice(0, start) + insertion + draft.slice(end)
+      commitDraft(nextDraft)
+      afterPaint(() => {
+        const caret = start + insertion.length
+        textareaRef.current?.setSelectionRange(caret, caret)
+      })
+      return
+    }
+
     if (event.key === 'Backspace' && textarea.selectionStart === 0 && safeActive > 0) {
       event.preventDefault()
       const merged = mergeBlockAtStart(contentRef.current, rangeRef.current.start)
@@ -518,12 +656,18 @@ export function LiveEditor({
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
-      (draft.slice(0, textarea.selectionStart).endsWith('\n') || draft === '')
+      textarea.selectionStart === draft.length &&
+      textarea.selectionEnd === draft.length
     ) {
       event.preventDefault()
-      const start = textarea.selectionStart
-      const nextDraft = `${draft.slice(0, start)}\n${draft.slice(textarea.selectionEnd)}`
-      commitDraft(nextDraft)
+      const insertionPoint = rangeRef.current.end
+      const nextContent =
+        contentRef.current.slice(0, insertionPoint) +
+        '\n\n' +
+        contentRef.current.slice(insertionPoint)
+      contentRef.current = nextContent
+      pendingAcknowledgementRef.current = nextContent
+      onChange(nextContent)
       onActiveBlockChange(safeActive + 1)
     }
   }
@@ -535,45 +679,49 @@ export function LiveEditor({
       ) : (
         blocks.map((block, index) =>
           index === safeActive ? (
-          <textarea
-            key={`active-${safeActive}`}
-            ref={textareaRef}
-            className="source-block"
-            aria-label="Active Markdown block"
-            autoFocus
-            spellCheck
-            value={draft}
-            onChange={(event) => {
-              const textarea = event.currentTarget
-              commitDraft(textarea.value)
-              if (!composingRef.current && autoSpacing) {
-                normalize(
-                  textarea.value,
-                  textarea.selectionStart,
-                  textarea.selectionEnd,
-                )
-              }
-            }}
-            onBlur={(event) =>
-              normalize(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart,
-                event.currentTarget.selectionEnd,
-              )
-            }
-            onCompositionStart={() => {
-              composingRef.current = true
-            }}
-            onCompositionEnd={(event) => {
-              composingRef.current = false
-              normalize(
-                event.currentTarget.value,
-                event.currentTarget.selectionStart,
-                event.currentTarget.selectionEnd,
-              )
-            }}
-            onKeyDown={handleKeyDown}
-          />
+            <div className="active-block" key={`active-${safeActive}`}>
+              <textarea
+                ref={textareaRef}
+                className={
+                  fencedCode ? 'source-block source-block-code' : 'source-block'
+                }
+                aria-label={fencedCode ? 'Active code block' : 'Active Markdown block'}
+                autoFocus
+                spellCheck={!fencedCode}
+                value={draft}
+                onChange={(event) => {
+                  const textarea = event.currentTarget
+                  commitDraft(textarea.value)
+                  if (!composingRef.current && autoSpacing) {
+                    normalize(
+                      textarea.value,
+                      textarea.selectionStart,
+                      textarea.selectionEnd,
+                    )
+                  }
+                }}
+                onBlur={(event) =>
+                  normalize(
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart,
+                    event.currentTarget.selectionEnd,
+                  )
+                }
+                onCompositionStart={() => {
+                  composingRef.current = true
+                }}
+                onCompositionEnd={(event) => {
+                  composingRef.current = false
+                  normalize(
+                    event.currentTarget.value,
+                    event.currentTarget.selectionStart,
+                    event.currentTarget.selectionEnd,
+                  )
+                }}
+                onKeyDown={handleKeyDown}
+              />
+              <ActiveBlockPreview source={draft} />
+            </div>
           ) : (
             <RenderedBlock
               key={block.id}
