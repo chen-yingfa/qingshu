@@ -1315,6 +1315,40 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => expect(textarea.selectionStart).toBe(7))
   })
 
+  it('uses one Markdown parse per auto-spaced keystroke with protected context', async () => {
+    const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
+    const normalize = vi.spyOn(markdownCjk, 'normalizeCjkInput')
+    const protectedTail =
+      ' `代码中文A` and https://example.com/路径/中文A'
+    const source = `中文${protectedTail}`
+    const result = renderEditor(source, { autoSpacing: true })
+    const textarea = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    parse.mockClear()
+
+    fireEvent.change(textarea, {
+      target: {
+        value: `中文text${protectedTail}`,
+        selectionStart: 6,
+        selectionEnd: 6,
+      },
+    })
+
+    expect(parse.mock.calls.length).toBeLessThanOrEqual(1)
+    expect(normalize).toHaveBeenCalledOnce()
+    expect(normalize).toHaveBeenCalledWith(
+      `中文text${protectedTail}`,
+      { start: 0, end: 6 + protectedTail.length },
+      true,
+      expect.any(Array),
+    )
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      `中文 text${protectedTail}`,
+    )
+    await waitFor(() => expect(textarea.selectionStart).toBe(7))
+  })
+
   it('ends composition and normalizes safely when the block blurs', () => {
     const result = renderEditor('中文', { autoSpacing: true })
     const textarea = screen.getByLabelText('Active Markdown block')

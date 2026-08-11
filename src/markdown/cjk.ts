@@ -111,19 +111,11 @@ function destinationRange(
   return { start: start + destinationStart, end: start + index }
 }
 
-function collectProtectedRanges(
+export function protectedMarkdownRanges(
   source: string,
-  editableRange?: SourceRange,
+  tree: MarkdownNode = parseMarkdownAst(source),
 ): SourceRange[] {
-  const tree = parseMarkdownAst(source)
   const ranges: SourceRange[] = collectPresentationRanges(source)
-  if (editableRange) {
-    ranges.push({ start: 0, end: Math.max(0, editableRange.start) })
-    ranges.push({
-      start: Math.min(source.length, editableRange.end),
-      end: source.length,
-    })
-  }
 
   const visit = (node: MarkdownNode) => {
     const start = node.position?.start.offset
@@ -173,12 +165,65 @@ function collectProtectedRanges(
   return merged
 }
 
+export function remapProtectedRanges(
+  before: string,
+  after: string,
+  ranges: readonly SourceRange[],
+): SourceRange[] {
+  let prefix = 0
+  while (prefix < before.length && before[prefix] === after[prefix]) prefix += 1
+  let suffix = 0
+  while (
+    suffix < before.length - prefix &&
+    suffix < after.length - prefix &&
+    before[before.length - suffix - 1] === after[after.length - suffix - 1]
+  ) suffix += 1
+  const previousEnd = before.length - suffix
+  const nextEnd = after.length - suffix
+  const delta = after.length - before.length
+  return ranges.map(range => ({
+    start:
+      range.start <= prefix
+        ? range.start
+        : range.start >= previousEnd
+          ? range.start + delta
+          : prefix,
+    end:
+      range.end < prefix
+        ? range.end
+        : range.end >= previousEnd
+          ? range.end + delta
+          : nextEnd,
+  }))
+}
+
 function transformMarkdownText(
   source: string,
   transform: TextTransform,
   editableRange?: SourceRange,
+  protectedRanges?: readonly SourceRange[],
 ): string {
-  const ranges = collectProtectedRanges(source, editableRange)
+  const ranges = [
+    ...(protectedRanges ?? protectedMarkdownRanges(source)),
+    ...(editableRange
+      ? [
+          { start: 0, end: Math.max(0, editableRange.start) },
+          {
+            start: Math.min(source.length, editableRange.end),
+            end: source.length,
+          },
+        ]
+      : []),
+  ]
+    .filter(range => range.end > range.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+    .reduce<SourceRange[]>((merged, range) => {
+      const previous = merged.at(-1)
+      if (previous && range.start <= previous.end) {
+        previous.end = Math.max(previous.end, range.end)
+      } else merged.push({ ...range })
+      return merged
+    }, [])
   let result = ''
   let index = 0
 
@@ -244,6 +289,7 @@ export function normalizeCjkInput(
   source: string,
   editableRange?: SourceRange,
   autoSpacing = false,
+  protectedRanges?: readonly SourceRange[],
 ): string {
   return transformMarkdownText(
     source,
@@ -252,6 +298,7 @@ export function normalizeCjkInput(
       return autoSpacing ? spacePlainText(normalized) : normalized
     },
     editableRange,
+    protectedRanges,
   )
 }
 

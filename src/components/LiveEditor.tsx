@@ -10,7 +10,11 @@ import {
   useState,
 } from 'react'
 
-import { normalizeCjkInput } from '../markdown/cjk'
+import {
+  normalizeCjkInput,
+  protectedMarkdownRanges,
+  remapProtectedRanges,
+} from '../markdown/cjk'
 import type { EditorSelection } from '../hooks/useDocument'
 import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
@@ -745,6 +749,10 @@ export function LiveEditor({
         : parseDocument(content),
     [content, sourceMode],
   )
+  const protectedRanges = useMemo(
+    () => sourceMode ? [] : protectedMarkdownRanges(content, model.ast),
+    [content, model.ast, sourceMode],
+  )
   const parsedEditorBlocks = useMemo(
     () => editorBlocks(content, model.blocks, currentInsertedBlocks),
     [content, currentInsertedBlocks, model.blocks],
@@ -983,22 +991,32 @@ export function LiveEditor({
       previousSource,
       nearestEol(contentRef.current, rangeRef.current.start),
     )
-    const candidate = replaceBlockSource(
-      contentRef.current,
-      rangeRef.current,
-      sourceValue,
-    )
     const editableRange = {
-      start: rangeRef.current.start,
-      end: rangeRef.current.start + sourceValue.length,
+      start: 0,
+      end: sourceValue.length,
     }
+    const localProtectedRanges = remapProtectedRanges(
+      active.source,
+      sourceValue,
+      protectedRanges
+        .filter(
+          range =>
+            range.start < active.end &&
+            range.end > active.start,
+        )
+        .map(range => ({
+          start: Math.max(0, range.start - active.start),
+          end: Math.min(active.source.length, range.end - active.start),
+        })),
+    )
     const transformedSource = normalizeCjkInput(
-      candidate,
+      sourceValue,
       editableRange,
       autoSpacing,
+      localProtectedRanges,
     )
     const transformedEnd = mappedTransformOffset(
-      candidate,
+      sourceValue,
       transformedSource,
       editableRange.end,
     )
@@ -1007,18 +1025,16 @@ export function LiveEditor({
     )
     if (normalized !== value) {
       const sourceSelectionStart =
-        editableRange.start +
         sourceOffsetForEditorOffset(sourceValue, selectionStart)
       const sourceSelectionEnd =
-        editableRange.start +
         sourceOffsetForEditorOffset(sourceValue, selectionEnd)
       const transformedStart = mappedTransformOffset(
-        candidate,
+        sourceValue,
         transformedSource,
         sourceSelectionStart,
       )
       const transformedSelectionEnd = mappedTransformOffset(
-        candidate,
+        sourceValue,
         transformedSource,
         sourceSelectionEnd,
       )
