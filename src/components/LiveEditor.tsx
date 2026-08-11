@@ -158,18 +158,23 @@ function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
   return parseDocument(`${source}${eol}qingshu-empty-probe`).blocks.length > 1
 }
 
-interface LiveEditorProps {
+interface LiveEditorBaseProps {
   content: string
-  contentRevision?: number
   activeBlock: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
   previewAll?: boolean
-  sourceMode?: boolean
   onPreviewReady?(error?: Error): void
   onChange(content: string): void
   onActiveBlockChange(index: number): void
 }
+
+type LiveEditorProps = LiveEditorBaseProps &
+  (
+    | { sourceMode: true; contentRevision: number }
+    | { sourceMode?: false; contentRevision?: number }
+    | { sourceMode: boolean; contentRevision: number }
+  )
 
 export function replaceBlockSource(
   source: string,
