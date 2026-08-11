@@ -345,6 +345,31 @@ describe('desktop IPC', () => {
     })
   })
 
+  it('keeps a committed save successful when recent chmod fails', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/chmod-warning.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.recentHandle.chmod.mockRejectedValueOnce(
+      new Error('recent chmod failed'),
+    )
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        path: '/notes/chmod-warning.md',
+        content: '# Committed',
+      }),
+    ).resolves.toEqual({
+      canceled: false,
+      path: '/notes/chmod-warning.md',
+    })
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith(
+      '# Committed',
+      'utf8',
+    )
+  })
+
   it('removes a recent file that disappears after canonical validation', async () => {
     const path = '/notes/raced-away.md'
     const missing = Object.assign(new Error('missing parent'), {

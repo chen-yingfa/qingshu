@@ -111,3 +111,113 @@ Status: DONE_WITH_CONCERNS
 - The requested plan file remains an untracked user-provided file and was not
   committed.
 - No push was performed, as explicitly requested.
+
+## Review remediation
+
+Status: DONE_WITH_CONCERNS
+
+### Fixes delivered
+
+- Save As now uses a two-phase protocol: Electron canonically resolves and
+  authorizes the native dialog selection without writing, the renderer rejects
+  any path owned by another live tab, and only then is the authorized save
+  issued. Both clean-owner and dirty-owner collisions preserve both buffers.
+- Open/save success no longer depends on recent-file persistence. Read, atomic
+  write, chmod, and cleanup failures are retained as non-blocking warnings;
+  failed queued writes cannot poison later writes.
+- Recent storage now uses a `0600` exclusive temporary file, file fsync,
+  rename, final `0600` chmod, and directory sync. `ENOENT` and `ENOTDIR` are
+  both missing-path outcomes, and cleanup compares the original stored array
+  with the validated result.
+- Tabs retain source mode and exact forward/backward editor selections. The
+  active editor restores that state after tab remount without adopting another
+  tab's draft state.
+- Horizontal, vertical, mobile, and focus layouts explicitly pin title,
+  toolbar, tab strip, workspace, and status rows.
+- Renderer recent refreshes use monotonically increasing generations, so an
+  older response cannot replace a newer ordering or emit stale warnings.
+- Tabs expose tab/tabpanel ID linkage, roving focus, inactive close buttons
+  outside the tab order, and focus restoration after close.
+- The toolbar recent control implements a true keyboard menu with initial
+  focus, wrapping Arrow navigation, Home/End, Escape focus restoration,
+  menuitem roles, and outside dismissal.
+- Sequential duplicate opens activate before allocating a tab ID or revision
+  map entry.
+
+### Review-fix TDD evidence
+
+1. Save As collision:
+   - RED main:
+     `npm test -- electron/main/index.test.ts -t "already authorized by another tab"`
+     resolved and wrote instead of rejecting.
+   - Further architecture RED:
+     `npm test -- electron/main/index.test.ts -t "canonically authorizes a Save As"`
+     had no two-phase handler.
+   - RED renderer:
+     `npm test -- src/hooks/useDocument.dom.test.tsx -t "Save As collides"`
+     did not perform pre-write live-tab collision checking.
+   - GREEN: main `1 passed`; renderer `2 passed`.
+2. Best-effort atomic recents:
+   - RED read/queue:
+     `npm test -- electron/main/index.test.ts -t "recents cannot be read"`
+     rejected the successful open with `EACCES`.
+   - RED atomic persistence:
+     `npm test -- electron/main/index.test.ts -t "persists canonical recents"`
+     made no exclusive temporary-file write.
+   - RED invalid cleanup and missing parent:
+     focused tests failed for the absent comparison helper and raw `ENOTDIR`.
+   - GREEN: all four focused runs passed; full Electron suite passed.
+3. Duplicate allocation:
+   - RED:
+     `npm test -- src/hooks/useDocument.dom.test.tsx -t "does not consume tab IDs"`
+     produced `tab-4` instead of `tab-3`.
+   - GREEN: `1 passed`.
+4. Per-tab editor view:
+   - RED:
+     `npm test -- src/App.test.tsx -t "restores each tab source mode"`
+     returned to the first tab in the second tab's source mode.
+   - GREEN: `1 passed`.
+5. Grid rows:
+   - RED:
+     `npm test -- src/appearance.test.ts -t "pins workspace rows"`
+     found no explicit row assignments.
+   - GREEN: `3 passed`; horizontal/vertical source/preview/focus integration
+     regression: `2 passed`.
+6. Tab accessibility:
+   - RED: `npm test -- src/components/TabStrip.test.tsx` failed tabpanel
+     linkage and close-focus assertions.
+   - GREEN: `2 passed`; App tabpanel integration `1 passed`.
+7. Recent keyboard menu:
+   - RED: `npm test -- src/components/Toolbar.test.tsx` failed initial focus
+     and outside-dismiss assertions.
+   - GREEN: `2 passed`.
+8. Recent generation ordering:
+   - RED:
+     `npm test -- src/App.test.tsx -t "ignores stale recent"` did not surface
+     the persistence warning and allowed unordered completion.
+   - GREEN: `1 passed`.
+
+### Review-fix commits
+
+- `e20547e` — `fix: reject save-as tab path collisions`
+- `cb29182` — `fix: harden tabs and recent file workflows`
+
+### Review-fix verification
+
+- `npm test`: exit 0; 23 files passed; 282 tests passed.
+- `npm run typecheck`: exit 0; renderer and Electron TypeScript projects
+  passed.
+- `npm run build`: exit 0; Vite renderer/main/preload builds, Electron
+  packaging, and AppImage creation passed.
+- Artifact: `release/2.1.0/Qingshu-2.1.0.AppImage`.
+- Direct AppImage smoke launch could not start because this host lacks
+  `libfuse.so.2`. `APPIMAGE_EXTRACT_AND_RUN=1` extraction fallback exited 0
+  after launching under Xvfb; Electron emitted headless DBus diagnostics.
+
+### Review-fix concerns
+
+- The environment cannot mount AppImages directly without FUSE, so smoke
+  verification used AppImageKit's extraction fallback.
+- Vite continues to report the pre-existing renderer chunk over 500 kB.
+- The user-provided plan file remains untracked and was not modified.
+- No push was performed, as requested.
