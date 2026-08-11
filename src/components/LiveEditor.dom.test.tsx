@@ -1474,3 +1474,25 @@ describe('LiveEditor block reordering', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
   })
 })
+
+describe('LiveEditor source mode', () => {
+  it('edits the canonical document directly and supports Tab indentation', async () => {
+    const result = renderEditor('# Title\n\nBody', { sourceMode: true })
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    source.setSelectionRange(source.value.length, source.value.length)
+
+    fireEvent.keyDown(source, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('# Title\n\nBody  ')
+    await waitFor(() =>
+      expect(source.selectionStart).toBe('# Title\n\nBody  '.length),
+    )
+  })
+
+  it('uses rendered full-document preview instead of source while printing', async () => {
+    renderEditor('# Printed', { sourceMode: true, previewAll: true })
+
+    expect(screen.queryByLabelText('Markdown source')).toBeNull()
+    expect(await screen.findByText('Printed')).not.toBeNull()
+  })
+})

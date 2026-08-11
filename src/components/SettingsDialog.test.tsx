@@ -39,6 +39,9 @@ describe('SettingsDialog', () => {
     })
     expect(onChange.mock.calls.at(-1)?.[0].fontSize).toBe(21)
 
+    fireEvent.click(screen.getByLabelText('Use source mode by default'))
+    expect(onChange.mock.calls.at(-1)?.[0].defaultSourceMode).toBe(true)
+
     fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
       key: 'k',
       ctrlKey: true,

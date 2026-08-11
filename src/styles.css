@@ -511,6 +511,26 @@ button {
   line-height: 1.65;
 }
 
+.source-document {
+  display: block;
+  width: 100%;
+  min-height: max(520px, calc(100vh - 250px));
+  resize: none;
+  overflow: auto;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-family:
+    "SFMono-Regular", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC",
+    monospace;
+  font-size: var(--document-font-size, 17px);
+  line-height: 1.7;
+  tab-size: 2;
+  white-space: pre;
+}
+
 .source-block-code {
   border-bottom-right-radius: 0;
   border-bottom-left-radius: 0;

@@ -119,6 +119,7 @@ export default function App() {
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(settings.defaultA4)
   const [autoSpacing, setAutoSpacing] = useState(settings.autoSpacing)
+  const [sourceMode, setSourceMode] = useState(settings.defaultSourceMode)
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -354,17 +355,19 @@ export default function App() {
       setSettings(next)
       setDark(resolvesDark(next.theme))
       setA4(next.defaultA4)
+      if (next.defaultSourceMode !== sourceMode) setFormatRequest(undefined)
+      setSourceMode(next.defaultSourceMode)
       if (next.autoSpacing && !autoSpacing) {
         const spaced = spaceCjkLatin(state.content)
         if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
       }
       setAutoSpacing(next.autoSpacing)
     },
-    [autoSpacing, dispatch, state.content],
+    [autoSpacing, dispatch, sourceMode, state.content],
   )
 
   const toggleOption = useCallback(
-    (option: 'dark' | 'focus' | 'a4' | 'spacing') => {
+    (option: 'dark' | 'focus' | 'a4' | 'spacing' | 'source') => {
       if (option === 'dark') {
         setDark((value) => {
           const next = !value
@@ -395,6 +398,17 @@ export default function App() {
             autoSpacing: enabled,
           }))
           return enabled
+        })
+      }
+      if (option === 'source') {
+        setFormatRequest(undefined)
+        setSourceMode((value) => {
+          const next = !value
+          setSettings((current) => ({
+            ...current,
+            defaultSourceMode: next,
+          }))
+          return next
         })
       }
     },
@@ -504,6 +518,14 @@ export default function App() {
         run: () => requestFormat('math'),
       },
       {
+        id: 'source-mode',
+        label: 'Toggle source mode',
+        shortcut:
+          formatShortcut(settings.shortcuts.sourceMode) || undefined,
+        keywords: ['markdown', 'raw', 'source', 'editor'],
+        run: () => toggleOption('source'),
+      },
+      {
         id: 'settings',
         label: 'Settings',
         shortcut: formatShortcut(settings.shortcuts.settings) || undefined,
@@ -531,12 +553,16 @@ export default function App() {
         inlineMath: 'math',
       }
       const options: Partial<
-        Record<ShortcutAction, 'dark' | 'focus' | 'a4' | 'spacing'>
+        Record<
+          ShortcutAction,
+          'dark' | 'focus' | 'a4' | 'spacing' | 'source'
+        >
       > = {
         theme: 'dark',
         focus: 'focus',
         a4: 'a4',
         spacing: 'spacing',
+        sourceMode: 'source',
       }
       if (action === 'palette') {
         setPaletteOpen((open) => !open)
@@ -599,7 +625,8 @@ export default function App() {
         ['bold', 'italic', 'inlineCode', 'inlineMath'].includes(action) &&
         !(
           event.target instanceof HTMLTextAreaElement &&
-          event.target.classList.contains('source-block')
+          (event.target.classList.contains('source-block') ||
+            event.target.classList.contains('source-document'))
         )
       ) {
         return
@@ -624,6 +651,7 @@ export default function App() {
         dark ? 'theme-dark' : 'theme-light',
         focus ? 'focus-mode' : '',
         a4 ? 'a4-mode' : '',
+        sourceMode ? 'source-mode' : '',
         `font-${settings.font}`,
       ].join(' ')}
       style={
@@ -642,6 +670,7 @@ export default function App() {
         focus={focus}
         a4={a4}
         autoSpacing={autoSpacing}
+        sourceMode={sourceMode}
         documentFont={settings.font}
         onFile={(command) => void runCommand(command)}
         onFormat={requestFormat}
@@ -667,6 +696,7 @@ export default function App() {
             activeBlock={state.activeBlock}
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
+            sourceMode={sourceMode}
             previewAll={printPreview}
             onPreviewReady={handlePreviewReady}
             onChange={(content) => dispatch({ type: 'edit', content })}

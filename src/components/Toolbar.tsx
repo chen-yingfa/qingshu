@@ -9,12 +9,13 @@ interface ToolbarProps {
   focus: boolean
   a4: boolean
   autoSpacing: boolean
+  sourceMode: boolean
   documentFont: DocumentFont
   onFile(command: 'new' | 'open' | 'save' | 'save-as' | 'export-html' | 'export-pdf'): void
   onFormat(command: FormatCommand): void
   onFontChange(font: DocumentFont): void
   onSettings(): void
-  onToggle(option: 'dark' | 'focus' | 'a4' | 'spacing'): void
+  onToggle(option: 'dark' | 'focus' | 'a4' | 'spacing' | 'source'): void
 }
 
 const formats: Array<[FormatCommand, IconName, string]> = [
@@ -58,6 +59,7 @@ export function Toolbar({
   focus,
   a4,
   autoSpacing,
+  sourceMode,
   documentFont,
   onFile,
   onFormat,
@@ -107,6 +109,12 @@ export function Toolbar({
           icon="spacing"
           active={autoSpacing}
           onClick={() => onToggle('spacing')}
+        />
+        <ToolButton
+          label="Toggle source mode"
+          icon="source"
+          active={sourceMode}
+          onClick={() => onToggle('source')}
         />
         <ToolButton
           label="Toggle A4 preview"

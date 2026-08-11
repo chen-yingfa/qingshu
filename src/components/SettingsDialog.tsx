@@ -199,6 +199,16 @@ export function SettingsDialog({
             <label className="settings-check">
               <input
                 type="checkbox"
+                checked={settings.defaultSourceMode}
+                onChange={(event) =>
+                  update({ defaultSourceMode: event.target.checked })
+                }
+              />
+              Use source mode by default
+            </label>
+            <label className="settings-check">
+              <input
+                type="checkbox"
                 checked={settings.autoSpacing}
                 onChange={(event) =>
                   update({ autoSpacing: event.target.checked })

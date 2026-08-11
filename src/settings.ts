@@ -18,11 +18,13 @@ export type ShortcutAction =
   | 'focus'
   | 'a4'
   | 'spacing'
+  | 'sourceMode'
   | 'settings'
 
 export interface AppSettings {
   theme: ThemePreference
   defaultA4: boolean
+  defaultSourceMode: boolean
   autoSpacing: boolean
   font: DocumentFont
   fontSize: number
@@ -49,11 +51,13 @@ export const SHORTCUT_ACTIONS: Array<{
   { id: 'focus', label: 'Toggle focus mode' },
   { id: 'a4', label: 'Toggle A4 preview' },
   { id: 'spacing', label: 'Toggle automatic CJK spacing' },
+  { id: 'sourceMode', label: 'Toggle source mode' },
 ]
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   defaultA4: false,
+  defaultSourceMode: false,
   autoSpacing: false,
   font: 'sans',
   fontSize: 17,
@@ -74,6 +78,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     focus: '',
     a4: '',
     spacing: '',
+    sourceMode: 'Mod+Shift+E',
   },
 }
 
@@ -97,6 +102,9 @@ export function loadSettings(
       settings.theme = value.theme
     }
     if (typeof value.defaultA4 === 'boolean') settings.defaultA4 = value.defaultA4
+    if (typeof value.defaultSourceMode === 'boolean') {
+      settings.defaultSourceMode = value.defaultSourceMode
+    }
     if (typeof value.autoSpacing === 'boolean') {
       settings.autoSpacing = value.autoSpacing
     }

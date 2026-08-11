@@ -391,6 +391,54 @@ describe('commands and operation feedback', () => {
     await waitFor(() => expect(editor.value).toBe('**word**'))
   })
 
+  it('round-trips direct full-document edits through source mode', async () => {
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '# Original' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    expect(source.value).toBe('# Original')
+    fireEvent.change(source, {
+      target: { value: '# Changed\n\nDirect **Markdown**' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('# Changed'),
+    )
+    await waitFor(() =>
+      expect(document.querySelector('.editor')?.textContent).toContain(
+        'Direct Markdown',
+      ),
+    )
+  })
+
+  it('toggles source mode with its default hotkey', () => {
+    render(<App />)
+
+    fireEvent.keyDown(window, {
+      key: 'e',
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    expect(screen.getByLabelText('Markdown source')).not.toBeNull()
+  })
+
+  it('loads source mode as a persisted editor default', () => {
+    window.localStorage.setItem(
+      'qingshu:settings:v1',
+      JSON.stringify({ defaultSourceMode: true }),
+    )
+
+    render(<App />)
+    expect(screen.getByLabelText('Markdown source')).not.toBeNull()
+  })
+
   it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {
     const { container } = render(<App />)
 
@@ -440,6 +488,7 @@ describe('commands and operation feedback', () => {
       'Italic',
       'Inline code',
       'Inline math',
+      'Toggle source mode',
       'Settings',
     ]) {
       expect(
@@ -452,6 +501,11 @@ describe('commands and operation feedback', () => {
     expect(
       screen.getByRole('option', {
         name: /^Inline math, Ctrl\+Shift\+M$/,
+      }),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('option', {
+        name: /^Toggle source mode, Ctrl\+Shift\+E$/,
       }),
     ).not.toBeNull()
     fireEvent.click(

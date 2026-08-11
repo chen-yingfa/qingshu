@@ -8,6 +8,7 @@ in the repository.
 ## Features
 
 - Source-backed block editing with sanitized live preview.
+- Full-document source mode for editing canonical Markdown directly.
 - GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks, and
   footnotes.
 - Inline and display mathematics rendered with bundled KaTeX typography,
@@ -59,6 +60,7 @@ directives and component blocks unchanged.
 | `Ctrl+I` | Italic |
 | `Ctrl+Shift+C` | Inline code |
 | `Ctrl+Shift+M` | Inline math |
+| `Ctrl+Shift+E` | Toggle full-document source mode |
 | `Ctrl+,` | Open settings |
 | `Escape` | Close the command palette or leave focus mode |
 | `↑` / `↓`, `Enter`, `Escape` | Navigate, run, or dismiss the palette |

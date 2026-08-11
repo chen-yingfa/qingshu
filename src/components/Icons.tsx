@@ -18,6 +18,7 @@ export type IconName =
   | 'page'
   | 'spacing'
   | 'settings'
+  | 'source'
   | 'minimize'
   | 'maximize'
   | 'close'
@@ -40,6 +41,7 @@ const paths: Record<IconName, string> = {
   page: 'M6 3h9l3 3v15H6zM15 3v4h4',
   spacing: 'M4 7h16M4 17h16M8 4 4 7l4 3m8-6 4 3-4 3m-8 4-4 3 4 3m8-6 4 3-4 3',
   settings: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  source: 'M8 6 3 12l5 6m8-12 5 6-5 6M14 3l-4 18',
   minimize: 'M5 12h14',
   maximize: 'M5 5h14v14H5z',
   close: 'm6 6 12 12M18 6 6 18',

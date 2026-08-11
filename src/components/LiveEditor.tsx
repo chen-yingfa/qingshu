@@ -157,6 +157,7 @@ interface LiveEditorProps {
   formatRequest?: FormatRequest
   autoSpacing?: boolean
   previewAll?: boolean
+  sourceMode?: boolean
   onPreviewReady?(error?: Error): void
   onChange(content: string): void
   onActiveBlockChange(index: number): void
@@ -706,6 +707,89 @@ function formattedValue(
   }
 }
 
+function DocumentSourceEditor({
+  content,
+  formatRequest,
+  onChange,
+}: {
+  content: string
+  formatRequest?: FormatRequest
+  onChange(content: string): void
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const handledFormatRef = useRef(0)
+  const [draft, setDraft] = useState(content)
+  const parentContentRef = useRef(content)
+  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    if (content === parentContentRef.current) return
+    const acknowledged = pendingAcknowledgementRef.current === content
+    parentContentRef.current = content
+    pendingAcknowledgementRef.current = undefined
+    if (!acknowledged) setDraft(content)
+  }, [content])
+
+  const commit = (value: string) => {
+    setDraft(value)
+    pendingAcknowledgementRef.current = value
+    onChange(value)
+  }
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (
+      !textarea ||
+      !formatRequest ||
+      formatRequest.id === handledFormatRef.current
+    ) {
+      return
+    }
+    handledFormatRef.current = formatRequest.id
+    const result = formattedValue(
+      formatRequest.command,
+      draft,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+    )
+    commit(result.value)
+    afterPaint(() => {
+      textarea.focus()
+      textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
+    })
+  }, [draft, formatRequest, onChange])
+
+  return (
+    <textarea
+      ref={textareaRef}
+      className="source-document"
+      aria-label="Markdown source"
+      autoFocus
+      spellCheck={false}
+      value={draft}
+      onChange={(event) => commit(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return
+        event.preventDefault()
+        const result = applyInlineFormat(
+          draft,
+          event.currentTarget.selectionStart,
+          event.currentTarget.selectionEnd,
+          '  ',
+          '',
+        )
+        commit(result.value)
+        afterPaint(() =>
+          textareaRef.current?.setSelectionRange(
+            result.selectionStart,
+            result.selectionEnd,
+          ),
+        )
+      }}
+    />
+  )
+}
+
 function BlockDragHandle({
   index,
   onPointerDown,
@@ -783,6 +867,7 @@ export function LiveEditor({
   formatRequest,
   autoSpacing = false,
   previewAll = false,
+  sourceMode = false,
   onPreviewReady,
   onChange,
   onActiveBlockChange,
@@ -1508,6 +1593,12 @@ export function LiveEditor({
     >
       {previewAll ? (
         <FullDocumentPreview content={content} onReady={onPreviewReady} />
+      ) : sourceMode ? (
+        <DocumentSourceEditor
+          content={content}
+          formatRequest={formatRequest}
+          onChange={onChange}
+        />
       ) : (
         <>
           {blocks.map((block, index) => {
