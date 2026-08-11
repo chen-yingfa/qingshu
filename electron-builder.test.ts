@@ -9,7 +9,7 @@ describe('desktop package metadata', () => {
 
     expect(config.appId).toBe('com.qingshu.editor')
     expect(config.productName).toBe('Qingshu')
-    expect(config.files).toContain('!node_modules{,/**/*}')
+    expect(config.files).toContain('!node_modules/**')
     expect(config.mac.icon).toBe('build/icon.icns')
     expect(config.win.icon).toBe('build/icon.ico')
     expect(config.win.target).toContainEqual({
