@@ -223,6 +223,7 @@ export function useDocument(defaultSourceMode = false) {
   const tabId = useRef(1)
   const contentRevisions = useRef(new Map<string, number>([['tab-1', 0]]))
   const latestSaveRequests = useRef(new Map<string, number>())
+  const activeSaveTokens = useRef(new Map<string, Set<string>>())
   const tabLifetimes = useRef(new Map<string, number>([['tab-1', 0]]))
   const tabsRef = useRef(tabsState)
   const pathOwners = useRef(new Map<string, string>())
@@ -414,6 +415,10 @@ export function useDocument(defaultSourceMode = false) {
         return { status: 'error', message } as const
       }
       const currentRequest = ++requestId.current
+      const saveToken = `${activeTabId}:${currentRequest}`
+      const tabSaveTokens = activeSaveTokens.current.get(activeTabId) ?? new Set()
+      tabSaveTokens.add(saveToken)
+      activeSaveTokens.current.set(activeTabId, tabSaveTokens)
       latestSaveRequests.current.set(activeTabId, currentRequest)
       dispatchTabs({
         type: 'document',
@@ -424,6 +429,7 @@ export function useDocument(defaultSourceMode = false) {
         const result = await window.qingshu.saveFile({
           content,
           path: savePath,
+          saveToken,
         })
         if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           if (!result.canceled && result.warning) {
@@ -488,6 +494,11 @@ export function useDocument(defaultSourceMode = false) {
         })
         return { status: 'error', message } as const
       } finally {
+        const remainingTokens = activeSaveTokens.current.get(activeTabId)
+        remainingTokens?.delete(saveToken)
+        if (remainingTokens?.size === 0) {
+          activeSaveTokens.current.delete(activeTabId)
+        }
         releasePath(savePath, reservation)
       }
     },
@@ -498,10 +509,28 @@ export function useDocument(defaultSourceMode = false) {
     dispatchTabs({ type: 'activate-tab', tabId })
   }, [dispatchTabs])
 
-  const closeTab = useCallback((tabId: string) => {
+  const cancelTabSaves = useCallback(async (tabId: string) => {
+    const tokens = [...(activeSaveTokens.current.get(tabId) ?? [])]
+    if (tokens.length === 0) return
+    await Promise.all(tokens.map(token => window.qingshu.cancelSave(token)))
+  }, [])
+
+  const cancelAllSaves = useCallback(async () => {
+    const tokens = [...activeSaveTokens.current.values()].flatMap(tokens => [
+      ...tokens,
+    ])
+    await Promise.all(tokens.map(token => window.qingshu.cancelSave(token)))
+  }, [])
+
+  const closeTab = useCallback(async (tabId: string) => {
     const closing = tabsRef.current.tabs.find((tab) => tab.id === tabId)
+    if (!closing) return
     const resetsOnlyTab = tabsRef.current.tabs.length === 1 && Boolean(closing)
     const nextLifetime = (tabLifetimes.current.get(tabId) ?? 0) + 1
+    tabLifetimes.current.set(tabId, nextLifetime)
+    latestSaveRequests.current.delete(tabId)
+    await cancelTabSaves(tabId)
+    if (!tabsRef.current.tabs.some(tab => tab.id === tabId)) return
     if (closing?.path && pathOwners.current.get(closing.path) === tabId) {
       pathOwners.current.delete(closing.path)
     }
@@ -512,12 +541,13 @@ export function useDocument(defaultSourceMode = false) {
     })
     contentRevisions.current.delete(tabId)
     latestSaveRequests.current.delete(tabId)
+    activeSaveTokens.current.delete(tabId)
     tabLifetimes.current.delete(tabId)
     if (resetsOnlyTab) {
       contentRevisions.current.set(tabId, 0)
       tabLifetimes.current.set(tabId, nextLifetime)
     }
-  }, [defaultSourceMode, dispatchTabs])
+  }, [cancelTabSaves, defaultSourceMode, dispatchTabs])
 
   return {
     state,
@@ -525,6 +555,7 @@ export function useDocument(defaultSourceMode = false) {
     tabs: tabsState.tabs,
     activeTabId: tabsState.activeTabId,
     activateTab,
+    cancelAllSaves,
     closeTab,
     newDocument,
     openDocument,

@@ -37,7 +37,14 @@ import {
   type AppSettings,
   type ShortcutAction,
 } from './settings'
-import type { MenuCommand } from './types/electron'
+
+type FileCommand =
+  | 'new'
+  | 'open'
+  | 'save'
+  | 'save-as'
+  | 'export-html'
+  | 'export-pdf'
 
 function filename(path: string): string {
   return path.split(/[\\/]/).at(-1) || path
@@ -119,6 +126,7 @@ export default function App() {
     tabs,
     activeTabId,
     activateTab,
+    cancelAllSaves,
     closeTab,
     newDocument,
     openDocument,
@@ -286,7 +294,7 @@ export default function App() {
   )
 
   const runCommand = useCallback(
-    async (command: MenuCommand) => {
+    async (command: FileCommand) => {
       switch (command) {
         case 'new':
           newDocument()
@@ -501,7 +509,7 @@ export default function App() {
     handleCloseTab,
   }
   const toolbarFile = useCallback(
-    (command: MenuCommand) => void shellActionsRef.current.runCommand(command),
+    (command: FileCommand) => void shellActionsRef.current.runCommand(command),
     [],
   )
   const toolbarRecent = useCallback(
@@ -694,7 +702,7 @@ export default function App() {
 
   const executeShortcutAction = useCallback(
     (action: ShortcutAction) => {
-      const menuCommands: Partial<Record<ShortcutAction, MenuCommand>> = {
+      const menuCommands: Partial<Record<ShortcutAction, FileCommand>> = {
         new: 'new',
         open: 'open',
         save: 'save',
@@ -767,16 +775,20 @@ export default function App() {
     ],
   )
 
-  useEffect(() => window.qingshu.onMenuCommand((command) => void runCommand(command)), [
-    runCommand,
-  ])
-
   useEffect(
     () =>
       window.qingshu.onCloseIntent(() => {
-        void window.qingshu.respondToClose(canDiscard())
+        const confirmed = canDiscard()
+        if (!confirmed) {
+          void window.qingshu.respondToClose(false)
+          return
+        }
+        void cancelAllSaves().then(
+          () => window.qingshu.respondToClose(true),
+          () => window.qingshu.respondToClose(false),
+        )
       }),
-    [canDiscard],
+    [canDiscard, cancelAllSaves],
   )
 
   useEffect(() => {

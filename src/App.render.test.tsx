@@ -55,7 +55,6 @@ beforeEach(() => {
   })
   window.qingshu = {
     listRecentFiles: vi.fn().mockResolvedValue({ paths: [], removed: [] }),
-    onMenuCommand: vi.fn(() => vi.fn()),
     onCloseIntent: vi.fn(() => vi.fn()),
   } as unknown as QingshuApi
 })

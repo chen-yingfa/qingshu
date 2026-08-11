@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ExportHtmlRequest,
-  MenuCommand,
   QingshuApi,
   WindowAction,
 } from '../../src/types/electron'
@@ -13,6 +12,7 @@ const api: QingshuApi = {
   openRecentFile: path =>
     ipcRenderer.invoke('qingshu:open-recent-file', path),
   saveFile: request => ipcRenderer.invoke('qingshu:save-file', request),
+  cancelSave: saveToken => ipcRenderer.invoke('qingshu:cancel-save', saveToken),
   exportHtml: (request: ExportHtmlRequest) =>
     ipcRenderer.invoke('qingshu:export-html', request),
   exportPdf: () => ipcRenderer.invoke('qingshu:export-pdf'),
@@ -26,13 +26,6 @@ const api: QingshuApi = {
     const handler = () => listener()
     ipcRenderer.on('qingshu:close-intent', handler)
     return () => ipcRenderer.removeListener('qingshu:close-intent', handler)
-  },
-  onMenuCommand: listener => {
-    const handler = (_event: Electron.IpcRendererEvent, command: MenuCommand) => {
-      listener(command)
-    }
-    ipcRenderer.on('qingshu:menu-command', handler)
-    return () => ipcRenderer.removeListener('qingshu:menu-command', handler)
   },
 }
 

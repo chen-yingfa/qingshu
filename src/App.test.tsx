@@ -11,9 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App, { formatShortcut, showExportLabel } from './App'
-import type { MenuCommand, QingshuApi } from './types/electron'
+import type { QingshuApi } from './types/electron'
 
-let menuListener: ((command: MenuCommand) => void) | undefined
 let closeIntentListener: (() => void) | undefined
 let api: {
   [Key in keyof QingshuApi]: ReturnType<typeof vi.fn>
@@ -23,7 +22,6 @@ let api: {
 }
 
 beforeEach(() => {
-  menuListener = undefined
   closeIntentListener = undefined
   window.localStorage.clear()
   Object.defineProperty(window, 'matchMedia', {
@@ -39,6 +37,7 @@ beforeEach(() => {
     listRecentFiles: vi.fn().mockResolvedValue({ paths: [], removed: [] }),
     openRecentFile: vi.fn(),
     saveFile: vi.fn(),
+    cancelSave: vi.fn().mockResolvedValue(undefined),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
     showItemInFolder: vi.fn(),
@@ -48,13 +47,14 @@ beforeEach(() => {
       closeIntentListener = listener
       return vi.fn()
     }),
-    onMenuCommand: vi.fn((listener: (command: MenuCommand) => void) => {
-      menuListener = listener
-      return vi.fn()
-    }),
   }
   window.qingshu = api as unknown as QingshuApi
 })
+
+function runPaletteCommand(label: string): void {
+  fireEvent.keyDown(window, { key: 'p', ctrlKey: true })
+  fireEvent.click(screen.getByRole('option', { name: label }))
+}
 
 afterEach(() => {
   cleanup()
@@ -173,10 +173,10 @@ describe('document tabs', () => {
     fireEvent.click(
       screen.getAllByRole('button', { name: 'Close Untitled' })[0],
     )
-    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1))
   })
 
-  it('switches and closes tabs with standard keyboard shortcuts', () => {
+  it('switches and closes tabs with standard keyboard shortcuts', async () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'New document' }))
     fireEvent.click(screen.getByRole('button', { name: 'New document' }))
@@ -201,7 +201,7 @@ describe('document tabs', () => {
       key: 'w',
       ctrlKey: true,
     })
-    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
   })
 
   it('loads vertical tab placement and persists changes from Settings', () => {
@@ -539,7 +539,7 @@ describe('application safety controls', () => {
     expect(api.respondToClose).toHaveBeenCalledWith(false)
   })
 
-  it('distinguishes rejected and confirmed native close intents', () => {
+  it('distinguishes rejected and confirmed native close intents', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<App />)
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
@@ -552,7 +552,9 @@ describe('application safety controls', () => {
 
     confirm.mockReturnValue(true)
     closeIntentListener?.()
-    expect(api.respondToClose).toHaveBeenLastCalledWith(true)
+    await waitFor(() =>
+      expect(api.respondToClose).toHaveBeenLastCalledWith(true),
+    )
   })
 
   it('switches to one full-document preview before PDF export', async () => {
@@ -571,7 +573,7 @@ describe('application safety controls', () => {
       },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Toggle focus mode' }))
-    menuListener?.('export-pdf')
+    runPaletteCommand('Export PDF')
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledTimes(1))
     expect(screen.queryByLabelText('Active Markdown block')).toBeNull()
@@ -609,7 +611,7 @@ describe('application safety controls', () => {
       fireEvent.change(screen.getByLabelText('Active Markdown block'), {
         target: { value: '![Diagram](https://example.com/diagram.png)' },
       })
-      menuListener?.('export-pdf')
+      runPaletteCommand('Export PDF')
 
       const image = await screen.findByRole('img', { name: 'Diagram' })
       Object.defineProperty(image, 'complete', { configurable: true, value: false })
@@ -649,9 +651,9 @@ describe('application safety controls', () => {
     )
     render(<App />)
 
-    menuListener?.('export-pdf')
+    runPaletteCommand('Export PDF')
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
-    menuListener?.('export-pdf')
+    runPaletteCommand('Export PDF')
 
     const feedback = await screen.findByText('PDF export is already in progress.')
     expect(feedback.closest('.toast-error')).not.toBeNull()
@@ -968,7 +970,7 @@ describe('commands and operation feedback', () => {
     expect((await screen.findByRole('status')).textContent).toContain('Saved saved.md')
 
     api.exportHtml.mockRejectedValue(new Error('Disk unavailable'))
-    menuListener?.('export-html')
+    runPaletteCommand('Export HTML')
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
     const alerts = await screen.findAllByRole('alert')
     expect(alerts).toHaveLength(1)
@@ -1121,7 +1123,7 @@ describe('commands and operation feedback', () => {
       target: { value: '| A | B |\n| - | - |\n| 1 | 2 |\n\n$E=mc^2$' },
     })
 
-    menuListener?.('export-html')
+    runPaletteCommand('Export HTML')
 
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
     const request = api.exportHtml.mock.calls[0][0] as { html: string }
@@ -1141,7 +1143,7 @@ describe('commands and operation feedback', () => {
     api.showItemInFolder.mockRejectedValue(new Error('Exported file is missing'))
     render(<App />)
 
-    menuListener?.('export-html')
+    runPaletteCommand('Export HTML')
     fireEvent.click(await screen.findByRole('button', { name: /Show in/ }))
 
     expect((await screen.findByRole('alert')).textContent).toContain(

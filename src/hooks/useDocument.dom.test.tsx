@@ -11,11 +11,11 @@ afterEach(() => {
 })
 
 describe('useDocument save lifecycle', () => {
-  it('preserves the configured source mode when resetting the only tab', () => {
+  it('preserves the configured source mode when resetting the only tab', async () => {
     const { result } = renderHook(() => useDocument(true))
     expect(result.current.state.sourceMode).toBe(true)
 
-    act(() => result.current.closeTab('tab-1'))
+    await act(() => result.current.closeTab('tab-1'))
 
     expect(result.current.state.sourceMode).toBe(true)
   })
@@ -44,6 +44,7 @@ describe('useDocument save lifecycle', () => {
     expect(saveFile).toHaveBeenCalledWith({
       content: '# Draft',
       path: '/notes/ordinary-save.md',
+      saveToken: expect.any(String),
     })
   })
 
@@ -84,6 +85,7 @@ describe('useDocument save lifecycle', () => {
     expect(saveFile).toHaveBeenCalledWith({
       content: '# Second',
       path: '/notes/shared.md',
+      saveToken: expect.any(String),
     })
     await expect(firstSave).resolves.toEqual({
       status: 'error',
@@ -134,7 +136,7 @@ describe('useDocument save lifecycle', () => {
     act(() => {
       save = result.current.saveDocument(true)
     })
-    act(() => result.current.closeTab('tab-2'))
+    await act(() => result.current.closeTab('tab-2'))
     finishSelection({ canceled: false, path: '/notes/closed.md' })
 
     await expect(save).resolves.toEqual({ status: 'superseded' })
