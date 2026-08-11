@@ -19,6 +19,9 @@ describe('ToastRegion', () => {
 
     render(<ToastRegion toasts={toasts} onDismiss={vi.fn()} />)
 
+    expect(screen.getByLabelText('Notifications').getAttribute('aria-live')).toBe(
+      'polite',
+    )
     expect(screen.getByRole('status').textContent).toContain('Saved note.md')
     expect(screen.getByRole('alert').textContent).toContain('Save failed')
     expect(

@@ -42,4 +42,14 @@ describe('TitleBar', () => {
     expect(brand.style.marginLeft).toBe('')
     expect(brand.textContent).toBe('Q')
   })
+
+  it('includes dirty state in the document title text', () => {
+    const { container } = render(
+      <TitleBar path="/notes/draft.md" dirty onClose={vi.fn()} />,
+    )
+
+    expect(container.querySelector('.document-title')?.textContent).toBe(
+      'draft.md — modified',
+    )
+  })
 })

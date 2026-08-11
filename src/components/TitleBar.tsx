@@ -32,6 +32,7 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
       )}
       <div className="document-title" title={path ?? 'Untitled document'}>
         {name}
+        {dirty && ' — modified'}
         {dirty && <span className="dirty-indicator" aria-label="Unsaved changes" />}
       </div>
       {!usesNativeControls && <div className="window-controls">

@@ -54,6 +54,26 @@ describe('fuzzyFilterCommands', () => {
 })
 
 describe('CommandPalette keyboard interaction', () => {
+  it('uses safe option IDs and a complete combobox relationship', () => {
+    const available = commands()
+    available.push({
+      id: 'recent:/notes/2026 draft #1.md',
+      label: 'Open draft',
+      keywords: ['recent'],
+      run: vi.fn(),
+    })
+    render(<CommandPalette commands={available} onDismiss={vi.fn()} />)
+    const input = screen.getByRole('combobox', { name: 'Search commands' })
+    fireEvent.change(input, { target: { value: 'draft' } })
+    const activeId = input.getAttribute('aria-activedescendant')!
+
+    expect(input.getAttribute('aria-haspopup')).toBe('listbox')
+    expect(document.getElementById(activeId)).toBe(
+      screen.getByRole('option', { name: 'Open draft' }),
+    )
+    expect(activeId).not.toMatch(/[\\/#\s]/u)
+  })
+
   it('moves selection with arrows and executes the selected command with Enter', () => {
     const available = commands()
     const onDismiss = vi.fn()

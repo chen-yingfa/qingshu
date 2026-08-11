@@ -73,7 +73,8 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
-  const listId = useId()
+  const reactId = useId()
+  const listId = `command-list-${reactId.replace(/[^a-zA-Z0-9_-]/gu, '-')}`
   const filtered = useMemo(
     () => fuzzyFilterCommands(commands, query),
     [commands, query],
@@ -155,10 +156,13 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
             role="combobox"
             aria-label="Search commands"
             aria-expanded="true"
+            aria-haspopup="listbox"
             aria-autocomplete="list"
             aria-controls={listId}
             aria-activedescendant={
-              filtered[selectedIndex] ? `${listId}-${filtered[selectedIndex].id}` : undefined
+              filtered[selectedIndex]
+                ? `${listId}-option-${selectedIndex}`
+                : undefined
             }
             autoComplete="off"
             spellCheck={false}
@@ -173,7 +177,7 @@ export function CommandPalette({ commands, onDismiss }: CommandPaletteProps) {
             filtered.map((command, index) => (
               <button
                 key={command.id}
-                id={`${listId}-${command.id}`}
+                id={`${listId}-option-${index}`}
                 className={index === selectedIndex ? 'command-item is-selected' : 'command-item'}
                 type="button"
                 role="option"

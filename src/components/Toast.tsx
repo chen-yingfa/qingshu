@@ -65,7 +65,12 @@ interface ToastRegionProps {
 
 export function ToastRegion({ toasts, onDismiss, duration = 4200 }: ToastRegionProps) {
   return (
-    <div className="toast-region" aria-label="Notifications">
+    <div
+      className="toast-region"
+      aria-label="Notifications"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} duration={duration} onDismiss={onDismiss} />
       ))}

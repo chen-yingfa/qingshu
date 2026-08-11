@@ -97,6 +97,7 @@ export function SettingsDialog({
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault()
+            event.stopPropagation()
             onDismiss()
           } else if (event.key === 'Tab') {
             const controls = Array.from(

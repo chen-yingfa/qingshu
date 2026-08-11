@@ -106,4 +106,23 @@ describe('SettingsDialog', () => {
     fireEvent.keyDown(bold, { key: 'Escape' })
     expect(onDismiss).toHaveBeenCalledOnce()
   })
+
+  it('contains Escape so it only dismisses the settings dialog', () => {
+    const onDismiss = vi.fn()
+    const outside = vi.fn()
+    window.addEventListener('keydown', outside)
+    render(
+      <SettingsDialog
+        settings={loadSettings(null)}
+        onChange={vi.fn()}
+        onDismiss={onDismiss}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+
+    expect(onDismiss).toHaveBeenCalledOnce()
+    expect(outside).not.toHaveBeenCalled()
+    window.removeEventListener('keydown', outside)
+  })
 })
