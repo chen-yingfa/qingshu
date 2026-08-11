@@ -21,6 +21,7 @@ describe('settings', () => {
         defaultA4: true,
         tabOrientation: 'vertical',
         autoSpacing: true,
+        cjkShortcuts: false,
         shortcuts: { bold: 'Ctrl+Shift+B', save: 42 },
       }),
     )
@@ -32,6 +33,7 @@ describe('settings', () => {
       defaultA4: true,
       tabOrientation: 'vertical',
       autoSpacing: true,
+      cjkShortcuts: false,
     })
     expect(loaded.shortcuts.bold).toBe('Ctrl+Shift+B')
     expect(loaded.shortcuts.save).toBe(DEFAULT_SETTINGS.shortcuts.save)

@@ -39,6 +39,7 @@ import {
   nearestEol,
   restoreSourceEols,
   sourceOffsetForEditorOffset,
+  textReplacement,
   toEditorValue,
   type FormatCommand,
   type FormatRequest,
@@ -53,6 +54,13 @@ export {
 interface SourceRange {
   start: number
   end: number
+}
+
+interface MathEnterToken {
+  revision: number
+  value: string
+  caret: number
+  session: number
 }
 
 export interface InsertedBlock {
@@ -788,7 +796,13 @@ export function LiveEditor({
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
   const codeTabEscapeRef = useRef(false)
-  const mathEnterArmedRef = useRef(false)
+  const mathEnterTokenRef = useRef<MathEnterToken | null>(null)
+  const draftRevisionRef = useRef(0)
+  const editorSessionRef = useRef(0)
+  const nativeInputRef = useRef<{
+    expectedValue: string
+    observed: boolean
+  } | null>(null)
   const previousActiveRef = useRef(safeActive)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
@@ -813,7 +827,9 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
-    mathEnterArmedRef.current = false
+    mathEnterTokenRef.current = null
+    draftRevisionRef.current += 1
+    editorSessionRef.current += 1
     setActiveInputFocused(document.activeElement === textareaRef.current)
     setEditingBoundary(null)
     setActiveSession((session) => session + 1)
@@ -960,16 +976,58 @@ export function LiveEditor({
       end: previous.start + sourceValue.length,
     })
     setDraft(value)
+    draftRevisionRef.current += 1
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
     pendingAcknowledgementRef.current = nextContent
     onChange(nextContent)
   }
 
+  const applyNativeTextareaEdit = (
+    before: string,
+    value: string,
+    selectionStart: number,
+    selectionEnd = selectionStart,
+    afterCommit?: () => void,
+    afterSelection = false,
+  ) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const change = textReplacement(before, value)
+    textarea.focus()
+    textarea.setSelectionRange(change.start, change.end)
+    const tracked = { expectedValue: value, observed: false }
+    nativeInputRef.current = tracked
+    const nativeApplied =
+      typeof document.execCommand === 'function' &&
+      document.execCommand('insertText', false, change.replacement)
+    if (!nativeApplied) {
+      nativeInputRef.current = null
+      textarea.setRangeText(
+        change.replacement,
+        change.start,
+        change.end,
+        'preserve',
+      )
+      commitDraft(textarea.value)
+    } else if (!tracked.observed) {
+      commitDraft(value)
+    }
+    nativeInputRef.current = null
+    const deferCommitCallback = afterSelection && nativeApplied
+    if (!deferCommitCallback) afterCommit?.()
+    afterPaint(() => {
+      textarea.focus()
+      textarea.setSelectionRange(selectionStart, selectionEnd)
+      if (deferCommitCallback) afterCommit?.()
+    })
+  }
+
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || !formatRequest || formatRequest.id === handledFormatRef.current) return
     if (readOnly) return
+    mathEnterTokenRef.current = null
     handledFormatRef.current = formatRequest.id
     const result = formattedValue(
       formatRequest.command,
@@ -1109,12 +1167,8 @@ export function LiveEditor({
       cjkShortcuts && (value === '¥¥' || value === '￥￥')
     if (!isDollar && !isYen) return false
     const mathSource = '$$\n\n$$'
-    mathEnterArmedRef.current = false
-    commitDraft(mathSource)
-    afterPaint(() => {
-      textareaRef.current?.focus()
-      textareaRef.current?.setSelectionRange(3, 3)
-    })
+    mathEnterTokenRef.current = null
+    applyNativeTextareaEdit(value, mathSource, 3)
     return true
   }
 
@@ -1126,7 +1180,13 @@ export function LiveEditor({
       composingRef.current
     ) return
     const textarea = event.currentTarget
-    if (event.key !== 'Enter') mathEnterArmedRef.current = false
+    const unmodifiedEnter =
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
+    if (!unmodifiedEnter) mathEnterTokenRef.current = null
 
     if (
       event.ctrlKey &&
@@ -1263,30 +1323,47 @@ export function LiveEditor({
       event.preventDefault()
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
-      if (mathEnterArmedRef.current) {
-        const removeAt = Math.max(3, start - 1)
-        const cleaned =
-          draft[removeAt] === '\n'
-            ? draft.slice(0, removeAt) + draft.slice(removeAt + 1)
-            : draft
-        commitDraft(cleaned)
-        mathEnterArmedRef.current = false
-        insertBlockAfter({
-          ...active,
-          type: 'math',
-          source: cleaned,
-          end: rangeRef.current.start + cleaned.length,
+      const token = mathEnterTokenRef.current
+      const canExit =
+        token !== null &&
+        token.revision === draftRevisionRef.current &&
+        token.session === editorSessionRef.current &&
+        token.value === draft &&
+        token.caret === start &&
+        start === end &&
+        draft[start - 1] === '\n'
+      if (canExit) {
+        const cleaned = draft.slice(0, start - 1) + draft.slice(start)
+        mathEnterTokenRef.current = null
+        applyNativeTextareaEdit(draft, cleaned, start - 1, start - 1, () => {
+          insertBlockAfter({
+            ...active,
+            type: 'math',
+            source: cleaned,
+            end: rangeRef.current.start + cleaned.length,
+          })
         })
         return
       }
 
       const nextDraft = draft.slice(0, start) + '\n' + draft.slice(end)
-      commitDraft(nextDraft)
-      mathEnterArmedRef.current = true
-      afterPaint(() => {
-        const caret = start + 1
-        textareaRef.current?.setSelectionRange(caret, caret)
-      })
+      const caret = start + 1
+      mathEnterTokenRef.current = null
+      applyNativeTextareaEdit(
+        draft,
+        nextDraft,
+        caret,
+        caret,
+        () => {
+          mathEnterTokenRef.current = {
+            revision: draftRevisionRef.current,
+            value: nextDraft,
+            caret,
+            session: editorSessionRef.current,
+          }
+        },
+        true,
+      )
       return
     }
 
@@ -1707,13 +1784,29 @@ export function LiveEditor({
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
+                          const nativeInput = nativeInputRef.current
                           if (
+                            nativeInput &&
+                            nativeInput.expectedValue === textarea.value
+                          ) {
+                            nativeInput.observed = true
+                            commitDraft(textarea.value)
+                            reportSelection(textarea)
+                            return
+                          }
+                          const inputType = (event.nativeEvent as InputEvent)
+                            .inputType
+                          const historyInput =
+                            inputType === 'historyUndo' ||
+                            inputType === 'historyRedo'
+                          if (
+                            !historyInput &&
                             !composingRef.current &&
                             enterDisplayMathMode(textarea.value)
                           ) {
                             return
                           }
-                          mathEnterArmedRef.current = false
+                          mathEnterTokenRef.current = null
                           commitDraft(textarea.value)
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
@@ -1724,8 +1817,23 @@ export function LiveEditor({
                             )
                           }
                         }}
-                        onSelect={(event) => reportSelection(event.currentTarget)}
+                        onSelect={(event) => {
+                          const textarea = event.currentTarget
+                          const token = mathEnterTokenRef.current
+                          if (
+                            token &&
+                            (textarea.selectionStart !== token.caret ||
+                              textarea.selectionEnd !== token.caret)
+                          ) {
+                            mathEnterTokenRef.current = null
+                          }
+                          reportSelection(textarea)
+                        }}
+                        onPointerDown={() => {
+                          mathEnterTokenRef.current = null
+                        }}
                         onBlur={(event) => {
+                          mathEnterTokenRef.current = null
                           setActiveInputFocused(false)
                           composingRef.current = false
                           codeTabEscapeRef.current = false
@@ -1736,6 +1844,7 @@ export function LiveEditor({
                           )
                         }}
                         onCompositionStart={() => {
+                          mathEnterTokenRef.current = null
                           composingRef.current = true
                         }}
                         onCompositionEnd={(event) => {

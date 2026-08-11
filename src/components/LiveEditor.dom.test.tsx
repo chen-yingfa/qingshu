@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as markdown from '../markdown/markdown'
 import * as markdownCjk from '../markdown/cjk'
 import * as markdownParser from '../markdown/parser'
+import { loadSettings } from '../settings'
 import { LiveEditor } from './LiveEditor'
 
 afterEach(() => {
@@ -656,6 +657,311 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
   })
 
+  it('uses minimal native edit transactions for math generation and focuses the next block', async () => {
+    const execCommand = vi.fn(
+      (_command: string, _ui: boolean, replacement: string) => {
+        const editor = screen.getByLabelText(
+          /Active (?:Markdown|math) block/,
+        ) as HTMLTextAreaElement
+        editor.setRangeText(
+          replacement,
+          editor.selectionStart,
+          editor.selectionEnd,
+          'end',
+        )
+        fireEvent.input(editor, {
+          target: {
+            value: editor.value,
+            selectionStart: editor.selectionStart,
+            selectionEnd: editor.selectionEnd,
+          },
+        })
+        return true
+      },
+    )
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    })
+    const result = renderEditor('Before\n\n', { activeBlock: 1 })
+    let editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+    })
+    editor = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    expect(execCommand).toHaveBeenLastCalledWith('insertText', false, '\n\n$$')
+    expect(result.onChange).toHaveBeenLastCalledWith('Before\n\n$$\n\n$$')
+
+    fireEvent.change(editor, {
+      target: { value: '$$\nx\n$$', selectionStart: 4, selectionEnd: 4 },
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(execCommand).toHaveBeenLastCalledWith('insertText', false, '\n')
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(execCommand).toHaveBeenLastCalledWith('insertText', false, '')
+    expect(execCommand).toHaveBeenCalledTimes(3)
+    expect(result.onChange).toHaveBeenLastCalledWith('Before\n\n$$\nx\n$$\n\n')
+
+    result.rerender(
+      <LiveEditor
+        content={'Before\n\n$$\nx\n$$\n\n'}
+        activeBlock={2}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const next = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    await waitFor(() => expect(document.activeElement).toBe(next))
+    expect(next.value).toBe('')
+  })
+
+  it('falls back to one canonical commit per generated math edit', async () => {
+    const execCommand = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    })
+    const result = renderEditor('')
+    let editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+    })
+    editor = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    editor.setSelectionRange(3, 3)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(4))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(execCommand).toHaveBeenCalledTimes(3)
+    expect(result.onChange.mock.calls.map(([value]) => value)).toEqual([
+      '$$\n\n$$',
+      '$$\n\n\n$$',
+      '$$\n\n$$',
+      '$$\n\n$$\n\n',
+    ])
+  })
+
+  it.each([
+    ['blur', (editor: HTMLTextAreaElement) => fireEvent.blur(editor)],
+    ['pointer move', (editor: HTMLTextAreaElement) =>
+      fireEvent.pointerDown(editor, { pointerId: 1 })],
+    ['selection change', (editor: HTMLTextAreaElement) => {
+      editor.setSelectionRange(3, 3)
+      fireEvent.select(editor)
+    }],
+    ['modified Enter', (editor: HTMLTextAreaElement) =>
+      fireEvent.keyDown(editor, { key: 'Enter', shiftKey: true })],
+    ['composition', (editor: HTMLTextAreaElement) =>
+      fireEvent.compositionStart(editor)],
+  ])('disarms math exit after %s', async (_name, intervene) => {
+    const result = renderEditor('$$\nx\n$$')
+    const editor = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(4, 4)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+
+    intervene(editor)
+    if (_name === 'composition') fireEvent.compositionEnd(editor)
+    editor.setSelectionRange(5, 5)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n\n\n$$')
+  })
+
+  it('requires the exact armed value and adjacent caret for math exit', async () => {
+    const result = renderEditor('$$\nx\n$$')
+    const editor = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(4, 4)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+
+    editor.setSelectionRange(3, 3)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\n\nx\n\n$$')
+  })
+
+  it('disarms math exit across toolbar and block sessions', async () => {
+    const source = '$$\nx\n$$\n\nAfter'
+    const result = renderEditor(source)
+    let editor = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(4, 4)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+
+    result.rerender(
+      <LiveEditor
+        content={'$$\nx\n\n$$\n\nAfter'}
+        activeBlock={0}
+        formatRequest={{ id: 1, command: 'bold' }}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() => expect(result.onChange).toHaveBeenCalled())
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+
+    result.rerender(
+      <LiveEditor
+        content={'$$\nx\n\n$$\n\nAfter'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content={'$$\nx\n\n$$\n\nAfter'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    editor = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    editor.setSelectionRange(5, 5)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+  })
+
+  it('disarms math exit after ordinary input', async () => {
+    const result = renderEditor('$$\nx\n$$')
+    const editor = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(4, 4)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+
+    fireEvent.input(editor, {
+      target: {
+        value: '$$\nxy\n\n$$',
+        selectionStart: 5,
+        selectionEnd: 5,
+      },
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'first',
+      '$$\nx\n$$\n\nAfter',
+      0,
+      '$$\nx\n$$\n\n\nAfter',
+      1,
+    ],
+    [
+      'middle',
+      'Before\n\n$$\nx\n$$\n\nAfter',
+      1,
+      'Before\n\n$$\nx\n$$\n\n\nAfter',
+      2,
+    ],
+    [
+      'last',
+      'Before\n\n$$\nx\n$$',
+      1,
+      'Before\n\n$$\nx\n$$\n\n',
+      2,
+    ],
+  ])(
+    'creates and focuses a next block after the %s math block',
+    async (_position, source, activeBlock, expected, nextActive) => {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: vi.fn(() => false),
+      })
+      const result = renderEditor(source, { activeBlock })
+      const math = screen.getByLabelText(
+        'Active math block',
+      ) as HTMLTextAreaElement
+      math.setSelectionRange(4, 4)
+      fireEvent.keyDown(math, { key: 'Enter' })
+      await waitFor(() => expect(math.selectionStart).toBe(5))
+      fireEvent.keyDown(math, { key: 'Enter' })
+      expect(result.onChange).toHaveBeenLastCalledWith(expected)
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(nextActive)
+
+      result.rerender(
+        <LiveEditor
+          content={expected}
+          activeBlock={nextActive}
+          onChange={result.onChange}
+          onActiveBlockChange={result.onActiveBlockChange}
+        />,
+      )
+      const next = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      await waitFor(() => expect(document.activeElement).toBe(next))
+      expect(next.value).toBe('')
+    },
+  )
+
+  it('tracks native undo input without desynchronizing canonical math content', () => {
+    const undoValues: string[] = []
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(
+        (_command: string, _ui: boolean, replacement: string) => {
+          const editor = screen.getByLabelText(
+            /Active (?:Markdown|math) block/,
+          ) as HTMLTextAreaElement
+          undoValues.push(editor.value)
+          editor.setRangeText(
+            replacement,
+            editor.selectionStart,
+            editor.selectionEnd,
+            'end',
+          )
+          fireEvent.input(editor, { target: { value: editor.value } })
+          return true
+        },
+      ),
+    })
+    const result = renderEditor('')
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+    })
+    const math = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    math.dispatchEvent(undo)
+    expect(undo.defaultPrevented).toBe(false)
+
+    fireEvent.input(math, {
+      inputType: 'historyUndo',
+      target: { value: undoValues.at(-1), selectionStart: 2, selectionEnd: 2 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('$$')
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('$$')
+  })
+
   it('converts yen math openers only when CJK shortcuts are enabled', () => {
     const enabled = renderEditor('', { cjkShortcuts: true })
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
@@ -675,6 +981,68 @@ describe('LiveEditor keyboard and composition behavior', () => {
         .value,
     ).toBe('¥¥')
   })
+
+  it.each(['¥¥', '￥￥'])(
+    'converts %s only when its persisted CJK setting is enabled',
+    (opener) => {
+      const enabled = loadSettings(JSON.stringify({ cjkShortcuts: true }))
+      const disabled = loadSettings(JSON.stringify({ cjkShortcuts: false }))
+      const first = renderEditor('', { cjkShortcuts: enabled.cjkShortcuts })
+      fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+        target: { value: opener, selectionStart: 2, selectionEnd: 2 },
+      })
+      expect(screen.getByLabelText('Active math block')).not.toBeNull()
+      first.unmount()
+
+      renderEditor('', { cjkShortcuts: disabled.cjkShortcuts })
+      fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+        target: { value: opener, selectionStart: 2, selectionEnd: 2 },
+      })
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe(opener)
+    },
+  )
+
+  it('keeps source mode math openers unaffected', () => {
+    const result = renderEditor('', {
+      sourceMode: true,
+      contentRevision: 0,
+      cjkShortcuts: true,
+    })
+    fireEvent.change(screen.getByLabelText('Markdown source'), {
+      target: { value: '￥￥', selectionStart: 2, selectionEnd: 2 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('￥￥')
+    expect(screen.queryByLabelText('Active math block')).toBeNull()
+  })
+
+  it('does not auto-close math openers embedded in protected content', () => {
+    const result = renderEditor('`code`')
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '`$$`', selectionStart: 3, selectionEnd: 3 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('`$$`')
+    expect(screen.queryByLabelText('Active math block')).toBeNull()
+  })
+
+  it('preserves CRLF when exiting formula and multiline math blocks', async () => {
+    for (const source of ['$$\r\n\r\n$$', '$$\r\nx\r\ny\r\n$$']) {
+      const result = renderEditor(source)
+      const editor = screen.getByLabelText(
+        'Active math block',
+      ) as HTMLTextAreaElement
+      const caret = editor.value.length - 3
+      editor.setSelectionRange(caret, caret)
+      fireEvent.keyDown(editor, { key: 'Enter' })
+      await waitFor(() => expect(editor.selectionStart).toBe(caret + 1))
+      fireEvent.keyDown(editor, { key: 'Enter' })
+      expect(result.onChange.mock.calls.at(-1)?.[0]).toMatch(/\r\n\r\n$/u)
+      result.unmount()
+    }
+  })
+
 
   it('hides a stale math preview immediately when the source is no longer math', async () => {
     const result = renderEditor('$x_t$')
