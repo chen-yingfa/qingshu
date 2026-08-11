@@ -4,6 +4,15 @@ import { canonicalFootnoteId } from '../markdown/markdown'
 import { createHtmlDocument } from './html'
 
 describe('createHtmlDocument', () => {
+  it('preserves frontmatter in source but omits it from exported HTML', async () => {
+    const html = await createHtmlDocument(
+      '---\ntitle: Private metadata\n---\n\n# Public document',
+    )
+
+    expect(html).not.toContain('Private metadata')
+    expect(html).toContain('<h1>Public document</h1>')
+  })
+
   it('creates a complete standalone UTF-8 document with inlined local styling', async () => {
     const html = await createHtmlDocument(
       '# 你好 Qingshu\n\n| Feature | Ready |\n| --- | --- |\n| GFM | Yes |\n\n$E=mc^2$',

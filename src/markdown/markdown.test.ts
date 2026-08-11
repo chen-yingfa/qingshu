@@ -12,6 +12,32 @@ import {
 } from './markdown'
 
 describe('parseBlocks', () => {
+  it('parses YAML frontmatter as one exact protected block', () => {
+    const source =
+      '---\ntitle: 你好 Qingshu\ntags:\n  - markdown\n---\n\n# Document'
+    const blocks = parseBlocks(source)
+
+    expect(blocks[0]).toMatchObject({
+      type: 'yaml',
+      source: '---\ntitle: 你好 Qingshu\ntags:\n  - markdown\n---',
+      start: 0,
+    })
+    expect(blocks[1]).toMatchObject({
+      type: 'heading',
+      source: '# Document',
+    })
+  })
+
+  it('parses TOML frontmatter as one exact protected block', () => {
+    const source = '+++\ntitle = "Qingshu"\ndraft = false\n+++\n\nBody'
+    const blocks = parseBlocks(source)
+
+    expect(blocks[0]).toMatchObject({
+      type: 'toml',
+      source: '+++\ntitle = "Qingshu"\ndraft = false\n+++',
+    })
+  })
+
   it('retains blank-line-separated items as one semantic loose list', () => {
     const blocks = parseBlocks('- Previous item\n\n-')
 
@@ -60,6 +86,16 @@ describe('parseBlocks', () => {
 })
 
 describe('renderMarkdown', () => {
+  it('omits frontmatter metadata from rendered document output', async () => {
+    const html = await renderMarkdown(
+      '---\ntitle: Secret metadata\n---\n\n# Visible title',
+    )
+
+    expect(html).not.toContain('Secret metadata')
+    expect(html).not.toContain('<hr')
+    expect(html).toContain('<h1>Visible title</h1>')
+  })
+
   it('distinguishes currency prose from semantic inline and display math', () => {
     expect(hasRenderableMath('Price is $5 and $10')).toBe(false)
     expect(hasRenderableMath('Inline $E=mc^2$.')).toBe(true)

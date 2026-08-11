@@ -2,6 +2,7 @@ import {
   Fragment,
   memo,
   type KeyboardEvent,
+  type MouseEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -547,8 +548,14 @@ const RenderedBlock = memo(function RenderedBlock({
 }) {
   const [html, setHtml] = useState('')
   const [error, setError] = useState<Error | null>(null)
+  const isFrontmatter = block.type === 'yaml' || block.type === 'toml'
 
   useEffect(() => {
+    if (isFrontmatter) {
+      setHtml('')
+      setError(null)
+      return undefined
+    }
     let current = true
     const cancel = deferWork(() => {
       void renderMarkdownBlock(block, context).then(
@@ -569,25 +576,39 @@ const RenderedBlock = memo(function RenderedBlock({
       current = false
       cancel()
     }
-  }, [block, context])
+  }, [block, context, isFrontmatter])
+
+  const activateFromPreview = (event: MouseEvent<HTMLElement>) => {
+    if (
+      editable &&
+      !(event.target as HTMLElement).closest(
+        'a, button, input, select, textarea, summary',
+      )
+    ) {
+      onActivate(index)
+    }
+  }
 
   return (
     <div className="preview-block" data-block-id={block.id}>
-      <div
-        className="rendered-block"
-        onError={(event) => markImageFailure(event.target)}
-        onClick={(event) => {
-          if (
-            editable &&
-            !(event.target as HTMLElement).closest(
-              'a, button, input, select, textarea, summary',
-            )
-          ) {
-            onActivate(index)
-          }
-        }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      {isFrontmatter ? (
+        <div
+          className="rendered-block frontmatter-preview"
+          onClick={activateFromPreview}
+        >
+          <div className="frontmatter-preview-label">
+            {block.type === 'yaml' ? 'YAML' : 'TOML'} front matter
+          </div>
+          <pre>{block.source}</pre>
+        </div>
+      ) : (
+        <div
+          className="rendered-block"
+          onError={(event) => markImageFailure(event.target)}
+          onClick={activateFromPreview}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
       {error && (
         <div className="block-render-error" role="alert">
           Unable to render this block: {error.message}
@@ -812,6 +833,8 @@ export function LiveEditor({
     () => draft.startsWith('$$\n') && draft.endsWith('\n$$'),
     [draft],
   )
+  const activeFrontmatter =
+    active.type === 'yaml' || active.type === 'toml'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
@@ -2155,6 +2178,8 @@ export function LiveEditor({
                             ? 'source-block source-block-code'
                             : displayMath
                               ? 'source-block source-block-math'
+                              : activeFrontmatter
+                                ? 'source-block source-block-frontmatter'
                             : 'source-block'
                         }
                         aria-label={
@@ -2162,10 +2187,14 @@ export function LiveEditor({
                             ? 'Active code block'
                             : displayMath
                               ? 'Active math block'
+                              : activeFrontmatter
+                                ? `Active ${active.type.toUpperCase()} front matter block`
                             : 'Active Markdown block'
                         }
                         autoFocus
-                        spellCheck={!fencedCode && !displayMath}
+                        spellCheck={
+                          !fencedCode && !displayMath && !activeFrontmatter
+                        }
                         readOnly={readOnly}
                         value={draft}
                         onFocus={() => setActiveInputFocused(true)}

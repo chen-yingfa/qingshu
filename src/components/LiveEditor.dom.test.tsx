@@ -36,6 +36,28 @@ function renderEditor(
 }
 
 describe('LiveEditor state synchronization', () => {
+  it('shows frontmatter as one protected metadata block', async () => {
+    const source = '---\ntitle: Test\ntags: [notes]\n---\n\n# Heading'
+    const result = renderEditor(source, { activeBlock: 1 })
+
+    const label = await screen.findByText('YAML front matter')
+    expect(label.closest('.frontmatter-preview')?.textContent).toContain(
+      'title: Test',
+    )
+    expect(
+      label.closest('.editor-block-row')?.querySelector('.block-drag-handle'),
+    ).toBeNull()
+    expect(result.container.querySelectorAll('.frontmatter-preview')).toHaveLength(
+      1,
+    )
+  })
+
+  it('labels the active YAML frontmatter editor distinctly', () => {
+    renderEditor('---\ntitle: Test\n---\n\nBody')
+
+    expect(screen.getByLabelText('Active YAML front matter block')).not.toBeNull()
+  })
+
   it('preserves the active textarea and caret after each parent content update', () => {
     const result = renderEditor('Hello')
     const editor = screen.getByLabelText(
@@ -2362,12 +2384,13 @@ describe('LiveEditor keyboard and composition behavior', () => {
       .parseDocument(source)
       .blocks.findIndex((block) => block.source.includes(marker))
     const result = renderEditor(source, { activeBlock, autoSpacing: true })
+    const editorLabel = 'Active YAML front matter block'
 
-    fireEvent.blur(screen.getByLabelText('Active Markdown block'))
+    fireEvent.blur(screen.getByLabelText(editorLabel))
 
     expect(result.onChange).not.toHaveBeenCalled()
     expect(
-      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+      (screen.getByLabelText(editorLabel) as HTMLTextAreaElement).value,
     ).toContain('"中文A"')
   })
 })

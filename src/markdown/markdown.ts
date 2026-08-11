@@ -2,6 +2,7 @@ import { fromHtmlIsomorphic } from 'hast-util-from-html-isomorphic'
 import rehypeKatex from 'rehype-katex'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import rehypeStringify from 'rehype-stringify'
+import remarkFrontmatter from 'remark-frontmatter'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import remarkParse from 'remark-parse'
@@ -333,6 +334,7 @@ async function processMarkdown(
 ): Promise<string> {
   const renderer = unified()
     .use(remarkParse)
+    .use(remarkFrontmatter, ['yaml', 'toml'])
     .use(remarkGfm)
     .use(remarkMath)
     .use(canonicalizeMdastFootnotes)

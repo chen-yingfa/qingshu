@@ -8,6 +8,9 @@ Electron.
 
 - Source-backed block editing with sanitized live preview.
 - Full-document source mode for editing canonical Markdown directly.
+- First-class YAML (`---`) and TOML (`+++`) frontmatter blocks that are
+  preserved exactly, protected from content transforms, and omitted from
+  rendered HTML/PDF output.
 - GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks, and
   footnotes.
 - Inline and display mathematics rendered with bundled KaTeX typography,
