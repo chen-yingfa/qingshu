@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useRef } from 'react'
+import { memo, type KeyboardEvent, useEffect, useRef } from 'react'
 
 import type { DocumentTab } from '../hooks/useDocument'
 
@@ -14,7 +14,7 @@ interface TabStripProps {
   onClose(tabId: string): void
 }
 
-export function TabStrip({
+export const TabStrip = memo(function TabStrip({
   tabs,
   activeTabId,
   orientation,
@@ -92,4 +92,18 @@ export function TabStrip({
       })}
     </div>
   )
-}
+}, (previous, next) =>
+  previous.activeTabId === next.activeTabId &&
+  previous.orientation === next.orientation &&
+  previous.onActivate === next.onActivate &&
+  previous.onClose === next.onClose &&
+  previous.tabs.length === next.tabs.length &&
+  previous.tabs.every((tab, index) => {
+    const candidate = next.tabs[index]
+    return (
+      tab.id === candidate.id &&
+      tab.path === candidate.path &&
+      tab.dirty === candidate.dirty
+    )
+  }),
+)

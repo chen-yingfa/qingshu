@@ -502,6 +502,42 @@ export default function App() {
     [dispatch, state.content, state.sourceMode],
   )
 
+  const shellActionsRef = useRef({
+    runCommand,
+    openRecent,
+    toggleOption,
+    handleCloseTab,
+  })
+  shellActionsRef.current = {
+    runCommand,
+    openRecent,
+    toggleOption,
+    handleCloseTab,
+  }
+  const toolbarFile = useCallback(
+    (command: MenuCommand) => void shellActionsRef.current.runCommand(command),
+    [],
+  )
+  const toolbarRecent = useCallback(
+    (path: string) => void shellActionsRef.current.openRecent(path),
+    [],
+  )
+  const toolbarToggle = useCallback(
+    (option: 'dark' | 'focus' | 'a4' | 'spacing' | 'source') =>
+      shellActionsRef.current.toggleOption(option),
+    [],
+  )
+  const toolbarFontChange = useCallback(
+    (font: AppSettings['font']) =>
+      setSettings((current) => ({ ...current, font })),
+    [],
+  )
+  const openSettings = useCallback(() => setSettingsOpen(true), [])
+  const closeTabFromShell = useCallback(
+    (tabId: string) => shellActionsRef.current.handleCloseTab(tabId),
+    [],
+  )
+
   const commands = useMemo<PaletteCommand[]>(
     () => [
       {
@@ -839,12 +875,12 @@ export default function App() {
         sourceMode={sourceMode}
         documentFont={settings.font}
         recentPaths={recentPaths}
-        onFile={(command) => void runCommand(command)}
+        onFile={toolbarFile}
         onFormat={requestFormat}
-        onFontChange={(font) => setSettings((current) => ({ ...current, font }))}
-        onSettings={() => setSettingsOpen(true)}
-        onRecent={(path) => void openRecent(path)}
-        onToggle={toggleOption}
+        onFontChange={toolbarFontChange}
+        onSettings={openSettings}
+        onRecent={toolbarRecent}
+        onToggle={toolbarToggle}
       />
       {settings.tabOrientation === 'horizontal' && (
         <TabStrip
@@ -852,7 +888,7 @@ export default function App() {
           activeTabId={activeTabId}
           orientation="horizontal"
           onActivate={activateTab}
-          onClose={handleCloseTab}
+          onClose={closeTabFromShell}
         />
       )}
       {focus && !printPreview && (
@@ -873,7 +909,7 @@ export default function App() {
             activeTabId={activeTabId}
             orientation="vertical"
             onActivate={activateTab}
-            onClose={handleCloseTab}
+            onClose={closeTabFromShell}
           />
         )}
         <main

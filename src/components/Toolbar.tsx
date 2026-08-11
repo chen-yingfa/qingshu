@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
@@ -58,7 +58,7 @@ function ToolButton({
   )
 }
 
-export function Toolbar({
+export const Toolbar = memo(function Toolbar({
   dark,
   focus,
   a4,
@@ -240,4 +240,4 @@ export function Toolbar({
       </div>
     </nav>
   )
-}
+})
