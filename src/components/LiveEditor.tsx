@@ -66,6 +66,14 @@ function restoreSourceEols(
   fallbackEol: '\n' | '\r\n',
 ): string {
   const previous = toEditorValue(previousSource)
+  const previousEndings = Array.from(previousSource.matchAll(/\r\n|\n/gu), (match) =>
+    match[0] as '\n' | '\r\n',
+  )
+  const nextEndingCount = Array.from(value.matchAll(/\n/gu)).length
+  if (previousEndings.length === nextEndingCount) {
+    let endingIndex = 0
+    return value.replaceAll('\n', () => previousEndings[endingIndex++])
+  }
   const endings = new Map<number, '\n' | '\r\n'>()
   let normalizedOffset = 0
   for (const part of previousSource.split(/(\r\n|\n)/u)) {
@@ -158,7 +166,7 @@ export function mergeBlockAtStart(
   if (separatorStart < 0) return { content: source, caret: blockStart }
   const left = source.slice(0, separatorStart).replace(/[ \t]+$/u, '')
   const right = source.slice(blockStart).replace(/^[ \t]+/u, '')
-  const separator = left && right ? preferredEol(source) : ''
+  const separator = left && right ? nearestEol(source, blockStart) : ''
   return { content: left + separator + right, caret: left.length + separator.length }
 }
 
@@ -236,7 +244,7 @@ function editorBlocks(
   for (let empty = 0; empty + 1 < trailingEndings.length; empty += 2) {
     const second = trailingEndings[empty + 1]
     const offset = last.end + second.index! + second[0].length
-    if (!editable.some((block) => block.start === offset && block.source === '')) {
+    if (!editable.some((block) => block.start === offset)) {
       editable.push({
         id: `empty-tail-${offset}`,
         type: 'paragraph',
@@ -821,7 +829,7 @@ export function LiveEditor({
       const inserted = (
         insertedBlocks.content === previousContent ? insertedBlocks.blocks : []
       ).find((block) => block.offset === blockStart)
-      if (inserted?.leftPadding) {
+      if (inserted?.leftPadding && !draft.trim()) {
         const removeStart = blockStart - inserted.leftPadding
         const mergedContent =
           previousContent.slice(0, removeStart) +

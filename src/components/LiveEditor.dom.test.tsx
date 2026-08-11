@@ -479,6 +479,34 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(editor().value).toBe('')
   })
 
+  it('does not duplicate a trailing inserted block containing whitespace', () => {
+    const result = renderEditor('First')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: '  ' } })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n  '}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect(result.container.querySelector('[data-block-id="empty-tail-7"]')).toBeNull()
+    expect(editor().value).toBe('  ')
+  })
+
   it('removes an inserted block padding when Backspace merges it', () => {
     const result = renderEditor('First\n\nSecond')
     const editor = () =>
@@ -497,6 +525,35 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor(), { key: 'Backspace' })
     expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+  })
+
+  it('uses normal merge semantics when Backspace joins a typed inserted block', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: 'Inserted' } })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\nInserted\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    editor().setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+    expect(result.onChange).toHaveBeenLastCalledWith('First\nInserted\n\nSecond')
   })
 
   it('clears inserted block state on an external document replacement', () => {
@@ -538,6 +595,40 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith(
       '```ts\r\nfirst\nsecond\r\n\r\n```\nAfter',
+    )
+  })
+
+  it('preserves mixed line endings when formatting a multiline selection', async () => {
+    const result = renderEditor('one\r\ntwo\nthree')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, editor.value.length)
+    result.rerender(
+      <LiveEditor
+        content={'one\r\ntwo\nthree'}
+        activeBlock={0}
+        formatRequest={{ id: 1, command: 'bold' }}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(result.onChange).toHaveBeenLastCalledWith(
+        '**one\r\ntwo\nthree**',
+      ),
+    )
+  })
+
+  it('uses the local line ending when Backspace merges mixed-EOL blocks', () => {
+    const result = renderEditor('First\r\n\r\nMiddle\n\nLast', {
+      activeBlock: 2,
+    })
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor, { key: 'Backspace' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'First\r\n\r\nMiddle\nLast',
     )
   })
 
