@@ -14,6 +14,7 @@ import {
 import { normalizeCjkInput, spaceCjkLatin } from '../markdown/cjk'
 import { highlightCode, parseFencedCode } from '../markdown/code'
 import {
+  frontMatterEnd,
   parseDocument,
   renderDocumentFootnotes,
   renderMarkdown,
@@ -259,6 +260,60 @@ function editorBlocks(
     }
   }
   return editable.sort((left, right) => left.start - right.start)
+}
+
+function reorderInsertedBlocks(
+  insertions: InsertedBlock[],
+  previousBlocks: MarkdownBlock[],
+  nextBlocks: MarkdownBlock[],
+  fromIndex: number,
+  boundary: number,
+): InsertedBlock[] {
+  const order = previousBlocks.map((_, index) => index)
+  const [moved] = order.splice(fromIndex, 1)
+  order.splice(boundary > fromIndex ? boundary - 1 : boundary, 0, moved)
+  const newIndexByOld = new Map(
+    order.map((oldIndex, newIndex) => [oldIndex, newIndex]),
+  )
+
+  return insertions.map((insertion) => {
+    const sourceBlock = previousBlocks.findIndex(
+      (block) =>
+        block.start === insertion.offset &&
+        block.end === insertion.offset + insertion.length,
+    )
+    if (sourceBlock >= 0) {
+      const next = nextBlocks[newIndexByOld.get(sourceBlock) ?? sourceBlock]
+      return next ? { ...insertion, offset: next.start } : insertion
+    }
+
+    const gap = previousBlocks.findIndex(
+      (block, index) =>
+        index < previousBlocks.length - 1 &&
+        insertion.offset >= block.end &&
+        insertion.offset <= previousBlocks[index + 1].start,
+    )
+    if (gap >= 0) {
+      return {
+        ...insertion,
+        offset: nextBlocks[gap].end + (insertion.offset - previousBlocks[gap].end),
+      }
+    }
+
+    const previousLast = previousBlocks.at(-1)
+    const nextLast = nextBlocks.at(-1)
+    if (
+      previousLast &&
+      nextLast &&
+      insertion.offset >= previousLast.end
+    ) {
+      return {
+        ...insertion,
+        offset: nextLast.end + (insertion.offset - previousLast.end),
+      }
+    }
+    return insertion
+  })
 }
 
 function containsMath(source: string): boolean {
@@ -572,13 +627,11 @@ function BlockDropZone({
   dragging,
   active,
   onTarget,
-  onDrop,
 }: {
   boundary: number
   dragging: boolean
   active: boolean
   onTarget(boundary: number): void
-  onDrop(boundary: number): void
 }) {
   return (
     <div
@@ -596,7 +649,6 @@ function BlockDropZone({
         event.preventDefault()
         if (!dragging) return
         onTarget(boundary)
-        onDrop(boundary)
       }}
     />
   )
@@ -620,6 +672,9 @@ export function LiveEditor({
   const [dropBoundary, setDropBoundary] = useState<number | null>(null)
   const draggedBlockRef = useRef<number | null>(null)
   const dropBoundaryRef = useRef<number | null>(null)
+  const dragPointerRef = useRef<number | null>(null)
+  const dragContentRef = useRef<string | null>(null)
+  const editorRef = useRef<HTMLElement>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(() => parseDocument(content), [content])
@@ -628,9 +683,13 @@ export function LiveEditor({
     [content, currentInsertedBlocks, model.blocks],
   )
   const renderContext = model.renderContext
+  const movableBlocks = useMemo(() => {
+    const protectedEnd = frontMatterEnd(content)
+    return model.blocks.filter((block) => block.start >= protectedEnd)
+  }, [content, model.blocks])
   const realBlockIndexes = useMemo(
-    () => new Map(model.blocks.map((block, index) => [block.id, index])),
-    [model.blocks],
+    () => new Map(movableBlocks.map((block, index) => [block.id, index])),
+    [movableBlocks],
   )
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
@@ -1121,6 +1180,8 @@ export function LiveEditor({
   const clearDragState = () => {
     draggedBlockRef.current = null
     dropBoundaryRef.current = null
+    dragPointerRef.current = null
+    dragContentRef.current = null
     setDraggedBlock(null)
     setDropBoundary(null)
   }
@@ -1130,19 +1191,45 @@ export function LiveEditor({
     setDropBoundary(boundary)
   }
 
-  const moveBlock = (fromIndex: number, boundary: number) => {
+  const moveBlock = (
+    fromIndex: number,
+    boundary: number,
+    focus: 'editor' | 'handle' = 'editor',
+  ) => {
+    const currentContent = contentRef.current
+    const currentModel = parseDocument(currentContent)
+    const protectedEnd = frontMatterEnd(currentContent)
+    const currentBlocks = currentModel.blocks.filter(
+      (block) => block.start >= protectedEnd,
+    )
     const reordered = reorderMarkdownBlocks(
-      contentRef.current,
-      model.blocks,
+      currentContent,
+      currentBlocks,
       fromIndex,
       boundary,
     )
     clearDragState()
-    if (reordered.content === contentRef.current) return
+    if (reordered.content === currentContent) return
 
     const nextModel = parseDocument(reordered.content)
-    const moved = nextModel.blocks[reordered.index]
-    setInsertedBlocks({ content: reordered.content, blocks: [] })
+    const nextProtectedEnd = frontMatterEnd(reordered.content)
+    const nextBlocks = nextModel.blocks.filter(
+      (block) => block.start >= nextProtectedEnd,
+    )
+    const moved = nextBlocks[reordered.index]
+    const editorIndex = nextModel.blocks.findIndex(
+      (block) => block.start === moved?.start && block.end === moved?.end,
+    )
+    setInsertedBlocks((current) => ({
+      content: reordered.content,
+      blocks: reorderInsertedBlocks(
+        current.content === currentContent ? current.blocks : [],
+        currentBlocks,
+        nextBlocks,
+        fromIndex,
+        boundary,
+      ),
+    }))
     setDraft(toEditorValue(moved?.source ?? ''))
     rangeRef.current = {
       start: moved?.start ?? 0,
@@ -1151,24 +1238,71 @@ export function LiveEditor({
     contentRef.current = reordered.content
     pendingAcknowledgementRef.current = reordered.content
     onChange(reordered.content)
-    onActiveBlockChange(reordered.index)
-    afterPaint(() => textareaRef.current?.focus())
+    onActiveBlockChange(Math.max(0, editorIndex))
+    afterPaint(() => {
+      if (focus === 'handle') {
+        editorRef.current
+          ?.querySelector<HTMLButtonElement>(
+            `[aria-label="Move block ${reordered.index + 1}"]`,
+          )
+          ?.focus()
+      } else {
+        textareaRef.current?.focus()
+      }
+    })
   }
 
-  const finishPointerMove = () => {
+  const finishPointerMove = (pointerId?: number) => {
+    if (
+      pointerId !== undefined &&
+      dragPointerRef.current !== null &&
+      pointerId !== dragPointerRef.current
+    ) {
+      return
+    }
     const from = draggedBlockRef.current
     const boundary = dropBoundaryRef.current
-    if (from !== null && boundary !== null) moveBlock(from, boundary)
+    if (
+      from !== null &&
+      boundary !== null &&
+      dragContentRef.current === contentRef.current
+    ) {
+      moveBlock(from, boundary)
+    }
     else clearDragState()
   }
 
   useEffect(() => {
     if (draggedBlock === null) return undefined
-    const finish = () => finishPointerMove()
-    const cancel = () => clearDragState()
+    const track = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== dragPointerRef.current) return
+      const zones = Array.from(
+        editorRef.current?.querySelectorAll<HTMLElement>('.block-drop-zone') ??
+          [],
+      )
+      const nearest = zones.reduce<{
+        boundary: number
+        distance: number
+      } | null>((closest, zone) => {
+        const rect = zone.getBoundingClientRect()
+        const distance = Math.abs(event.clientY - (rect.top + rect.height / 2))
+        const boundary = Number(zone.dataset.dropBoundary)
+        return !closest || distance < closest.distance
+          ? { boundary, distance }
+          : closest
+      }, null)
+      if (nearest) targetDropBoundary(nearest.boundary)
+    }
+    const finish = (event: globalThis.PointerEvent) =>
+      finishPointerMove(event.pointerId)
+    const cancel = (event: globalThis.PointerEvent) => {
+      if (event.pointerId === dragPointerRef.current) clearDragState()
+    }
+    window.addEventListener('pointermove', track)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', cancel)
     return () => {
+      window.removeEventListener('pointermove', track)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', cancel)
     }
@@ -1178,7 +1312,8 @@ export function LiveEditor({
     <section
       className="editor"
       aria-label="Markdown document"
-      onPointerUp={finishPointerMove}
+      ref={editorRef}
+      onPointerUp={(event) => finishPointerMove(event.pointerId)}
       onPointerCancel={clearDragState}
     >
       {previewAll ? (
@@ -1195,11 +1330,6 @@ export function LiveEditor({
                     dragging={draggedBlock !== null}
                     active={dropBoundary === realIndex}
                     onTarget={targetDropBoundary}
-                    onDrop={(boundary) => {
-                      if (draggedBlock !== null) {
-                        moveBlock(draggedBlock, boundary)
-                      }
-                    }}
                   />
                 )}
                 <div
@@ -1213,21 +1343,24 @@ export function LiveEditor({
                     <BlockDragHandle
                       index={realIndex}
                       onPointerDown={(event) => {
+                        if (event.button !== 0 || !event.isPrimary) return
                         event.preventDefault()
                         draggedBlockRef.current = realIndex
                         dropBoundaryRef.current = realIndex
+                        dragPointerRef.current = event.pointerId
+                        dragContentRef.current = contentRef.current
                         setDraggedBlock(realIndex)
                         setDropBoundary(realIndex)
                       }}
                       onMove={(direction) => {
                         if (direction < 0 && realIndex > 0) {
-                          moveBlock(realIndex, realIndex - 1)
+                          moveBlock(realIndex, realIndex - 1, 'handle')
                         }
                         if (
                           direction > 0 &&
-                          realIndex < model.blocks.length - 1
+                          realIndex < movableBlocks.length - 1
                         ) {
-                          moveBlock(realIndex, realIndex + 2)
+                          moveBlock(realIndex, realIndex + 2, 'handle')
                         }
                       }}
                     />
@@ -1296,15 +1429,12 @@ export function LiveEditor({
               </Fragment>
             )
           })}
-          {model.blocks.length > 0 && (
+          {movableBlocks.length > 0 && (
             <BlockDropZone
-              boundary={model.blocks.length}
+              boundary={movableBlocks.length}
               dragging={draggedBlock !== null}
-              active={dropBoundary === model.blocks.length}
+              active={dropBoundary === movableBlocks.length}
               onTarget={targetDropBoundary}
-              onDrop={(boundary) => {
-                if (draggedBlock !== null) moveBlock(draggedBlock, boundary)
-              }}
             />
           )}
         </>

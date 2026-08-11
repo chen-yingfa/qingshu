@@ -137,7 +137,7 @@ function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
   })
 }
 
-function frontMatterEnd(source: string): number {
+export function frontMatterEnd(source: string): number {
   const opening = source.match(/^(?:\uFEFF)?(---|\+\+\+)[ \t]*\r?\n/u)
   if (!opening) return 0
   const escaped = opening[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')

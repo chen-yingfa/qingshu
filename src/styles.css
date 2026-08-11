@@ -940,6 +940,8 @@ kbd {
   .status-bar,
   .exit-focus-button,
   .edit-block-button,
+  .block-drag-handle,
+  .block-drop-zone,
   .palette-backdrop,
   .toast-region {
     display: none;

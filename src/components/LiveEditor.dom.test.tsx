@@ -959,7 +959,7 @@ describe('LiveEditor block reordering', () => {
       '[data-drop-boundary="0"]',
     ) as HTMLElement
 
-    fireEvent.pointerDown(handle, { pointerId: 1 })
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, isPrimary: true })
     fireEvent.pointerEnter(target, { pointerId: 1 })
     expect(target.classList.contains('is-drop-target')).toBe(true)
     fireEvent.pointerUp(target, { pointerId: 1 })
@@ -984,6 +984,35 @@ describe('LiveEditor block reordering', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
   })
 
+  it('retains drag-handle focus for repeated keyboard moves', async () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 1' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+    result.rerender(
+      <LiveEditor
+        content={'Second\n\nFirst\n\nThird'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute('aria-label')).toBe(
+        'Move block 2',
+      ),
+    )
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Second\n\nThird\n\nFirst',
+    )
+  })
+
   it('commits the hovered move when pointer release misses the drop zone', () => {
     const result = renderEditor('First\n\nSecond\n\nThird')
     const handle = screen.getByRole('button', { name: 'Move block 3' })
@@ -991,12 +1020,106 @@ describe('LiveEditor block reordering', () => {
       '[data-drop-boundary="0"]',
     ) as HTMLElement
 
-    fireEvent.pointerDown(handle, { pointerId: 1 })
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, isPrimary: true })
     fireEvent.pointerEnter(target, { pointerId: 1 })
     fireEvent.pointerUp(window, { pointerId: 1 })
 
     expect(result.onChange).toHaveBeenLastCalledWith(
       'Third\n\nFirst\n\nSecond',
     )
+  })
+
+  it('cancels rather than corrupting source changed during a drag', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const handle = screen.getByRole('button', { name: 'Move block 2' })
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      button: 0,
+      isPrimary: true,
+    })
+    result.rerender(
+      <LiveEditor
+        content={'First changed\n\nSecond\n\nThird'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.pointerUp(window, { pointerId: 1 })
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
+  it('ignores unrelated pointer releases during a drag', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const handle = screen.getByRole('button', { name: 'Move block 2' })
+    const target = result.container.querySelector(
+      '[data-drop-boundary="0"]',
+    ) as HTMLElement
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      button: 0,
+      isPrimary: true,
+    })
+    fireEvent.pointerEnter(target, { pointerId: 1 })
+
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(result.onChange).not.toHaveBeenCalled()
+    fireEvent.pointerUp(window, { pointerId: 1 })
+    expect(result.onChange).toHaveBeenCalledOnce()
+  })
+
+  it('tracks touch movement by coordinates despite implicit pointer capture', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const zones = Array.from(
+      result.container.querySelectorAll<HTMLElement>('.block-drop-zone'),
+    )
+    zones.forEach((zone, index) => {
+      vi.spyOn(zone, 'getBoundingClientRect').mockReturnValue({
+        x: 0,
+        y: index * 100,
+        top: index * 100,
+        right: 500,
+        bottom: index * 100 + 20,
+        left: 0,
+        width: 500,
+        height: 20,
+        toJSON: () => ({}),
+      })
+    })
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Move block 3' }),
+      {
+        pointerId: 7,
+        pointerType: 'touch',
+        button: 0,
+        isPrimary: true,
+      },
+    )
+
+    fireEvent.pointerMove(window, { pointerId: 7, clientY: 5 })
+    fireEvent.pointerUp(window, { pointerId: 7 })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Third\n\nFirst\n\nSecond',
+    )
+  })
+
+  it('keeps front matter locked and exposes handles only for content blocks', () => {
+    renderEditor(
+      [
+        '---',
+        'title: Drag test',
+        'theme: default',
+        '---',
+        '# First',
+        '',
+        'Second',
+      ].join('\n'),
+      { activeBlock: 2 },
+    )
+
+    expect(screen.queryByRole('button', { name: 'Move block 3' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Move block 1' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Move block 2' })).not.toBeNull()
   })
 })
