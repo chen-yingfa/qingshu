@@ -64,6 +64,7 @@ describe('LiveEditor state synchronization', () => {
 
   it('synchronizes the active draft after a same-index document replacement', () => {
     const result = renderEditor('Old document')
+    const previous = screen.getByLabelText('Active Markdown block')
 
     result.rerender(
       <LiveEditor
@@ -75,6 +76,7 @@ describe('LiveEditor state synchronization', () => {
     )
 
     const textarea = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    expect(textarea).not.toBe(previous)
     expect(textarea.value).toBe('Opened document')
     fireEvent.change(textarea, { target: { value: 'Opened document!' } })
     expect(result.onChange).toHaveBeenLastCalledWith('Opened document!')

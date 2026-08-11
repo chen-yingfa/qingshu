@@ -718,6 +718,11 @@ export function LiveEditor({
   const previousActiveRef = useRef(safeActive)
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+  const activeSessionRef = useRef(0)
+  const activeSessionObservationRef = useRef({
+    content,
+    active: safeActive,
+  })
   const handledFormatRef = useRef(0)
   const activationRef = useRef(onActiveBlockChange)
   activationRef.current = onActiveBlockChange
@@ -725,6 +730,29 @@ export function LiveEditor({
     activationRef.current(index)
   }, [])
   contentRef.current = content
+
+  const observedSession = activeSessionObservationRef.current
+  if (
+    observedSession.content !== content ||
+    observedSession.active !== safeActive
+  ) {
+    const acknowledged = pendingAcknowledgementRef.current === content
+    if (observedSession.active !== safeActive || !acknowledged) {
+      activeSessionRef.current += 1
+    }
+    activeSessionObservationRef.current = {
+      content,
+      active: safeActive,
+    }
+  }
+
+  const rotateEditorSession = (nextContent: string, nextActive: number) => {
+    activeSessionRef.current += 1
+    activeSessionObservationRef.current = {
+      content: nextContent,
+      active: nextActive,
+    }
+  }
 
   useLayoutEffect(() => {
     const activeChanged = previousActiveRef.current !== safeActive
@@ -945,6 +973,7 @@ export function LiveEditor({
           },
         ],
       }))
+      rotateEditorSession(nextContent, safeActive)
       setDraft('')
       rangeRef.current = { start: insertionPoint, end: insertionPoint }
       contentRef.current = nextContent
@@ -1080,6 +1109,7 @@ export function LiveEditor({
         const targetIndex = Math.max(0, safeActive - 1)
         if (safeActive === 0) {
           const first = parseDocument(mergedContent).blocks[0]
+          rotateEditorSession(mergedContent, 0)
           setDraft(toEditorValue(first?.source ?? ''))
           rangeRef.current = {
             start: first?.start ?? 0,
@@ -1253,6 +1283,7 @@ export function LiveEditor({
       content: reordered.content,
       blocks: reorderedInsertions,
     })
+    rotateEditorSession(reordered.content, Math.max(0, editorIndex))
     setDraft(toEditorValue(moved?.source ?? ''))
     rangeRef.current = {
       start: moved?.start ?? 0,
@@ -1351,7 +1382,7 @@ export function LiveEditor({
               <Fragment
                 key={
                   index === safeActive
-                    ? `active-block-row-${safeActive}`
+                    ? `active-block-row-${activeSessionRef.current}`
                     : block.id
                 }
               >
