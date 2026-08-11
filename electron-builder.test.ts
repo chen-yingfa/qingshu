@@ -55,25 +55,82 @@ describe('desktop package metadata', () => {
     expect(publicPng.readUInt32BE(16)).toBe(256)
     expect(publicPng.readUInt32BE(20)).toBe(256)
     expect(ico.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]))
+    expect(ico.readUInt16LE(0)).toBe(0)
+    expect(ico.readUInt16LE(2)).toBe(1)
     const icoCount = ico.readUInt16LE(4)
+    const icoRanges: Array<[number, number]> = []
     const icoSizes = Array.from({ length: icoCount }, (_, index) => {
-      const width = ico[6 + index * 16]
-      return width === 0 ? 256 : width
+      const entry = 6 + index * 16
+      const width = ico[entry] === 0 ? 256 : ico[entry]
+      const height = ico[entry + 1] === 0 ? 256 : ico[entry + 1]
+      const payloadLength = ico.readUInt32LE(entry + 8)
+      const payloadOffset = ico.readUInt32LE(entry + 12)
+      expect(height).toBe(width)
+      expect(ico.readUInt16LE(entry + 4)).toBe(1)
+      expect(ico.readUInt16LE(entry + 6)).toBe(32)
+      expect(payloadOffset).toBeGreaterThanOrEqual(6 + icoCount * 16)
+      expect(payloadOffset + payloadLength).toBeLessThanOrEqual(ico.length)
+      icoRanges.push([payloadOffset, payloadOffset + payloadLength])
+      const pngSignature = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ])
+      if (
+        ico.subarray(payloadOffset, payloadOffset + 8).equals(pngSignature)
+      ) {
+        expect(ico.readUInt32BE(payloadOffset + 16)).toBe(width)
+        expect(ico.readUInt32BE(payloadOffset + 20)).toBe(height)
+        expect(
+          ico
+            .subarray(
+              payloadOffset + payloadLength - 8,
+              payloadOffset + payloadLength - 4,
+            )
+            .toString('ascii'),
+        ).toBe('IEND')
+      } else {
+        expect(ico.readUInt32LE(payloadOffset)).toBe(40)
+        expect(ico.readInt32LE(payloadOffset + 4)).toBe(width)
+        expect(Math.abs(ico.readInt32LE(payloadOffset + 8)) / 2).toBe(height)
+        expect(ico.readUInt16LE(payloadOffset + 12)).toBe(1)
+        expect(ico.readUInt16LE(payloadOffset + 14)).toBe(32)
+        expect(payloadLength).toBeGreaterThanOrEqual(40 + width * height * 4)
+      }
+      return width
     }).sort((left, right) => left - right)
     expect(icoSizes).toEqual([16, 32, 48, 256])
+    icoRanges.sort(([left], [right]) => left - right)
+    for (let index = 1; index < icoRanges.length; index += 1) {
+      expect(icoRanges[index][0]).toBeGreaterThanOrEqual(
+        icoRanges[index - 1][1],
+      )
+    }
 
     expect(icns.subarray(0, 4).toString('ascii')).toBe('icns')
+    expect(icns.readUInt32BE(4)).toBe(icns.length)
     const icnsEntries = new Map<string, number>()
-    for (let offset = 8; offset < icns.length; ) {
+    let icnsOffset = 8
+    for (; icnsOffset < icns.length; ) {
+      const offset = icnsOffset
       const type = icns.subarray(offset, offset + 4).toString('ascii')
       const length = icns.readUInt32BE(offset + 4)
+      expect(length).toBeGreaterThan(20)
+      expect(offset + length).toBeLessThanOrEqual(icns.length)
       expect(
         icns.subarray(offset + 8, offset + 16),
         `${type} PNG signature`,
       ).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-      icnsEntries.set(type, icns.readUInt32BE(offset + 24))
-      offset += length
+      const width = icns.readUInt32BE(offset + 24)
+      const height = icns.readUInt32BE(offset + 28)
+      expect(height).toBe(width)
+      expect(
+        icns
+          .subarray(offset + length - 8, offset + length - 4)
+          .toString('ascii'),
+      ).toBe('IEND')
+      icnsEntries.set(type, width)
+      icnsOffset += length
     }
+    expect(icnsOffset).toBe(icns.length)
     expect(Object.fromEntries(icnsEntries)).toEqual({
       icp4: 16,
       icp5: 32,
