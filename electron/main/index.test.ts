@@ -1500,6 +1500,100 @@ describe('desktop IPC', () => {
     )
   })
 
+  it('serializes concurrent HTML and PDF exports to the same canonical destination', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/links/shared.html',
+    })
+    mocks.realpath.mockImplementation(async (path: string) =>
+      path === '/links/shared.html' ? '/exports/shared.html' : path,
+    )
+    let releaseFirst!: () => void
+    mocks.tempHandle.writeFile
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+    const pdf = Buffer.from('pdf')
+    const otherEvent = {
+      ...event,
+      sender: {
+        ...event.sender,
+        mainFrame: senderFrame,
+        printToPDF: vi.fn().mockResolvedValue(pdf),
+      },
+    }
+
+    const first = mocks.handlers
+      .get('qingshu:export-html')
+      ?.(event, { html: '<h1>First</h1>' })
+    const second = mocks.handlers
+      .get('qingshu:export-pdf')
+      ?.(otherEvent)
+
+    await vi.waitFor(() =>
+      expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith(
+        '<h1>First</h1>',
+        'utf8',
+      ),
+    )
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledTimes(1)
+    releaseFirst()
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { canceled: false, path: '/exports/shared.html' },
+      { canceled: false, path: '/exports/shared.html' },
+    ])
+    expect(mocks.tempHandle.writeFile.mock.calls.map(([content]) => content)).toEqual(
+      ['<h1>First</h1>', pdf],
+    )
+  })
+
+  it('continues a same-target export queue after an earlier commit fails', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/retry.html',
+    })
+    mocks.rename
+      .mockRejectedValueOnce(new Error('first export failed'))
+      .mockResolvedValueOnce(undefined)
+    let releaseFirst!: () => void
+    mocks.tempHandle.writeFile
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+    const otherEvent = {
+      ...event,
+      sender: { ...event.sender, mainFrame: senderFrame },
+    }
+
+    const first = mocks.handlers
+      .get('qingshu:export-html')
+      ?.(event, { html: '<h1>First</h1>' })
+    const second = mocks.handlers
+      .get('qingshu:export-html')
+      ?.(otherEvent, { html: '<h1>Second</h1>' })
+
+    await vi.waitFor(() => expect(mocks.tempHandle.writeFile).toHaveBeenCalled())
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledTimes(1)
+    releaseFirst()
+    await expect(first).rejects.toThrow('first export failed')
+    await expect(second).resolves.toEqual({
+      canceled: false,
+      path: '/exports/retry.html',
+    })
+    expect(mocks.tempHandle.writeFile.mock.calls.map(([content]) => content)).toEqual([
+      '<h1>First</h1>',
+      '<h1>Second</h1>',
+    ])
+  })
+
   it('does not remember an HTML export when its atomic commit fails', async () => {
     mocks.showSaveDialog.mockResolvedValue({
       canceled: false,

@@ -68,6 +68,7 @@ const saveOperations = new WeakMap<
   Map<string, SaveOperation>
 >()
 const activeDialogs = new WeakSet<Electron.WebContents>()
+const exportCommitQueues = new Map<string, Promise<void>>()
 const RECENT_FILES_LIMIT = 12
 const MAX_TEXT_PAYLOAD_BYTES = 16 * 1024 * 1024
 let recentFiles: string[] | null = null
@@ -687,6 +688,23 @@ function enqueueSave<T>(
   return result
 }
 
+function enqueueExportCommit<T>(
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = exportCommitQueues.get(path) ?? Promise.resolve()
+  const result = previous.then(operation)
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  exportCommitQueues.set(path, settled)
+  void settled.then(() => {
+    if (exportCommitQueues.get(path) === settled) exportCommitQueues.delete(path)
+  })
+  return result
+}
+
 async function withSaveOperation<T>(
   sender: Electron.WebContents,
   token: string | undefined,
@@ -970,20 +988,22 @@ ipcMain.handle(
     if (target.canceled) return target
 
     const targetPath = await canonicalDocumentPath(target.path)
-    const committed = await atomicWrite(
-      targetPath,
-      request.html,
-      await currentRevision(targetPath),
-      { mode: 0o600 },
-    )
-    const exportedRevision = await currentRevision(targetPath)
-    if (!exportedRevision) throw new Error('Exported file could not be verified')
-    await rememberExport(event.sender, targetPath, exportedRevision)
-    return {
-      canceled: false,
-      path: targetPath,
-      ...(committed.warning ? { warning: committed.warning } : {}),
-    }
+    return enqueueExportCommit(targetPath, async () => {
+      const committed = await atomicWrite(
+        targetPath,
+        request.html,
+        await currentRevision(targetPath),
+        { mode: 0o600 },
+      )
+      const exportedRevision = await currentRevision(targetPath)
+      if (!exportedRevision) throw new Error('Exported file could not be verified')
+      await rememberExport(event.sender, targetPath, exportedRevision)
+      return {
+        canceled: false,
+        path: targetPath,
+        ...(committed.warning ? { warning: committed.warning } : {}),
+      }
+    })
   },
 )
 
@@ -1004,20 +1024,22 @@ ipcMain.handle(
       printBackground: true,
     })
     const targetPath = await canonicalDocumentPath(target.path)
-    const committed = await atomicWrite(
-      targetPath,
-      pdf,
-      await currentRevision(targetPath),
-      { mode: 0o600 },
-    )
-    const exportedRevision = await currentRevision(targetPath)
-    if (!exportedRevision) throw new Error('Exported file could not be verified')
-    await rememberExport(event.sender, targetPath, exportedRevision)
-    return {
-      canceled: false,
-      path: targetPath,
-      ...(committed.warning ? { warning: committed.warning } : {}),
-    }
+    return enqueueExportCommit(targetPath, async () => {
+      const committed = await atomicWrite(
+        targetPath,
+        pdf,
+        await currentRevision(targetPath),
+        { mode: 0o600 },
+      )
+      const exportedRevision = await currentRevision(targetPath)
+      if (!exportedRevision) throw new Error('Exported file could not be verified')
+      await rememberExport(event.sender, targetPath, exportedRevision)
+      return {
+        canceled: false,
+        path: targetPath,
+        ...(committed.warning ? { warning: committed.warning } : {}),
+      }
+    })
   },
 )
 
