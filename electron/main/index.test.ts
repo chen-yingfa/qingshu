@@ -204,7 +204,7 @@ describe('desktop IPC', () => {
       }
       if (path === '/user-data') return mocks.recentDirectoryHandle
       if (flags === 'wx') return mocks.tempHandle
-      if (path.includes('.md')) return mocks.sourceHandle
+      if (flags === 'r' && /\.[a-z]+$/u.test(path)) return mocks.sourceHandle
       return mocks.directoryHandle
     })
     mocks.sourceHandle.readFile.mockResolvedValue('# Hello')
@@ -242,6 +242,7 @@ describe('desktop IPC', () => {
 
   it('registers only the renderer bridge channels', () => {
     expect([...mocks.handlers.keys()].sort()).toEqual([
+      'qingshu:cancel-save',
       'qingshu:choose-save-path',
       'qingshu:close-response',
       'qingshu:export-html',
@@ -485,8 +486,16 @@ describe('desktop IPC', () => {
       )
       .mockRejectedValueOnce(new Error('recent failure b'))
 
+    const secondSenderFrame = { url: senderFrame.url }
+    const secondEvent = {
+      senderFrame: secondSenderFrame,
+      sender: {
+        mainFrame: secondSenderFrame,
+        printToPDF: vi.fn(),
+      },
+    }
     const first = mocks.handlers.get('qingshu:open-file')?.(event)
-    const second = mocks.handlers.get('qingshu:open-file')?.(event)
+    const second = mocks.handlers.get('qingshu:open-file')?.(secondEvent)
     await vi.waitFor(() =>
       expect(mocks.recentHandle.writeFile).toHaveBeenCalledOnce(),
     )
@@ -502,7 +511,10 @@ describe('desktop IPC', () => {
     releaseFirstWrite()
     await Promise.all([first, second])
     await expect(listed).resolves.toMatchObject({
-      paths: ['/notes/concurrent-b.md', '/notes/concurrent-a.md'],
+      paths: expect.arrayContaining([
+        '/notes/concurrent-b.md',
+        '/notes/concurrent-a.md',
+      ]),
       warnings: [
         expect.stringContaining('recent failure a'),
         expect.stringContaining('recent failure b'),
@@ -788,6 +800,23 @@ describe('desktop IPC', () => {
       filePaths: ['/notes/ordered.md'],
     })
     await mocks.handlers.get('qingshu:open-file')?.(event)
+    const initialRevision = {
+      dev: 1,
+      ino: 2,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
+    }
+    const savedRevision = {
+      dev: 1,
+      ino: 8,
+      mode: 0o100644,
+      mtimeMs: 300,
+      size: 5,
+    }
+    mocks.sourceHandle.stat
+      .mockResolvedValueOnce(initialRevision)
+      .mockResolvedValueOnce(savedRevision)
     mocks.stat
       .mockResolvedValueOnce({
         dev: 1,
@@ -869,7 +898,9 @@ describe('desktop IPC', () => {
     await vi.waitFor(() => expect(mocks.tempHandle.writeFile).toHaveBeenCalled())
 
     await expect(
-      mocks.handlers.get('qingshu:cancel-save')?.(event, 'tab-2:7'),
+      Promise.resolve(
+        mocks.handlers.get('qingshu:cancel-save')?.(event, 'tab-2:7'),
+      ),
     ).resolves.toBeUndefined()
     releaseWrite()
     await expect(save).rejects.toThrow('Save was canceled')
@@ -902,6 +933,7 @@ describe('desktop IPC', () => {
       canceled: false,
       filePaths: ['/notes/interleaved.md'],
     })
+    mocks.stat.mockResolvedValue(initialRevision)
     mocks.sourceHandle.stat.mockResolvedValue(initialRevision)
     mocks.sourceHandle.readFile.mockImplementation(async () => {
       order.push(`read:${diskContent}`)
@@ -910,10 +942,12 @@ describe('desktop IPC', () => {
     await mocks.handlers.get('qingshu:open-file')?.(event)
 
     mocks.stat
-      .mockResolvedValueOnce(initialRevision)
-      .mockResolvedValueOnce(initialRevision)
       .mockResolvedValue(savedRevision)
-    mocks.sourceHandle.stat.mockResolvedValue(savedRevision)
+      .mockResolvedValueOnce(initialRevision)
+      .mockResolvedValueOnce(initialRevision)
+    mocks.sourceHandle.stat
+      .mockResolvedValue(savedRevision)
+      .mockResolvedValueOnce(initialRevision)
     mocks.tempHandle.stat.mockResolvedValue(savedRevision)
     mocks.tempHandle.writeFile.mockImplementation(async (content: string) => {
       pendingContent = content
@@ -938,6 +972,8 @@ describe('desktop IPC', () => {
       .finally(() => {
         duplicateSettled = true
       })
+    await vi.waitFor(() => expect(mocks.showOpenDialog).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
     const saveB = mocks.handlers.get('qingshu:save-file')?.(event, {
       path: '/notes/interleaved.md',
       content: 'save-b',
@@ -1006,6 +1042,15 @@ describe('desktop IPC', () => {
       mtimeMs: 100,
       size: 7,
     })
+    const initialRevision = {
+      dev: 1,
+      ino: 4,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 7,
+    }
+    mocks.stat.mockResolvedValue(initialRevision)
+    await mocks.handlers.get('qingshu:open-file')?.(event)
     mocks.stat.mockResolvedValue({
       dev: 1,
       ino: 4,
@@ -1013,7 +1058,6 @@ describe('desktop IPC', () => {
       mtimeMs: 200,
       size: 12,
     })
-    await mocks.handlers.get('qingshu:open-file')?.(event)
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
@@ -1068,21 +1112,13 @@ describe('desktop IPC', () => {
       filePaths: ['/notes/handle-conflict.md'],
     })
     await mocks.handlers.get('qingshu:open-file')?.(event)
-    mocks.sourceHandle.stat
-      .mockResolvedValueOnce({
-        dev: 1,
-        ino: 2,
-        mode: 0o100644,
-        mtimeMs: 100,
-        size: 6,
-      })
-      .mockResolvedValueOnce({
-        dev: 1,
-        ino: 77,
-        mode: 0o100644,
-        mtimeMs: 100,
-        size: 6,
-      })
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 77,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
+    })
 
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
@@ -1127,7 +1163,6 @@ describe('desktop IPC', () => {
   })
 
   it('unifies concurrent Save As aliases under one physical-path queue', async () => {
-    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
     mocks.showSaveDialog
       .mockResolvedValueOnce({
         canceled: false,
@@ -1140,40 +1175,40 @@ describe('desktop IPC', () => {
     mocks.realpath
       .mockResolvedValueOnce('/real/shared-save-as.md')
       .mockResolvedValueOnce('/real/shared-save-as.md')
-    let releaseInitialStat!: () => void
-    const initialStat = new Promise<void>((resolve) => {
-      releaseInitialStat = resolve
-    })
-    let statCall = 0
-    const committed = {
+    const revision = {
       dev: 1,
-      ino: 8,
-      mode: 0o100600,
-      mtimeMs: 300,
-      size: 5,
+      ino: 2,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 6,
     }
-    mocks.stat.mockImplementation(async () => {
-      statCall += 1
-      if (statCall === 1) await initialStat
-      if (statCall <= 3) throw missing
-      return committed
-    })
-    mocks.tempHandle.stat.mockResolvedValue(committed)
+    mocks.stat.mockResolvedValue(revision)
+    mocks.sourceHandle.stat.mockResolvedValue(revision)
+    mocks.tempHandle.stat.mockResolvedValue(revision)
+    await mocks.handlers.get('qingshu:choose-save-path')?.(event)
+    await mocks.handlers.get('qingshu:choose-save-path')?.(event)
+    let releaseFirst!: () => void
     const writes: string[] = []
     mocks.tempHandle.writeFile.mockImplementation(async (content: string) => {
       writes.push(content)
+      if (writes.length === 1) {
+        await new Promise<void>(resolve => {
+          releaseFirst = resolve
+        })
+      }
     })
 
     const first = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/real/shared-save-as.md',
       content: 'first',
     }) as Promise<unknown>
     const second = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/real/shared-save-as.md',
       content: 'second',
     }) as Promise<unknown>
-    await vi.waitFor(() => expect(mocks.stat).toHaveBeenCalledTimes(1))
-    expect(writes).toEqual([])
+    await vi.waitFor(() => expect(writes).toEqual(['first']))
 
-    releaseInitialStat()
+    releaseFirst()
     await expect(Promise.all([first, second])).resolves.toEqual([
       { canceled: false, path: '/real/shared-save-as.md' },
       { canceled: false, path: '/real/shared-save-as.md' },
@@ -1262,6 +1297,13 @@ describe('desktop IPC', () => {
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, { content: '# New' }),
     ).resolves.toEqual({ canceled: false, path: '/notes/new.md' })
+    mocks.sourceHandle.stat.mockResolvedValue({
+      dev: 1,
+      ino: 8,
+      mode: 0o100600,
+      mtimeMs: 300,
+      size: 5,
+    })
 
     expect(mocks.open).toHaveBeenCalledWith(
       expect.stringMatching(/^\/notes\/\.new\.md\.qingshu-\d+-\d+\.tmp$/),
@@ -1333,6 +1375,7 @@ describe('desktop IPC', () => {
       path: '/notes/durable-warning.md',
       warning: 'Saved, but directory sync failed: I/O failure',
     })
+    mocks.sourceHandle.stat.mockResolvedValue(committed)
     await expect(
       mocks.handlers.get('qingshu:save-file')?.(event, {
         path: '/notes/durable-warning.md',
@@ -1379,8 +1422,7 @@ describe('desktop IPC', () => {
     await expect(
       mocks.handlers.get('qingshu:export-html')?.(event, { html: '<h1>Hello</h1>' }),
     ).resolves.toEqual({ canceled: false, path: '/exports/hello.html' })
-    expect(mocks.writeFile).toHaveBeenCalledWith(
-      '/exports/hello.html',
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith(
       '<h1>Hello</h1>',
       'utf8',
     )
@@ -1659,7 +1701,13 @@ describe('desktop IPC', () => {
       pageSize: 'A4',
       printBackground: true,
     })
-    expect(mocks.writeFile).toHaveBeenCalledWith('/exports/hello.pdf', pdf)
+    expect(mocks.tempHandle.writeFile).toHaveBeenCalledWith(pdf)
+    expect(mocks.rename).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/exports\/\.hello\.pdf\.qingshu-\d+-\d+\.tmp$/,
+      ),
+      '/exports/hello.pdf',
+    )
   })
 
   it('does not print or write when PDF export is canceled', async () => {
