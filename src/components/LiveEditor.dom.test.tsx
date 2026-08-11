@@ -1069,6 +1069,30 @@ describe('LiveEditor block reordering', () => {
     expect(result.onChange).toHaveBeenCalledOnce()
   })
 
+  it('rejects a competing primary pointer during an active drag', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const target = result.container.querySelector(
+      '[data-drop-boundary="0"]',
+    ) as HTMLElement
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Move block 2' }),
+      { pointerId: 1, button: 0, isPrimary: true },
+    )
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Move block 3' }),
+      { pointerId: 2, button: 0, isPrimary: true },
+    )
+    fireEvent.pointerEnter(target, { pointerId: 2 })
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(result.onChange).not.toHaveBeenCalled()
+
+    fireEvent.pointerEnter(target, { pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Second\n\nFirst\n\nThird',
+    )
+  })
+
   it('tracks touch movement by coordinates despite implicit pointer capture', () => {
     const result = renderEditor('First\n\nSecond\n\nThird')
     const zones = Array.from(

@@ -1369,7 +1369,13 @@ export function LiveEditor({
                     <BlockDragHandle
                       index={realIndex}
                       onPointerDown={(event) => {
-                        if (event.button !== 0 || !event.isPrimary) return
+                        if (
+                          event.button !== 0 ||
+                          !event.isPrimary ||
+                          dragPointerRef.current !== null
+                        ) {
+                          return
+                        }
                         event.preventDefault()
                         draggedBlockRef.current = realIndex
                         dropBoundaryRef.current = realIndex
