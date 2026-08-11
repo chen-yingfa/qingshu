@@ -221,3 +221,98 @@ Status: DONE_WITH_CONCERNS
 - Vite continues to report the pre-existing renderer chunk over 500 kB.
 - The user-provided plan file remains untracked and was not modified.
 - No push was performed, as requested.
+
+## Second review remediation
+
+Status: DONE_WITH_CONCERNS
+
+### Fixes delivered
+
+- Ordinary Save on an untitled document now uses the same two-phase native
+  selection, Electron canonicalization/authorization, live-tab collision
+  preflight, and authorized write as Save As.
+- `useDocument` maintains a synchronously reduced live tab ref plus canonical
+  path owners and token-counted reservations. Save, Save As, normal Open, and
+  Recent Open make atomic ownership decisions after IPC awaits. Reservations
+  survive overlapping operations and are released in `finally`; successful
+  current saves commit ownership.
+- Tab lifetimes prevent a dialog result from writing after its originating tab
+  was closed or reset. Simultaneous duplicate opens deduplicate before tab ID
+  and revision allocation.
+- A transient recent read failure leaves persistence state unknown. It cannot
+  be mutated or written as an empty fallback, and a later list/operation
+  retries loading.
+- Recent warnings are queued rather than overwritten, consumed once by a list
+  response, and rendered even when that response is stale for ordering.
+- Malformed recent JSON becomes a known-safe empty state and is atomically
+  rewritten. Recent directory-sync warnings are retained and reported instead
+  of being discarded.
+- Resetting the sole tab threads the configured default source mode through
+  the close action.
+- Only the active tab advertises `aria-controls`; its target tabpanel exists.
+  Inactive tabs no longer reference nonexistent panels.
+
+### TDD red/green evidence
+
+1. Untitled Save and atomic ownership:
+   - RED:
+     `npm test -- src/hooks/useDocument.dom.test.tsx -t "ordinary Save|atomically reserves|simultaneous opens"`
+     failed all three tests: ordinary Save skipped canonical selection, both
+     overlapping saves reached the write bridge, and duplicate opens consumed
+     `tab-3`.
+   - GREEN: `3 passed`.
+2. Post-await lifetime:
+   - RED:
+     `npm test -- src/hooks/useDocument.dom.test.tsx -t "originating tab closes"`
+     reached the write bridge after the tab closed.
+   - GREEN: `1 passed`.
+3. Sole-tab source default:
+   - RED:
+     `npm test -- src/hooks/useDocument.dom.test.tsx -t "configured source mode"`
+     restored `false` instead of the configured `true`.
+   - GREEN: `1 passed`.
+4. ARIA controls:
+   - RED:
+     `npm test -- src/components/TabStrip.test.tsx -t "accessible tablist"`
+     found `aria-controls="document-panel-two"` on an inactive tab without a
+     panel.
+   - GREEN: complete TabStrip suite `2 passed`.
+5. Unknown/malformed recent state and directory sync:
+   - RED focused runs showed an EACCES fallback writing
+     `["/notes/new.md"]`, malformed JSON receiving no rewrite, and a dropped
+     directory-sync warning.
+   - GREEN: all three focused runs passed; complete Electron suite passed.
+6. Warning queue:
+   - RED:
+     `npm test -- electron/main/index.test.ts -t "queues each recent persistence warning"`
+     returned only the second warning.
+   - GREEN: `1 passed`, and the following list response contained no consumed
+     warnings.
+7. Stale notification delivery:
+   - RED:
+     `npm test -- src/App.test.tsx -t "consumable recent notifications"`
+     lost both warning and missing-file notification with the stale ordering.
+   - GREEN: `1 passed`; newest path ordering remained intact.
+
+### Commits
+
+- `a91b56f` — `fix: reserve live document paths atomically`
+- `9df0a98` — `fix: preserve recent state and notifications`
+
+### Verification
+
+- `npm test`: exit 0; 23 files passed; 292 tests passed.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0; renderer, Electron main/preload, packaging, and
+  AppImage generation passed.
+- Artifact: `release/2.1.0/Qingshu-2.1.0.AppImage`.
+- `APPIMAGE_EXTRACT_AND_RUN=1` Xvfb smoke launch: accepted exit 0/timeout
+  condition; actual run exited 0 and emitted only headless DBus diagnostics.
+
+### Concerns
+
+- This host still lacks `libfuse.so.2`, so AppImage smoke testing uses
+  AppImageKit's extraction fallback.
+- Vite still reports the pre-existing renderer chunk-size warning.
+- The user-provided plan remains untracked and untouched.
+- No push was performed.
