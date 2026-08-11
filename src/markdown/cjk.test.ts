@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import * as markdownParser from './parser'
 import {
   documentStats,
   normalizeCjkInput,
@@ -159,6 +160,40 @@ describe('normalizeCjkInput', () => {
 
     expect(normalized).toBe('`"中文A"` $"中文A"$ “中文A”')
     expect(spaceCjkLatin(normalized)).toBe('`"中文A"` $"中文A"$ “中文 A”')
+  })
+
+  it('protects code and math emitted before automatic spacing', () => {
+    expect(normalizeCjkInput('￥中文A￥ ·中文A·', undefined, true)).toBe(
+      '$中文A$ `中文A`',
+    )
+  })
+
+  it('still spaces prose adjacent to converted shortcuts', () => {
+    expect(
+      normalizeCjkInput(
+        '正文A ￥中文A￥ ·中文A· B中文',
+        undefined,
+        true,
+      ),
+    ).toBe('正文 A $中文A$ `中文A` B 中文')
+  })
+
+  it('spaces escaped and unmatched shortcut pairs as ordinary text', () => {
+    expect(
+      normalizeCjkInput(
+        '\\￥中文A￥ \\·中文A· ￥中文A ·中文A',
+        undefined,
+        true,
+      ),
+    ).toBe('\\$中文 A$ \\`中文 A` ￥中文 A ·中文 A')
+  })
+
+  it('only adds one output parse when shortcuts create protected syntax', () => {
+    const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
+
+    normalizeCjkInput('￥中文A￥ ·中文A· 正文B', undefined, true)
+
+    expect(parse).toHaveBeenCalledTimes(2)
   })
 
   it('protects Markdown destinations while transforming visible labels', () => {

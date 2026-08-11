@@ -329,7 +329,12 @@ function normalizeRegularText(text: string, start: number, source: string): stri
     })
 }
 
-function normalizePlainText(text: string, start: number, source: string): string {
+function normalizePlainText(
+  text: string,
+  start: number,
+  source: string,
+  onShortcut?: () => void,
+): string {
   let result = ''
   let plainStart = 0
   let index = 0
@@ -355,6 +360,7 @@ function normalizePlainText(text: string, start: number, source: string): string
     )
     const markdownDelimiter = delimiter === '￥' ? '$' : '`'
     result += markdownDelimiter + text.slice(index + 1, close) + markdownDelimiter
+    onShortcut?.()
     index = close + 1
     plainStart = index
   }
@@ -369,6 +375,30 @@ export function normalizeCjkInput(
   autoSpacing = false,
   protectedRanges?: readonly SourceRange[],
 ): string {
+  if (autoSpacing && /[￥·]/u.test(source)) {
+    const initialRanges =
+      protectedRanges ?? protectedMarkdownRanges(source)
+    let convertedShortcut = false
+    const normalized = transformMarkdownText(
+      source,
+      (text, start, fullSource) =>
+        normalizePlainText(text, start, fullSource, () => {
+          convertedShortcut = true
+        }),
+      editableRange,
+      initialRanges,
+    )
+    const spacingRanges = convertedShortcut
+      ? protectedMarkdownRanges(normalized)
+      : initialRanges
+    return transformMarkdownText(
+      normalized,
+      spacePlainText,
+      editableRange,
+      spacingRanges,
+    )
+  }
+
   return transformMarkdownText(
     source,
     (text, start, fullSource) => {

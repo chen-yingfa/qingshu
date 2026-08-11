@@ -1315,6 +1315,28 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => expect(textarea.selectionStart).toBe(7))
   })
 
+  it('protects converted shortcuts while spacing prose and mapping the caret', async () => {
+    const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
+    const result = renderEditor('中文', { autoSpacing: true })
+    const textarea = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const value = '￥中文A￥ ·中文A· 正文B'
+    parse.mockClear()
+
+    fireEvent.change(textarea, {
+      target: {
+        value,
+        selectionStart: value.length,
+        selectionEnd: value.length,
+      },
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('$中文A$ `中文A` 正文 B')
+    expect(parse).toHaveBeenCalledTimes(3)
+    await waitFor(() => expect(textarea.selectionStart).toBe(value.length + 1))
+  })
+
   it.each([
     ['inline code', '`中文A`', '`中文A`'],
     ['link', '[中文A](./中文React)', '[中文 A](./中文React)'],
