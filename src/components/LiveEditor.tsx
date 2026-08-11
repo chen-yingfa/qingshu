@@ -709,6 +709,7 @@ export function LiveEditor({
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(toEditorValue(active.source))
+  const [activeSession, setActiveSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
@@ -718,11 +719,6 @@ export function LiveEditor({
   const previousActiveRef = useRef(safeActive)
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
-  const activeSessionRef = useRef(0)
-  const activeSessionObservationRef = useRef({
-    content,
-    active: safeActive,
-  })
   const handledFormatRef = useRef(0)
   const activationRef = useRef(onActiveBlockChange)
   activationRef.current = onActiveBlockChange
@@ -731,27 +727,10 @@ export function LiveEditor({
   }, [])
   contentRef.current = content
 
-  const observedSession = activeSessionObservationRef.current
-  if (
-    observedSession.content !== content ||
-    observedSession.active !== safeActive
-  ) {
-    const acknowledged = pendingAcknowledgementRef.current === content
-    if (observedSession.active !== safeActive || !acknowledged) {
-      activeSessionRef.current += 1
-    }
-    activeSessionObservationRef.current = {
-      content,
-      active: safeActive,
-    }
-  }
-
-  const rotateEditorSession = (nextContent: string, nextActive: number) => {
-    activeSessionRef.current += 1
-    activeSessionObservationRef.current = {
-      content: nextContent,
-      active: nextActive,
-    }
+  const rotateEditorSession = () => {
+    composingRef.current = false
+    codeTabEscapeRef.current = false
+    setActiveSession((session) => session + 1)
   }
 
   useLayoutEffect(() => {
@@ -765,11 +744,11 @@ export function LiveEditor({
     }
     const externalChange = parentChanged && !acknowledged
     if (activeChanged || externalChange) {
+      rotateEditorSession()
       setDraft(toEditorValue(active.source))
       rangeRef.current = { start: active.start, end: active.end }
     }
     if (externalChange) setInsertedBlocks({ content, blocks: [] })
-    if (activeChanged) codeTabEscapeRef.current = false
     previousActiveRef.current = safeActive
   }, [active.end, active.source, active.start, content, safeActive])
 
@@ -973,7 +952,7 @@ export function LiveEditor({
           },
         ],
       }))
-      rotateEditorSession(nextContent, safeActive)
+      rotateEditorSession()
       setDraft('')
       rangeRef.current = { start: insertionPoint, end: insertionPoint }
       contentRef.current = nextContent
@@ -1109,7 +1088,7 @@ export function LiveEditor({
         const targetIndex = Math.max(0, safeActive - 1)
         if (safeActive === 0) {
           const first = parseDocument(mergedContent).blocks[0]
-          rotateEditorSession(mergedContent, 0)
+          rotateEditorSession()
           setDraft(toEditorValue(first?.source ?? ''))
           rangeRef.current = {
             start: first?.start ?? 0,
@@ -1283,7 +1262,7 @@ export function LiveEditor({
       content: reordered.content,
       blocks: reorderedInsertions,
     })
-    rotateEditorSession(reordered.content, Math.max(0, editorIndex))
+    if (Math.max(0, editorIndex) === safeActive) rotateEditorSession()
     setDraft(toEditorValue(moved?.source ?? ''))
     rangeRef.current = {
       start: moved?.start ?? 0,
@@ -1382,7 +1361,7 @@ export function LiveEditor({
               <Fragment
                 key={
                   index === safeActive
-                    ? `active-block-row-${activeSessionRef.current}`
+                    ? `active-block-row-${activeSession}`
                     : block.id
                 }
               >

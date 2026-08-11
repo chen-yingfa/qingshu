@@ -136,6 +136,45 @@ describe('LiveEditor state synchronization', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('B!')
   })
 
+  it('resets IME composition state for a same-index external replacement', () => {
+    const result = renderEditor('中文', { autoSpacing: true })
+    fireEvent.compositionStart(screen.getByLabelText('Active Markdown block'))
+    result.rerender(
+      <LiveEditor
+        content="新文"
+        activeBlock={0}
+        autoSpacing
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '新文text', selectionStart: 6, selectionEnd: 6 },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('新文 text')
+  })
+
+  it('resets code Tab escape state when a new block session replaces it', () => {
+    const result = renderEditor('```ts\nvalue\n```')
+    fireEvent.keyDown(screen.getByLabelText('Active code block'), {
+      key: 'Escape',
+    })
+    result.rerender(
+      <LiveEditor
+        content={'```js\nother\n```'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith('  ```js\nother\n```')
+  })
+
   it('renders the entire source once while printing so cross-block footnotes resolve', async () => {
     renderEditor(
       '# Active\n\nA reference across blocks.[^note]\n\n[^note]: Footnote **content**.',
