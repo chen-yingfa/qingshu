@@ -826,18 +826,23 @@ export function LiveEditor({
     }
     const externalChange = parentChanged && !acknowledged
     if (activeChanged || externalChange) {
-      const semanticActive =
+      const semanticIndex =
         activeChanged && editingBoundary?.content === content
-          ? model.blocks.find(
+          ? model.blocks.findIndex(
               (block) =>
                 block.start <= active.start && block.end >= active.end,
             )
-          : undefined
+          : -1
+      const semanticActive =
+        semanticIndex >= 0 ? model.blocks[semanticIndex] : undefined
       rotateEditorSession()
       setDraft(toEditorValue(semanticActive?.source ?? active.source))
       rangeRef.current = {
         start: semanticActive?.start ?? active.start,
         end: semanticActive?.end ?? active.end,
+      }
+      if (semanticIndex >= 0 && semanticIndex !== safeActive) {
+        activationRef.current(semanticIndex)
       }
     }
     if (externalChange) setInsertedBlocks({ content, blocks: [] })

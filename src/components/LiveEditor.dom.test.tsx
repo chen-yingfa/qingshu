@@ -124,6 +124,40 @@ describe('LiveEditor state synchronization', () => {
     )
   })
 
+  it('remaps a trailing list overlay to its semantic list index', async () => {
+    const before =
+      'Intro\n\n- One\n\nCurrent\n\n- Three\n\nOutro\n\nAnother'
+    const after = 'Intro\n\n- One\n\n-\n\n- Three\n\nOutro\n\nAnother'
+    const result = renderEditor(before, { activeBlock: 2 })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '-', selectionStart: 1, selectionEnd: 1 },
+    })
+    result.rerender(
+      <LiveEditor
+        content={after}
+        activeBlock={2}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    result.rerender(
+      <LiveEditor
+        content={after}
+        activeBlock={3}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1),
+    )
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('- One\n\n-\n\n- Three')
+  })
+
   it('does not duplicate content when a tight list becomes loose while active', () => {
     const result = renderEditor('- First\n- Second')
     const editor = screen.getByLabelText(
