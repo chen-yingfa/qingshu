@@ -2186,10 +2186,7 @@ export function LiveEditor({
                         spellCheck={!fencedCode && !displayMath}
                         readOnly={readOnly}
                         value={draft}
-                        onFocus={(event) => {
-                          reportSelection(event.currentTarget)
-                          setActiveInputFocused(true)
-                        }}
+                        onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
