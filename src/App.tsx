@@ -607,6 +607,36 @@ export default function App() {
         run: () => toggleOption('source'),
       },
       {
+        id: 'next-tab',
+        label: 'Next tab',
+        shortcut: formatShortcut(settings.shortcuts.nextTab) || undefined,
+        keywords: ['document', 'switch', 'tab'],
+        run: () => {
+          const index = tabs.findIndex((tab) => tab.id === activeTabId)
+          if (index >= 0) activateTab(tabs[(index + 1) % tabs.length].id)
+        },
+      },
+      {
+        id: 'previous-tab',
+        label: 'Previous tab',
+        shortcut:
+          formatShortcut(settings.shortcuts.previousTab) || undefined,
+        keywords: ['document', 'switch', 'tab'],
+        run: () => {
+          const index = tabs.findIndex((tab) => tab.id === activeTabId)
+          if (index >= 0) {
+            activateTab(tabs[(index - 1 + tabs.length) % tabs.length].id)
+          }
+        },
+      },
+      {
+        id: 'close-tab',
+        label: 'Close current tab',
+        shortcut: formatShortcut(settings.shortcuts.closeTab) || undefined,
+        keywords: ['document', 'close', 'tab'],
+        run: () => handleCloseTab(activeTabId),
+      },
+      {
         id: 'settings',
         label: 'Settings',
         shortcut: formatShortcut(settings.shortcuts.settings) || undefined,
@@ -620,7 +650,18 @@ export default function App() {
         run: () => openRecent(path),
       })),
     ],
-    [openRecent, recentPaths, requestFormat, runCommand, settings.shortcuts, toggleOption],
+    [
+      activateTab,
+      activeTabId,
+      handleCloseTab,
+      openRecent,
+      recentPaths,
+      requestFormat,
+      runCommand,
+      settings.shortcuts,
+      tabs,
+      toggleOption,
+    ],
   )
 
   const executeShortcutAction = useCallback(
@@ -660,6 +701,20 @@ export default function App() {
         setSettingsOpen(true)
         return
       }
+      if (action === 'closeTab') {
+        handleCloseTab(activeTabId)
+        return
+      }
+      if (action === 'nextTab' || action === 'previousTab') {
+        const current = tabs.findIndex((tab) => tab.id === activeTabId)
+        if (current >= 0) {
+          const direction = action === 'nextTab' ? 1 : -1
+          const target =
+            (current + direction + tabs.length) % tabs.length
+          activateTab(tabs[target].id)
+        }
+        return
+      }
       const menu = menuCommands[action]
       if (menu) {
         void runCommand(menu)
@@ -673,7 +728,15 @@ export default function App() {
       const option = options[action]
       if (option) toggleOption(option)
     },
-    [requestFormat, runCommand, toggleOption],
+    [
+      activateTab,
+      activeTabId,
+      handleCloseTab,
+      requestFormat,
+      runCommand,
+      tabs,
+      toggleOption,
+    ],
   )
 
   useEffect(() => window.qingshu.onMenuCommand((command) => void runCommand(command)), [

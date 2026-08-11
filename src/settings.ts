@@ -19,6 +19,9 @@ export type ShortcutAction =
   | 'a4'
   | 'spacing'
   | 'sourceMode'
+  | 'nextTab'
+  | 'previousTab'
+  | 'closeTab'
   | 'settings'
 
 export interface AppSettings {
@@ -53,6 +56,9 @@ export const SHORTCUT_ACTIONS: Array<{
   { id: 'a4', label: 'Toggle A4 preview' },
   { id: 'spacing', label: 'Toggle automatic CJK spacing' },
   { id: 'sourceMode', label: 'Toggle source mode' },
+  { id: 'nextTab', label: 'Next tab' },
+  { id: 'previousTab', label: 'Previous tab' },
+  { id: 'closeTab', label: 'Close current tab' },
 ]
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -81,6 +87,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     a4: '',
     spacing: '',
     sourceMode: 'Mod+Shift+E',
+    nextTab: 'Ctrl+Tab',
+    previousTab: 'Ctrl+Shift+Tab',
+    closeTab: 'Mod+W',
   },
 }
 

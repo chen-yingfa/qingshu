@@ -272,12 +272,17 @@ button {
 }
 
 .document-tab-close {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 27px;
   width: 27px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--muted);
   font-size: 17px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 
 .document-tab-close:hover {

@@ -268,7 +268,13 @@ export function SettingsDialog({
                         }
                         placeholder="Unassigned"
                         onKeyDown={(event) => {
-                          if (event.key === 'Tab' || event.key === 'Escape') {
+                          if (
+                            (event.key === 'Tab' &&
+                              !event.ctrlKey &&
+                              !event.metaKey &&
+                              !event.altKey) ||
+                            event.key === 'Escape'
+                          ) {
                             return
                           }
                           event.preventDefault()
