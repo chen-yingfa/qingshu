@@ -440,9 +440,13 @@ button {
   color: var(--muted);
   background: transparent;
   cursor: grab;
-  opacity: 0.42;
+  opacity: 0;
   place-items: center;
   touch-action: none;
+  transition:
+    opacity 100ms ease,
+    color 100ms ease,
+    background-color 100ms ease;
   user-select: none;
 }
 

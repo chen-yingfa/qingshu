@@ -37,4 +37,16 @@ describe('writing surface appearance', () => {
       /\.focus-mode\s*\{[^}]*grid-template-rows:\s*0 0 0 minmax\(0,\s*1fr\) 0;/su,
     )
   })
+
+  it('shows block drag dots only for the hovered or keyboard-focused block', () => {
+    expect(styles).toMatch(
+      /\.block-drag-handle\s*\{[^}]*opacity:\s*0;/su,
+    )
+    expect(styles).toMatch(
+      /\.editor-block-row:hover \.block-drag-handle\s*\{[^}]*opacity:\s*1;/su,
+    )
+    expect(styles).toMatch(
+      /\.block-drag-handle:focus-visible[\s\S]*opacity:\s*1;/su,
+    )
+  })
 })
