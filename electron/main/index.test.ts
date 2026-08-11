@@ -341,8 +341,90 @@ describe('desktop IPC', () => {
       mocks.handlers.get('qingshu:list-recent-files')?.(event),
     ).resolves.toMatchObject({
       paths: ['/notes/second.md', '/notes/first.md'],
-      warning: expect.stringContaining('Recent files could not be updated'),
+      warnings: [
+        expect.stringContaining('Recent files could not be updated'),
+      ],
     })
+  })
+
+  it('keeps a transient recent read failure unknown instead of treating it as empty', async () => {
+    const denied = Object.assign(new Error('permission denied'), {
+      code: 'EACCES',
+    })
+    const loaded = await main.loadRecentFiles(() => Promise.reject(denied))
+
+    expect(loaded).toEqual({ known: false, error: denied })
+  })
+
+  it('rewrites malformed recent JSON once an empty state is known safe', async () => {
+    const loaded = await main.loadRecentFiles(() =>
+      Promise.resolve('{malformed'),
+    )
+
+    expect(loaded).toEqual({
+      known: true,
+      stored: [],
+      malformed: true,
+    })
+  })
+
+  it('retains a recent directory sync warning for the renderer', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.readFile.mockRejectedValue(missing)
+    mocks.recentDirectoryHandle.sync.mockRejectedValue(
+      Object.assign(new Error('directory sync failed'), { code: 'EIO' }),
+    )
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/sync-warning.md'],
+    })
+
+    await expect(
+      mocks.handlers.get('qingshu:open-file')?.(event),
+    ).resolves.toMatchObject({
+      canceled: false,
+      path: '/notes/sync-warning.md',
+    })
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toMatchObject({
+      warnings: [expect.stringContaining('directory sync failed')],
+    })
+  })
+
+  it('queues each recent persistence warning until one list response consumes it', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.readFile.mockRejectedValue(missing)
+    mocks.recentHandle.writeFile
+      .mockRejectedValueOnce(new Error('first persistence failure'))
+      .mockResolvedValue(undefined)
+    mocks.recentHandle.chmod
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('second persistence failure'))
+    mocks.showOpenDialog
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/first-warning.md'],
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ['/notes/second-warning.md'],
+      })
+
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toMatchObject({
+      warnings: [
+        expect.stringContaining('first persistence failure'),
+        expect.stringContaining('second persistence failure'),
+      ],
+    })
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.not.toHaveProperty('warnings')
   })
 
   it('keeps a committed save successful when recent chmod fails', async () => {

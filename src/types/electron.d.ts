@@ -10,6 +10,7 @@ export type RecentFilesResult = {
   paths: string[]
   removed: string[]
   warning?: string
+  warnings?: string[]
 }
 
 export type WindowAction = 'minimize' | 'toggle-maximize' | 'close'

@@ -176,12 +176,14 @@ export default function App() {
     const generation = ++recentRefreshGeneration.current
     try {
       const result = await window.qingshu.listRecentFiles()
-      if (generation !== recentRefreshGeneration.current) return
-      setRecentPaths(result.paths)
-      if (result.warning) addToast('warning', result.warning)
+      for (const warning of result.warnings ?? (result.warning ? [result.warning] : [])) {
+        addToast('warning', warning)
+      }
       for (const path of result.removed) {
         addToast('warning', `Removed missing recent file: ${filename(path)}`)
       }
+      if (generation !== recentRefreshGeneration.current) return
+      setRecentPaths(result.paths)
     } catch (error) {
       if (generation !== recentRefreshGeneration.current) return
       addToast('error', errorMessage(error))

@@ -300,6 +300,55 @@ describe('document tabs', () => {
     expect(screen.queryByRole('menuitem', { name: 'stale.md' })).toBeNull()
   })
 
+  it('delivers consumable recent notifications from a stale list response once', async () => {
+    let resolveOlder!: (value: {
+      paths: string[]
+      removed: string[]
+      warning?: string
+    }) => void
+    let resolveNewer!: (value: {
+      paths: string[]
+      removed: string[]
+    }) => void
+    api.listRecentFiles
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewer = resolve
+          }),
+      )
+    api.openFile.mockResolvedValue({
+      canceled: false,
+      path: '/notes/opened.md',
+      content: '# Opened',
+    })
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await waitFor(() => expect(api.listRecentFiles).toHaveBeenCalledTimes(2))
+
+    resolveNewer({ paths: ['/notes/newest.md'], removed: [] })
+    resolveOlder({
+      paths: ['/notes/stale.md'],
+      removed: ['/notes/missing.md'],
+      warning: 'Recent persistence warning',
+    })
+
+    expect(await screen.findByText('Recent persistence warning')).not.toBeNull()
+    expect(
+      await screen.findByText('Removed missing recent file: missing.md'),
+    ).not.toBeNull()
+    expect(screen.getAllByText('Recent persistence warning')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Recent files' }))
+    expect(screen.getByRole('menuitem', { name: 'newest.md' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'stale.md' })).toBeNull()
+  })
+
   it('shows dynamic recent commands and opens them from the compact toolbar menu', async () => {
     api.listRecentFiles.mockResolvedValue({
       paths: ['/notes/recent.md'],
@@ -764,8 +813,11 @@ describe('commands and operation feedback', () => {
     fireEvent.keyDown(window, { key: 's', ctrlKey: true, shiftKey: true })
 
     await waitFor(() => expect(api.openFile).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.chooseSavePath).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(api.saveFile).toHaveBeenCalledTimes(2))
-    expect(api.saveFile.mock.calls[0][0]).toMatchObject({ path: undefined })
+    expect(api.saveFile.mock.calls[0][0]).toMatchObject({
+      path: '/notes/selected.md',
+    })
     expect(api.saveFile.mock.calls[1][0]).toMatchObject({
       path: '/notes/selected.md',
     })

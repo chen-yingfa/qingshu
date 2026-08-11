@@ -63,7 +63,7 @@ let recentFiles: string[] | null = null
 let recentFilesLoad: Promise<void> | null = null
 let removedRecentFiles: string[] = []
 let recentFilesWrite = Promise.resolve()
-let recentFilesWarning: string | undefined
+let recentFilesWarnings: string[] = []
 let tempSequence = 0
 
 interface CloseState {
@@ -129,7 +129,10 @@ function recentFilesPath(): string {
 }
 
 function noteRecentWarning(error: unknown): void {
-  recentFilesWarning = `Recent files could not be updated: ${messageOf(error)}`
+  recentFilesWarnings = [
+    ...recentFilesWarnings,
+    `Recent files could not be updated: ${messageOf(error)}`,
+  ]
 }
 
 async function atomicWriteRecentFiles(content: string): Promise<void> {
@@ -150,7 +153,8 @@ async function atomicWriteRecentFiles(content: string): Promise<void> {
     await rename(tempPath, target)
     renamed = true
     await chmod(target, 0o600)
-    await syncDirectory(dirname(target))
+    const directoryWarning = await syncDirectory(dirname(target))
+    if (directoryWarning) throw new Error(directoryWarning)
   } finally {
     await handle?.close().catch(() => undefined)
     if (!renamed) {
@@ -184,18 +188,38 @@ export function recentEntriesNeedCleanup(
   )
 }
 
+export async function loadRecentFiles(
+  read: () => Promise<string> = () => readFile(recentFilesPath(), 'utf8'),
+): Promise<
+  | { known: false; error: unknown }
+  | { known: true; stored: unknown; malformed: boolean }
+> {
+  let serialized: string
+  try {
+    serialized = await read()
+  } catch (error) {
+    return isMissingFile(error)
+      ? { known: true, stored: [], malformed: false }
+      : { known: false, error }
+  }
+  try {
+    return { known: true, stored: JSON.parse(serialized), malformed: false }
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) return { known: false, error }
+    return { known: true, stored: [], malformed: true }
+  }
+}
+
 async function ensureRecentFiles(): Promise<void> {
   if (recentFiles) return
   if (recentFilesLoad) return recentFilesLoad
   recentFilesLoad = (async () => {
-    let stored: unknown = []
-    try {
-      stored = JSON.parse(await readFile(recentFilesPath(), 'utf8'))
-    } catch (error) {
-      if (!isMissingFile(error) && !(error instanceof SyntaxError)) {
-        noteRecentWarning(error)
-      }
+    const loaded = await loadRecentFiles()
+    if (!loaded.known) {
+      noteRecentWarning(loaded.error)
+      return
     }
+    const { stored, malformed } = loaded
     const candidates = Array.isArray(stored)
       ? stored.filter(
           (path): path is string =>
@@ -210,13 +234,16 @@ async function ensureRecentFiles(): Promise<void> {
         if (canonical === path && !valid.includes(path)) valid.push(path)
         else removed.push(path)
       } catch (error) {
-        if (!isMissingFile(error)) noteRecentWarning(error)
-        removed.push(path)
+        if (isMissingFile(error)) removed.push(path)
+        else {
+          noteRecentWarning(error)
+          if (!valid.includes(path)) valid.push(path)
+        }
       }
     }
     recentFiles = valid
     removedRecentFiles = removed
-    if (recentEntriesNeedCleanup(stored, valid)) {
+    if (malformed || recentEntriesNeedCleanup(stored, valid)) {
       await persistRecentFiles().catch(noteRecentWarning)
     }
   })()
@@ -229,6 +256,9 @@ async function ensureRecentFiles(): Promise<void> {
 
 async function rememberRecent(path: string): Promise<void> {
   await ensureRecentFiles()
+  if (recentFiles === null) {
+    throw new Error('Recent files are temporarily unavailable; retrying later.')
+  }
   recentFiles = [
     path,
     ...(recentFiles ?? []).filter((candidate) => candidate !== path),
@@ -553,18 +583,19 @@ ipcMain.handle(
   async (event, ...args: unknown[]): Promise<{
     paths: string[]
     removed: string[]
+    warnings?: string[]
   }> => {
     assertTrustedIpcSender(event)
     assertNoPayload('qingshu:list-recent-files', args)
     await ensureRecentFiles()
     const removed = removedRecentFiles
     removedRecentFiles = []
-    const warning = recentFilesWarning
-    recentFilesWarning = undefined
+    const warnings = recentFilesWarnings
+    recentFilesWarnings = []
     return {
       paths: [...(recentFiles ?? [])],
       removed,
-      ...(warning ? { warning } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     }
   },
 )
