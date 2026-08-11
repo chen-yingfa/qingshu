@@ -48,6 +48,8 @@ interface AuthorizedDocument {
 }
 interface SaveOperation {
   canceled: boolean
+  completion: Promise<void>
+  finish(): void
 }
 interface ExportedFile {
   realPath: string
@@ -690,7 +692,14 @@ async function withSaveOperation<T>(
   token: string | undefined,
   operation: (state: SaveOperation) => Promise<T>,
 ): Promise<T> {
-  const state = { canceled: false }
+  let finish!: () => void
+  const state: SaveOperation = {
+    canceled: false,
+    completion: new Promise<void>(resolve => {
+      finish = resolve
+    }),
+    finish: () => finish(),
+  }
   if (!token) return operation(state)
   const operations = saveOperations.get(sender) ?? new Map<string, SaveOperation>()
   if (operations.has(token)) throw new Error('Save token is already active')
@@ -700,6 +709,7 @@ async function withSaveOperation<T>(
     return await operation(state)
   } finally {
     operations.delete(token)
+    state.finish()
   }
 }
 
@@ -862,11 +872,11 @@ ipcMain.handle(
 
 ipcMain.handle(
   'qingshu:cancel-save',
-  (
+  async (
     event: IpcMainInvokeEvent,
     rawToken: unknown,
     ...extra: unknown[]
-  ): void => {
+  ): Promise<void> => {
     assertTrustedIpcSender(event)
     if (
       extra.length !== 0 ||
@@ -877,7 +887,10 @@ ipcMain.handle(
       invalidPayload('qingshu:cancel-save')
     }
     const operation = saveOperations.get(event.sender)?.get(rawToken)
-    if (operation) operation.canceled = true
+    if (operation) {
+      operation.canceled = true
+      await operation.completion
+    }
   },
 )
 

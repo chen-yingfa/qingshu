@@ -913,11 +913,12 @@ describe('desktop IPC', () => {
     })
     await mocks.handlers.get('qingshu:open-file')?.(event)
     let releaseRename!: () => void
-    mocks.rename.mockImplementation(
-      () =>
-        new Promise<void>(resolve => {
-          releaseRename = resolve
-        }),
+    mocks.rename.mockImplementation((_source: string, target: string) =>
+      target === '/notes/committing.md'
+        ? new Promise<void>(resolve => {
+            releaseRename = resolve
+          })
+        : Promise.resolve(),
     )
 
     const save = mocks.handlers.get('qingshu:save-file')?.(event, {
