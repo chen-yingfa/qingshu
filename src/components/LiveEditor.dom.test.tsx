@@ -327,6 +327,38 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
   })
 
+  it('keeps repeated trailing blocks editable when typing fenced code', () => {
+    const result = renderEditor('First')
+    const editor = () =>
+      screen.getByLabelText(/Active (?:Markdown|code) block/) as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\n'}
+        activeBlock={2}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.change(editor(), { target: { value: '```ts' } })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\n\n\n```ts')
+    expect(editor().value).toBe('```ts')
+    expect(editor().getAttribute('aria-label')).toBe('Active code block')
+  })
+
   it('applies automatic spacing after IME composition completes', async () => {
     const result = renderEditor('中文', { autoSpacing: true })
     const textarea = screen.getByLabelText('Active Markdown block')

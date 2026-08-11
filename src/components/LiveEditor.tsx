@@ -134,13 +134,18 @@ function editorBlocks(
     }
   }
 
-  if (/\n\s*\n$/u.test(content)) {
+  const last = parsedBlocks.at(-1)!
+  const trailing = content.slice(last.end)
+  const trailingEndings = Array.from(trailing.matchAll(/\r?\n/gu))
+  for (let empty = 0; empty + 1 < trailingEndings.length; empty += 2) {
+    const second = trailingEndings[empty + 1]
+    const offset = last.end + second.index! + second[0].length
     editable.push({
-      id: 'empty-tail',
+      id: `empty-tail-${offset}`,
       type: 'paragraph',
       source: '',
-      start: content.length,
-      end: content.length,
+      start: offset,
+      end: offset,
     })
   }
   return editable
