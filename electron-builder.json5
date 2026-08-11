@@ -11,7 +11,8 @@
   },
   "files": [
     "dist-electron",
-    "dist"
+    "dist",
+    "!node_modules{,/**/*}"
   ],
   "mac": {
     "icon": "build/icon.icns",
@@ -34,7 +35,7 @@
     "artifactName": "${productName}_${version}.${ext}"
   },
   "linux": {
-    "icon": "build/icon.png",
+    "icon": "build/icon-source.png",
     "category": "Office",
     "syncDesktopName": true,
     "synopsis": "A lightweight desktop Markdown editor",

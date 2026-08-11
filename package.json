@@ -9,34 +9,16 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "clean": "node build/clean.mjs",
     "icons": "node build/generate-icons.mjs",
     "prebuild": "npm run icons",
+    "build:renderer": "vite build",
     "build": "npm run typecheck && vite build && electron-builder",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false"
   },
   "engines": {
     "node": ">=22.12.0"
-  },
-  "debug": {
-    "env": {
-      "VITE_DEV_SERVER_URL": "http://127.0.0.1:3344"
-    }
-  },
-  "dependencies": {
-    "hast-util-from-html-isomorphic": "^2.0.0",
-    "highlight.js": "^11.11.1",
-    "katex": "^0.18.4",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "rehype-katex": "^7.0.1",
-    "rehype-sanitize": "^6.0.0",
-    "rehype-stringify": "^10.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0",
-    "remark-parse": "^11.0.0",
-    "remark-rehype": "^11.1.2",
-    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@fiahfy/icns": "^0.0.7",
@@ -47,9 +29,22 @@
     "@vitejs/plugin-react": "^6.0.5",
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
+    "hast-util-from-html-isomorphic": "^2.0.0",
+    "highlight.js": "^11.11.1",
     "jsdom": "^29.1.1",
+    "katex": "^0.18.4",
     "png-to-ico": "^3.0.2",
     "pngjs": "^7.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "rehype-katex": "^7.0.1",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vite-plugin-electron": "^1.1.1",

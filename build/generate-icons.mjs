@@ -8,7 +8,6 @@ import pngToIco from 'png-to-ico'
 const directory = fileURLToPath(new URL('.', import.meta.url))
 const root = fileURLToPath(new URL('..', import.meta.url))
 const sourcePath = `${directory}icon-source.png`
-const pngPath = `${directory}icon.png`
 const sourceBuffer = await readFile(sourcePath)
 const source = PNG.sync.read(sourceBuffer)
 
@@ -48,7 +47,6 @@ function resizedPng(size) {
   return PNG.sync.write(target, { colorType: 6 })
 }
 
-await writeFile(pngPath, sourceBuffer)
 await writeFile(`${root}/public/icon.png`, resizedPng(256))
 await writeFile(`${directory}icon.ico`, await pngToIco(sourcePath))
 

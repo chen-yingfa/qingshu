@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 describe('desktop package metadata', () => {
@@ -9,6 +9,7 @@ describe('desktop package metadata', () => {
 
     expect(config.appId).toBe('com.qingshu.editor')
     expect(config.productName).toBe('Qingshu')
+    expect(config.files).toContain('!node_modules{,/**/*}')
     expect(config.mac.icon).toBe('build/icon.icns')
     expect(config.win.icon).toBe('build/icon.ico')
     expect(config.win.target).toContainEqual({
@@ -16,13 +17,15 @@ describe('desktop package metadata', () => {
       arch: ['x64'],
     })
     expect(config.linux).toMatchObject({
-      icon: 'build/icon.png',
+      icon: 'build/icon-source.png',
       category: 'Office',
       syncDesktopName: true,
     })
     const packageMetadata = JSON.parse(await readFile('package.json', 'utf8'))
     expect(packageMetadata.desktopName).toBe('Qingshu')
+    expect(packageMetadata.dependencies).toBeUndefined()
     expect(packageMetadata.scripts.prebuild).toBe('npm run icons')
+    expect(packageMetadata.scripts.clean).toBe('node build/clean.mjs')
     expect(await readFile('index.html', 'utf8')).toContain(
       'rel="icon" type="image/png" href="/icon.png"',
     )
@@ -30,7 +33,6 @@ describe('desktop package metadata', () => {
 
   it('includes generated PNG, Windows ICO, and macOS ICNS assets', async () => {
     const generatedPaths = [
-      'build/icon.png',
       'public/icon.png',
       'build/icon.ico',
       'build/icon.icns',
@@ -44,14 +46,14 @@ describe('desktop package metadata', () => {
       readFile('build/icon-source.png'),
       readFile('build/generate-icons.mjs', 'utf8'),
     ])
-    const [png, publicPng, ico, icns] = after
+    const [publicPng, ico, icns] = after
 
-    expect(png.subarray(0, 8)).toEqual(
+    expect(source.subarray(0, 8)).toEqual(
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     )
-    expect(png.readUInt32BE(16)).toBe(1024)
-    expect(png.readUInt32BE(20)).toBe(1024)
-    expect(png).toEqual(source)
+    expect(source.readUInt32BE(16)).toBe(1024)
+    expect(source.readUInt32BE(20)).toBe(1024)
+    await expect(access('build/icon.png')).rejects.toThrow()
     expect(publicPng.readUInt32BE(16)).toBe(256)
     expect(publicPng.readUInt32BE(20)).toBe(256)
     expect(ico.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]))
