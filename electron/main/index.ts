@@ -210,18 +210,24 @@ async function rememberExport(
 
 function parseSaveRequest(value: unknown, extra: unknown[]): {
   path?: string
+  sourcePath?: string
   content: string
 } {
   if (
     extra.length !== 0 ||
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['path', 'content']) ||
+    !hasOnlyKeys(value, ['path', 'sourcePath', 'content']) ||
     typeof value.content !== 'string' ||
-    (value.path !== undefined && typeof value.path !== 'string')
+    (value.path !== undefined && typeof value.path !== 'string') ||
+    (value.sourcePath !== undefined && typeof value.sourcePath !== 'string')
   ) {
     invalidPayload('qingshu:save-file')
   }
-  return { content: value.content, path: value.path as string | undefined }
+  return {
+    content: value.content,
+    path: value.path as string | undefined,
+    sourcePath: value.sourcePath as string | undefined,
+  }
 }
 
 function parseHtmlRequest(value: unknown, extra: unknown[]): ExportHtmlRequest {
@@ -575,7 +581,19 @@ ipcMain.handle(
     if (target.canceled) return target
     const targetPath = requestedPath ?? await canonicalDocumentPath(target.path)
     if (!requestedPath) {
-      document = installDocumentQueue(documents, targetPath)
+      const existingTarget = documents.get(targetPath)
+      const sourcePath = request.sourcePath
+        ? await canonicalDocumentPath(request.sourcePath)
+        : undefined
+      if (
+        existingTarget?.initialized &&
+        sourcePath !== targetPath
+      ) {
+        throw new Error(
+          'The selected file is already open in another tab. Choose a different path.',
+        )
+      }
+      document = existingTarget ?? installDocumentQueue(documents, targetPath)
     }
     if (!document) throw new Error('Save path authorization was lost')
 

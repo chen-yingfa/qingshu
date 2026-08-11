@@ -474,6 +474,27 @@ describe('desktop IPC', () => {
     expect(mocks.rename).not.toHaveBeenCalled()
   })
 
+  it('rejects Save As to a canonical path already authorized by another tab before writing', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/existing.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/aliases/existing.md',
+    })
+    mocks.realpath.mockResolvedValueOnce('/notes/existing.md')
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(event, {
+        content: '# Conflicting draft',
+      }),
+    ).rejects.toThrow('already open in another tab')
+    expect(mocks.rename).not.toHaveBeenCalled()
+    expect(mocks.tempHandle.writeFile).not.toHaveBeenCalled()
+  })
+
   it('rejects overwrite when the opened file changed externally', async () => {
     mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/notes/conflict.md'] })
     mocks.sourceHandle.readFile.mockResolvedValue('# First')

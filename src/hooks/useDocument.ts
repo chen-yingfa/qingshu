@@ -265,6 +265,7 @@ export function useDocument() {
         const result = await window.qingshu.saveFile({
           content,
           path: saveAs ? undefined : state.path,
+          sourcePath: saveAs ? state.path : undefined,
         })
         if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           if (!result.canceled && result.warning) {

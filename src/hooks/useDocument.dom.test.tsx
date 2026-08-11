@@ -11,6 +11,59 @@ afterEach(() => {
 })
 
 describe('useDocument save lifecycle', () => {
+  it.each([false, true])(
+    'preserves both tab buffers when Save As collides with a %s dirty owner',
+    async (ownerDirty) => {
+      window.qingshu = {
+        openFile: vi.fn().mockResolvedValue({
+          canceled: false,
+          path: '/notes/existing.md',
+          content: '# Existing',
+        }),
+        saveFile: vi
+          .fn()
+          .mockRejectedValue(
+            new Error('The selected file is already open in another tab.'),
+          ),
+      } as unknown as QingshuApi
+      const { result } = renderHook(() => useDocument())
+      await act(async () => {
+        await result.current.openDocument()
+      })
+      if (ownerDirty) {
+        act(() =>
+          result.current.dispatch({ type: 'edit', content: '# Existing dirty' }),
+        )
+      }
+      act(() => result.current.newDocument())
+      act(() =>
+        result.current.dispatch({ type: 'edit', content: '# Conflicting draft' }),
+      )
+
+      let operation!: Awaited<ReturnType<typeof result.current.saveDocument>>
+      await act(async () => {
+        operation = await result.current.saveDocument(true)
+      })
+
+      expect(operation).toEqual({
+        status: 'error',
+        message: 'The selected file is already open in another tab.',
+      })
+      expect(result.current.tabs).toHaveLength(3)
+      expect(
+        result.current.tabs.find((tab) => tab.path === '/notes/existing.md'),
+      ).toMatchObject({
+        content: ownerDirty ? '# Existing dirty' : '# Existing',
+        dirty: ownerDirty,
+      })
+      expect(result.current.state).toMatchObject({
+        content: '# Conflicting draft',
+        dirty: true,
+      })
+      expect(result.current.state.path).toBeUndefined()
+    },
+  )
+
   it('supersedes a Save As response after an edit while adopting its authorized path', async () => {
     let finishSave!: (result: {
       canceled: false

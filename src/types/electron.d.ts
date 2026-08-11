@@ -25,7 +25,11 @@ export interface QingshuApi {
   openFile(): Promise<FileResult>
   listRecentFiles(): Promise<RecentFilesResult>
   openRecentFile(path: string): Promise<Extract<FileResult, { canceled: false }>>
-  saveFile(request: { path?: string; content: string }): Promise<FileResult>
+  saveFile(request: {
+    path?: string
+    sourcePath?: string
+    content: string
+  }): Promise<FileResult>
   exportHtml(request: ExportHtmlRequest): Promise<FileResult>
   exportPdf(): Promise<FileResult>
   showItemInFolder(path: string): Promise<void>
