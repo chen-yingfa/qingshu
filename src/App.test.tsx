@@ -439,6 +439,18 @@ describe('commands and operation feedback', () => {
     expect(screen.getByLabelText('Markdown source')).not.toBeNull()
   })
 
+  it('does not change the startup default when source mode is toggled temporarily', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+
+    expect(
+      (screen.getByLabelText(
+        'Use source mode by default',
+      ) as HTMLInputElement).checked,
+    ).toBe(false)
+  })
+
   it('keeps palette, settings, and formatting hotkeys active in source mode', async () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
@@ -459,6 +471,27 @@ describe('commands and operation feedback', () => {
 
     fireEvent.keyDown(source, { key: ',', ctrlKey: true })
     expect(screen.getByRole('dialog', { name: 'Settings' })).not.toBeNull()
+  })
+
+  it('keeps formatting request IDs monotonic across source-mode round trips', async () => {
+    render(<App />)
+    let editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: 'word' } })
+    editor.setSelectionRange(0, 4)
+    fireEvent.keyDown(editor, { key: 'b', ctrlKey: true })
+    await waitFor(() => expect(editor.value).toBe('**word**'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, 6)
+    fireEvent.keyDown(editor, { key: 'i', ctrlKey: true })
+
+    await waitFor(() => expect(editor.value).toBe('**_word_**'))
   })
 
   it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {

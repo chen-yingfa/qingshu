@@ -127,15 +127,16 @@ export default function App() {
   const toastId = useRef(0)
   const settingsStorageWarned = useRef(false)
   const activePdfExport = useRef<ActivePdfExport | null>(null)
+  const formatRequestId = useRef(0)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
   >()
 
   const requestFormat = useCallback((command: FormatCommand) => {
-    setFormatRequest((request) => ({
-      id: (request?.id ?? 0) + 1,
+    setFormatRequest({
+      id: ++formatRequestId.current,
       command,
-    }))
+    })
   }, [])
 
   const addToast = useCallback(
@@ -404,10 +405,7 @@ export default function App() {
         setFormatRequest(undefined)
         setSourceMode((value) => {
           const next = !value
-          setSettings((current) => ({
-            ...current,
-            defaultSourceMode: next,
-          }))
+          if (next) dispatch({ type: 'activate', index: 0 })
           return next
         })
       }
@@ -693,6 +691,7 @@ export default function App() {
         <div className="paper">
           <LiveEditor
             content={state.content}
+            contentRevision={state.contentRevision}
             activeBlock={state.activeBlock}
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}

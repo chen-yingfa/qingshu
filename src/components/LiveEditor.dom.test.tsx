@@ -1476,6 +1476,24 @@ describe('LiveEditor block reordering', () => {
 })
 
 describe('LiveEditor source mode', () => {
+  it('preserves CRLF line endings while editing normalized textarea content', () => {
+    const result = renderEditor('first\r\nsecond', {
+      sourceMode: true,
+      contentRevision: 0,
+    })
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    expect(source.value).toBe('first\nsecond')
+
+    fireEvent.change(source, {
+      target: {
+        value: 'first\nsecond!',
+        selectionStart: 13,
+        selectionEnd: 13,
+      },
+    })
+    expect(result.onChange).toHaveBeenLastCalledWith('first\r\nsecond!')
+  })
+
   it('does not overwrite rapid local edits with intermediate acknowledgements', () => {
     const result = renderEditor('abc', { sourceMode: true })
     const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
@@ -1512,6 +1530,48 @@ describe('LiveEditor source mode', () => {
     expect(source.selectionStart).toBe(5)
   })
 
+  it('ignores delayed revisions after a newer external replacement', () => {
+    const result = renderEditor('base', {
+      sourceMode: true,
+      contentRevision: 0,
+    })
+    const source = screen.getByLabelText('Markdown source')
+    fireEvent.change(source, { target: { value: 'local one' } })
+    fireEvent.change(source, { target: { value: 'local two' } })
+    result.rerender(
+      <LiveEditor
+        content="local one"
+        contentRevision={1}
+        activeBlock={0}
+        sourceMode
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content="external"
+        contentRevision={3}
+        activeBlock={0}
+        sourceMode
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    result.rerender(
+      <LiveEditor
+        content="local two"
+        contentRevision={2}
+        activeBlock={0}
+        sourceMode
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect((source as HTMLTextAreaElement).value).toBe('external')
+  })
+
   it('edits the canonical document directly and supports Tab indentation', async () => {
     const result = renderEditor('# Title\n\nBody', { sourceMode: true })
     const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
@@ -1530,5 +1590,14 @@ describe('LiveEditor source mode', () => {
 
     expect(screen.queryByLabelText('Markdown source')).toBeNull()
     expect(await screen.findByText('Printed')).not.toBeNull()
+  })
+
+  it('does not render preview footnotes beneath source mode', () => {
+    const result = renderEditor('Text[^1]\n\n[^1]: Note', {
+      sourceMode: true,
+    })
+
+    expect(result.container.querySelector('[data-footnotes]')).toBeNull()
+    expect(result.container.querySelectorAll('.rendered-block')).toHaveLength(0)
   })
 })

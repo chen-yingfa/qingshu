@@ -52,6 +52,13 @@ interface EditingBoundary {
   end: number
 }
 
+const EMPTY_RENDER_CONTEXT: DocumentRenderContext = {
+  supportSource: '',
+  footnoteSource: '',
+  references: [],
+  signature: '',
+}
+
 interface FormatRequest {
   id: number
   command: FormatCommand
@@ -153,6 +160,7 @@ function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
 
 interface LiveEditorProps {
   content: string
+  contentRevision?: number
   activeBlock: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
@@ -709,37 +717,105 @@ function formattedValue(
 
 function DocumentSourceEditor({
   content,
+  contentRevision,
   formatRequest,
   onChange,
 }: {
   content: string
+  contentRevision?: number
   formatRequest?: FormatRequest
   onChange(content: string): void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const handledFormatRef = useRef(0)
-  const [draft, setDraft] = useState(content)
+  const [draft, setDraft] = useState(toEditorValue(content))
   const parentContentRef = useRef(content)
-  const pendingAcknowledgementsRef = useRef<string[]>([])
+  const canonicalContentRef = useRef(content)
+  const lastParentRevisionRef = useRef(contentRevision ?? 0)
+  const nextLocalRevisionRef = useRef(contentRevision ?? 0)
+  const pendingAcknowledgementsRef = useRef(
+    new Map<number, string>(),
+  )
+  const pendingTextsRef = useRef<string[]>([])
 
   useLayoutEffect(() => {
-    if (content === parentContentRef.current) return
-    const acknowledgementIndex =
-      pendingAcknowledgementsRef.current.indexOf(content)
-    const acknowledged = acknowledgementIndex >= 0
-    parentContentRef.current = content
-    if (acknowledged) {
-      pendingAcknowledgementsRef.current.splice(0, acknowledgementIndex + 1)
-    } else {
-      pendingAcknowledgementsRef.current = []
-      setDraft(content)
+    if (
+      content === parentContentRef.current &&
+      (contentRevision === undefined ||
+        contentRevision === lastParentRevisionRef.current)
+    ) {
+      return
     }
-  }, [content])
+    if (
+      contentRevision !== undefined &&
+      contentRevision < lastParentRevisionRef.current
+    ) {
+      return
+    }
 
-  const commit = (value: string) => {
+    let acknowledged = false
+    if (contentRevision !== undefined) {
+      const pending = pendingAcknowledgementsRef.current
+      acknowledged = pending.get(contentRevision) === content
+      if (acknowledged) {
+        for (const revision of pending.keys()) {
+          if (revision <= contentRevision) pending.delete(revision)
+        }
+      } else if (
+        contentRevision <= nextLocalRevisionRef.current &&
+        contentRevision > lastParentRevisionRef.current
+      ) {
+        // A coalesced intermediate acknowledgement no longer retained in the
+        // bounded queue; it must not overwrite a newer local draft.
+        acknowledged = true
+      }
+      lastParentRevisionRef.current = contentRevision
+      nextLocalRevisionRef.current = Math.max(
+        nextLocalRevisionRef.current,
+        contentRevision,
+      )
+    } else {
+      const acknowledgementIndex = pendingTextsRef.current.indexOf(content)
+      acknowledged = acknowledgementIndex >= 0
+      if (acknowledged) {
+        pendingTextsRef.current.splice(0, acknowledgementIndex + 1)
+      }
+    }
+
+    parentContentRef.current = content
+    if (!acknowledged) {
+      pendingAcknowledgementsRef.current.clear()
+      pendingTextsRef.current = []
+      canonicalContentRef.current = content
+      setDraft(toEditorValue(content))
+    }
+  }, [content, contentRevision])
+
+  const commit = (value: string, editorOffset = value.length) => {
+    const previousCanonical = canonicalContentRef.current
+    const sourceOffset = sourceOffsetForEditorOffset(
+      previousCanonical,
+      editorOffset,
+    )
+    const canonical = restoreSourceEols(
+      value,
+      previousCanonical,
+      nearestEol(previousCanonical, sourceOffset),
+    )
+    canonicalContentRef.current = canonical
     setDraft(value)
-    pendingAcknowledgementsRef.current.push(value)
-    onChange(value)
+    if (contentRevision !== undefined) {
+      const revision = ++nextLocalRevisionRef.current
+      pendingAcknowledgementsRef.current.set(revision, canonical)
+      while (pendingAcknowledgementsRef.current.size > 32) {
+        const oldest = pendingAcknowledgementsRef.current.keys().next().value
+        if (oldest === undefined) break
+        pendingAcknowledgementsRef.current.delete(oldest)
+      }
+    } else {
+      pendingTextsRef.current.push(canonical)
+    }
+    onChange(canonical)
   }
 
   useEffect(() => {
@@ -758,7 +834,19 @@ function DocumentSourceEditor({
       textarea.selectionStart,
       textarea.selectionEnd,
     )
-    commit(result.value)
+    const suffixLength = draft.length - textarea.selectionEnd
+    const replacement = result.value.slice(
+      textarea.selectionStart,
+      result.value.length - suffixLength,
+    )
+    textarea.setRangeText(
+      replacement,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+      'select',
+    )
+    textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
+    commit(textarea.value, result.selectionEnd)
     afterPaint(() => {
       textarea.focus()
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
@@ -773,22 +861,34 @@ function DocumentSourceEditor({
       autoFocus
       spellCheck={false}
       value={draft}
-      onChange={(event) => commit(event.target.value)}
+      onChange={(event) =>
+        commit(event.target.value, event.target.selectionStart)
+      }
       onKeyDown={(event) => {
-        if (event.key !== 'Tab') return
+        if (
+          event.key !== 'Tab' ||
+          event.shiftKey ||
+          event.nativeEvent.isComposing
+        ) {
+          return
+        }
         event.preventDefault()
-        const result = applyInlineFormat(
-          draft,
+        event.currentTarget.setRangeText(
+          '  ',
           event.currentTarget.selectionStart,
           event.currentTarget.selectionEnd,
-          '  ',
-          '',
+          'end',
         )
-        commit(result.value)
+        const selectionStart = event.currentTarget.selectionStart
+        const selectionEnd = event.currentTarget.selectionEnd
+        commit(
+          event.currentTarget.value,
+          selectionStart,
+        )
         afterPaint(() =>
           textareaRef.current?.setSelectionRange(
-            result.selectionStart,
-            result.selectionEnd,
+            selectionStart,
+            selectionEnd,
           ),
         )
       }}
@@ -869,6 +969,7 @@ function BlockDropZone({
 
 export function LiveEditor({
   content,
+  contentRevision,
   activeBlock,
   formatRequest,
   autoSpacing = false,
@@ -893,7 +994,13 @@ export function LiveEditor({
   const editorRef = useRef<HTMLElement>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
-  const model = useMemo(() => parseDocument(content), [content])
+  const model = useMemo(
+    () =>
+      sourceMode
+        ? { blocks: [], renderContext: EMPTY_RENDER_CONTEXT }
+        : parseDocument(content),
+    [content, sourceMode],
+  )
   const parsedEditorBlocks = useMemo(
     () => editorBlocks(content, model.blocks, currentInsertedBlocks),
     [content, currentInsertedBlocks, model.blocks],
@@ -923,6 +1030,7 @@ export function LiveEditor({
   const composingRef = useRef(false)
   const codeTabEscapeRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
+  const previousSourceModeRef = useRef(sourceMode)
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
@@ -942,6 +1050,7 @@ export function LiveEditor({
 
   useLayoutEffect(() => {
     const activeChanged = previousActiveRef.current !== safeActive
+    const sourceModeChanged = previousSourceModeRef.current !== sourceMode
     const parentChanged = content !== parentContentRef.current
     const acknowledged =
       parentChanged && pendingAcknowledgementRef.current === content
@@ -949,8 +1058,13 @@ export function LiveEditor({
       parentContentRef.current = content
       pendingAcknowledgementRef.current = undefined
     }
+    if (sourceMode) {
+      previousActiveRef.current = safeActive
+      previousSourceModeRef.current = true
+      return
+    }
     const externalChange = parentChanged && !acknowledged
-    if (activeChanged || externalChange) {
+    if (sourceModeChanged || activeChanged || externalChange) {
       const semanticIndex =
         activeChanged && editingBoundary?.content === content
           ? model.blocks.findIndex(
@@ -982,6 +1096,7 @@ export function LiveEditor({
     }
     if (externalChange) setInsertedBlocks({ content, blocks: [] })
     previousActiveRef.current = safeActive
+    previousSourceModeRef.current = false
   }, [
     active.end,
     active.source,
@@ -991,6 +1106,7 @@ export function LiveEditor({
     model.blocks,
     parsedEditorBlocks,
     safeActive,
+    sourceMode,
   ])
 
   useLayoutEffect(() => {
@@ -1602,6 +1718,7 @@ export function LiveEditor({
       ) : sourceMode ? (
         <DocumentSourceEditor
           content={content}
+          contentRevision={contentRevision}
           formatRequest={formatRequest}
           onChange={onChange}
         />
@@ -1751,7 +1868,9 @@ export function LiveEditor({
           )}
         </>
       )}
-      {!previewAll && <DocumentFootnotes context={renderContext} />}
+      {!previewAll && !sourceMode && (
+        <DocumentFootnotes context={renderContext} />
+      )}
     </section>
   )
 }
