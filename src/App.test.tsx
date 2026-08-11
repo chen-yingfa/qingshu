@@ -310,7 +310,7 @@ describe('document tabs', () => {
           .value,
       ).toBe('First'),
     )
-    expect(screen.getByText('Second')).not.toBeNull()
+    expect(await screen.findByText('Second')).not.toBeNull()
   })
 
   it('ignores stale recent refresh responses and surfaces persistence warnings', async () => {
