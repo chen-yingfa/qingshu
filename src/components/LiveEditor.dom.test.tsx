@@ -954,20 +954,15 @@ describe('LiveEditor keyboard and composition behavior', () => {
 describe('LiveEditor block reordering', () => {
   it('shows a blue drop boundary and moves a dragged block there', () => {
     const result = renderEditor('First\n\nSecond\n\nThird')
-    const dataTransfer = {
-      dropEffect: 'none',
-      effectAllowed: 'none',
-      setData: vi.fn(),
-    }
     const handle = screen.getByRole('button', { name: 'Move block 2' })
     const target = result.container.querySelector(
       '[data-drop-boundary="0"]',
     ) as HTMLElement
 
-    fireEvent.dragStart(handle, { dataTransfer })
-    fireEvent.dragOver(target, { dataTransfer })
+    fireEvent.pointerDown(handle, { pointerId: 1 })
+    fireEvent.pointerEnter(target, { pointerId: 1 })
     expect(target.classList.contains('is-drop-target')).toBe(true)
-    fireEvent.drop(target, { dataTransfer })
+    fireEvent.pointerUp(target, { pointerId: 1 })
 
     expect(result.onChange).toHaveBeenLastCalledWith(
       'Second\n\nFirst\n\nThird',
@@ -989,22 +984,16 @@ describe('LiveEditor block reordering', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
   })
 
-  it('commits the hovered move on dragend when Electron omits drop', () => {
+  it('commits the hovered move when pointer release misses the drop zone', () => {
     const result = renderEditor('First\n\nSecond\n\nThird')
-    const dataTransfer = {
-      dropEffect: 'none',
-      effectAllowed: 'none',
-      setData: vi.fn(),
-    }
     const handle = screen.getByRole('button', { name: 'Move block 3' })
     const target = result.container.querySelector(
       '[data-drop-boundary="0"]',
     ) as HTMLElement
 
-    fireEvent.dragStart(handle, { dataTransfer })
-    fireEvent.dragOver(target, { dataTransfer })
-    expect(dataTransfer.dropEffect).toBe('move')
-    fireEvent.dragEnd(handle, { dataTransfer })
+    fireEvent.pointerDown(handle, { pointerId: 1 })
+    fireEvent.pointerEnter(target, { pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
 
     expect(result.onChange).toHaveBeenLastCalledWith(
       'Third\n\nFirst\n\nSecond',

@@ -1,8 +1,8 @@
 import {
   Fragment,
   memo,
-  type DragEvent,
   type KeyboardEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -532,24 +532,20 @@ function formattedValue(
 
 function BlockDragHandle({
   index,
-  onDragStart,
-  onDragEnd,
+  onPointerDown,
   onMove,
 }: {
   index: number
-  onDragStart(event: DragEvent<HTMLButtonElement>): void
-  onDragEnd(event: DragEvent<HTMLButtonElement>): void
+  onPointerDown(event: PointerEvent<HTMLButtonElement>): void
   onMove(direction: -1 | 1): void
 }) {
   return (
     <button
       type="button"
       className="block-drag-handle"
-      draggable
       aria-label={`Move block ${index + 1}`}
       title="Drag to move block · Alt+Arrow to move"
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onPointerDown={onPointerDown}
       onKeyDown={(event) => {
         if (
           event.altKey &&
@@ -593,14 +589,13 @@ function BlockDropZone({
       ].join(' ')}
       data-drop-boundary={boundary}
       aria-hidden="true"
-      onDragEnter={() => onTarget(boundary)}
-      onDragOver={(event) => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-        onTarget(boundary)
+      onPointerEnter={() => {
+        if (dragging) onTarget(boundary)
       }}
-      onDrop={(event) => {
+      onPointerUp={(event) => {
         event.preventDefault()
+        if (!dragging) return
+        onTarget(boundary)
         onDrop(boundary)
       }}
     />
@@ -1160,8 +1155,32 @@ export function LiveEditor({
     afterPaint(() => textareaRef.current?.focus())
   }
 
+  const finishPointerMove = () => {
+    const from = draggedBlockRef.current
+    const boundary = dropBoundaryRef.current
+    if (from !== null && boundary !== null) moveBlock(from, boundary)
+    else clearDragState()
+  }
+
+  useEffect(() => {
+    if (draggedBlock === null) return undefined
+    const finish = () => finishPointerMove()
+    const cancel = () => clearDragState()
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', cancel)
+    return () => {
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', cancel)
+    }
+  }, [draggedBlock])
+
   return (
-    <section className="editor" aria-label="Markdown document">
+    <section
+      className="editor"
+      aria-label="Markdown document"
+      onPointerUp={finishPointerMove}
+      onPointerCancel={clearDragState}
+    >
       {previewAll ? (
         <FullDocumentPreview content={content} onReady={onPreviewReady} />
       ) : (
@@ -1193,26 +1212,12 @@ export function LiveEditor({
                   {realIndex !== undefined && (
                     <BlockDragHandle
                       index={realIndex}
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = 'move'
-                        event.dataTransfer.setData('text/plain', block.id)
+                      onPointerDown={(event) => {
+                        event.preventDefault()
                         draggedBlockRef.current = realIndex
                         dropBoundaryRef.current = realIndex
                         setDraggedBlock(realIndex)
                         setDropBoundary(realIndex)
-                      }}
-                      onDragEnd={(event) => {
-                        const from = draggedBlockRef.current
-                        const boundary = dropBoundaryRef.current
-                        if (
-                          event.dataTransfer.dropEffect === 'move' &&
-                          from !== null &&
-                          boundary !== null
-                        ) {
-                          moveBlock(from, boundary)
-                        } else {
-                          clearDragState()
-                        }
                       }}
                       onMove={(direction) => {
                         if (direction < 0 && realIndex > 0) {
