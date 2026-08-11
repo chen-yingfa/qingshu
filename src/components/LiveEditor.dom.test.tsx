@@ -527,6 +527,35 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
   })
 
+  it('removes tracked whitespace with its inserted block on Backspace', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: '  ' } })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n  \n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    editor().setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
+  })
+
   it('uses normal merge semantics when Backspace joins a typed inserted block', () => {
     const result = renderEditor('First\n\nSecond')
     const editor = () =>

@@ -831,16 +831,18 @@ export function LiveEditor({
       ).find((block) => block.offset === blockStart)
       if (inserted?.leftPadding && !draft.trim()) {
         const removeStart = blockStart - inserted.leftPadding
+        const removeEnd = blockStart + inserted.length
+        const removedLength = inserted.leftPadding + inserted.length
         const mergedContent =
           previousContent.slice(0, removeStart) +
-          previousContent.slice(blockStart)
+          previousContent.slice(removeEnd)
         setInsertedBlocks((current) => ({
           content: mergedContent,
           blocks: (current.content === previousContent ? current.blocks : [])
             .filter((block) => block.offset !== blockStart)
             .map((block) =>
               block.offset > blockStart
-                ? { ...block, offset: block.offset - inserted.leftPadding }
+                ? { ...block, offset: block.offset - removedLength }
                 : block,
             ),
         }))
