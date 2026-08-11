@@ -215,18 +215,17 @@ interface ListLine {
   end: number
   prefixEnd: number
   indent: string
+  marker: string
   nextPrefix: string
   content: string
 }
 
-function listLineAt(
+function parseListLine(
   value: string,
-  caret: number,
+  start: number,
+  end: number,
   firstLineIndent = '',
 ): ListLine | null {
-  const start = value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
-  const nextBreak = value.indexOf('\n', caret)
-  const end = nextBreak < 0 ? value.length : nextBreak
   const line = value.slice(start, end)
   const unordered = line.match(/^([ \t]*)([-+*])[ \t]+(.*)$/u)
   if (unordered) {
@@ -239,6 +238,7 @@ function listLineAt(
       end,
       prefixEnd: start + prefixLength,
       indent: unordered[1],
+      marker: unordered[2],
       nextPrefix: task
         ? `${sourceIndent}${unordered[1]}${unordered[2]} [ ] `
         : `${sourceIndent}${unordered[1]}${unordered[2]} `,
@@ -249,14 +249,213 @@ function listLineAt(
   if (!ordered) return null
   const sourceIndent = start === 0 ? firstLineIndent : ''
   const prefixLength = line.length - ordered[4].length
+  const nextNumber = String(Number(ordered[2]) + 1).padStart(
+    ordered[2].length,
+    '0',
+  )
   return {
     start,
     end,
     prefixEnd: start + prefixLength,
     indent: ordered[1],
-    nextPrefix: `${sourceIndent}${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `,
+    marker: `${ordered[2]}${ordered[3]}`,
+    nextPrefix: `${sourceIndent}${ordered[1]}${nextNumber}${ordered[3]} `,
     content: ordered[4],
   }
+}
+
+function listItemStarts(value: string): Set<number> {
+  const starts = new Set<number>()
+  const visit = (node: MarkdownDocumentModel['ast']) => {
+    if (node.type === 'listItem') {
+      const start = node.position?.start.offset
+      if (start !== undefined) starts.add(start)
+    }
+    node.children?.forEach((child) => visit(child as MarkdownDocumentModel['ast']))
+  }
+  visit(parseDocument(value).ast)
+  return starts
+}
+
+function selectionIsInNonListMarkdown(
+  value: string,
+  start: number,
+  end: number,
+): boolean {
+  const excludedTypes = new Set([
+    'code',
+    'html',
+    'inlineCode',
+    'inlineMath',
+    'math',
+    'toml',
+    'yaml',
+  ])
+  let excluded = false
+  const visit = (node: MarkdownDocumentModel['ast']) => {
+    const nodeStart = node.position?.start.offset
+    const nodeEnd = node.position?.end.offset
+    if (
+      excludedTypes.has(node.type) &&
+      nodeStart !== undefined &&
+      nodeEnd !== undefined &&
+      nodeStart <= start &&
+      nodeEnd >= end
+    ) {
+      excluded = true
+      return
+    }
+    node.children?.forEach((child) => visit(child as MarkdownDocumentModel['ast']))
+  }
+  visit(parseDocument(value).ast)
+  return excluded
+}
+
+function listLineAt(
+  value: string,
+  caret: number,
+  firstLineIndent = '',
+): ListLine | null {
+  const start = value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
+  const nextBreak = value.indexOf('\n', caret)
+  const end = nextBreak < 0 ? value.length : nextBreak
+  const line = parseListLine(value, start, end, firstLineIndent)
+  if (!line) return null
+  const starts = listItemStarts(value)
+  return starts.has(start) || starts.has(start + line.indent.length)
+    ? line
+    : null
+}
+
+interface ListItemRange extends ListLine {
+  itemEnd: number
+  logicalIndent: number
+}
+
+function listItemRanges(
+  value: string,
+  firstLineIndent: string,
+): ListItemRange[] {
+  const semanticStarts = listItemStarts(value)
+  const lines: ListLine[] = []
+  let start = 0
+  while (start <= value.length) {
+    const nextBreak = value.indexOf('\n', start)
+    const end = nextBreak < 0 ? value.length : nextBreak
+    const line = parseListLine(value, start, end, firstLineIndent)
+    if (
+      line &&
+      (semanticStarts.has(start) ||
+        semanticStarts.has(start + line.indent.length))
+    ) {
+      lines.push(line)
+    }
+    if (nextBreak < 0) break
+    start = nextBreak + 1
+  }
+  return lines.map((line, index) => {
+    const logicalIndent =
+      line.indent.length + (line.start === 0 ? firstLineIndent.length : 0)
+    const nextSibling = lines
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          candidate.indent.length +
+            (candidate.start === 0 ? firstLineIndent.length : 0) <=
+          logicalIndent,
+      )
+    return {
+      ...line,
+      logicalIndent,
+      itemEnd: nextSibling?.start ?? value.length,
+    }
+  })
+}
+
+function selectedListItemRange(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  firstLineIndent: string,
+): { start: number; end: number } | null {
+  const items = listItemRanges(value, firstLineIndent)
+  const itemAt = (position: number) =>
+    items
+      .filter((item) => item.start <= position && position < item.itemEnd)
+      .sort(
+        (left, right) =>
+          right.logicalIndent - left.logicalIndent ||
+          right.start - left.start,
+      )[0]
+  const first = itemAt(selectionStart)
+  if (!first) return null
+  if (selectionStart === selectionEnd) {
+    return { start: first.start, end: first.itemEnd }
+  }
+  const last = itemAt(Math.max(selectionStart, selectionEnd - 1)) ?? first
+  const rootIndent = Math.min(first.logicalIndent, last.logicalIndent)
+  const selected = items.filter(
+    (item) =>
+      item.logicalIndent === rootIndent &&
+      item.itemEnd > selectionStart &&
+      item.start < selectionEnd,
+  )
+  if (selected.length === 0) return null
+  return {
+    start: selected[0].start,
+    end: selected.at(-1)!.itemEnd,
+  }
+}
+
+function existingListIndentUnit(items: ListItemRange[]): string {
+  for (const item of items) {
+    const parent = [...items]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.start < item.start &&
+          candidate.logicalIndent < item.logicalIndent &&
+          candidate.itemEnd >= item.itemEnd,
+      )
+    if (!parent) continue
+    if (item.indent.includes('\t')) return '\t'
+    const difference = item.logicalIndent - parent.logicalIndent
+    if (difference > 0 && difference <= 4) return ' '.repeat(difference)
+  }
+  return '    '
+}
+
+interface TextIndentEdit {
+  start: number
+  remove: number
+  insert: string
+}
+
+function mapSelectionOffset(offset: number, edits: TextIndentEdit[]): number {
+  let mapped = offset
+  for (const edit of [...edits].sort((left, right) => left.start - right.start)) {
+    if (offset <= edit.start) continue
+    if (offset < edit.start + edit.remove) {
+      mapped = edit.start + edit.insert.length
+      continue
+    }
+    mapped += edit.insert.length - edit.remove
+  }
+  return mapped
+}
+
+function applyTextIndentEdits(
+  value: string,
+  edits: TextIndentEdit[],
+): string {
+  let result = value
+  for (const edit of [...edits].sort((left, right) => right.start - left.start)) {
+    result =
+      result.slice(0, edit.start) +
+      edit.insert +
+      result.slice(edit.start + edit.remove)
+  }
+  return result
 }
 
 function editorBlocks(
@@ -1374,6 +1573,7 @@ export function LiveEditor({
     if (undoSnapshot) {
       pushEditorUndo(undoSnapshot, contentRef.current, safeActive, value)
     }
+    reportSelection(textarea)
     afterCommit?.()
     deferredSelectionRef.current = {
       start: selectionStart,
@@ -1483,6 +1683,106 @@ export function LiveEditor({
         })
       }
     }
+  }
+
+  const applyCanonicalListEdit = (
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+    selectionDirection: SelectionDirection,
+    sourcePrefix: string,
+    nextSourcePrefix: string,
+    undoSnapshot: EditorUndoSnapshot,
+  ) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const previousContent = contentRef.current
+    const previousRange = { ...rangeRef.current }
+    const previousSource = previousContent.slice(
+      previousRange.start,
+      previousRange.end,
+    )
+    const sourceValue = restoreSourceEols(
+      value,
+      previousSource,
+      nearestEol(previousContent, previousRange.start),
+    )
+    const prefixStart = previousRange.start - sourcePrefix.length
+    const nextContent =
+      previousContent.slice(0, prefixStart) +
+      nextSourcePrefix +
+      sourceValue +
+      previousContent.slice(previousRange.end)
+    const prefixDelta = nextSourcePrefix.length - sourcePrefix.length
+    const nextRange = {
+      start: previousRange.start + prefixDelta,
+      end: previousRange.start + prefixDelta + sourceValue.length,
+    }
+    const totalDelta =
+      nextSourcePrefix.length +
+      sourceValue.length -
+      sourcePrefix.length -
+      (previousRange.end - previousRange.start)
+    const existing =
+      insertedBlocksRef.current.content === previousContent
+        ? insertedBlocksRef.current.blocks
+        : []
+    const nextInserted = {
+      content: nextContent,
+      blocks: existing.map((block) =>
+        block.offset > previousRange.end
+          ? { ...block, offset: block.offset + totalDelta }
+          : { ...block },
+      ),
+    }
+    const nextBoundary = {
+      content: nextContent,
+      start: nextRange.start,
+      end: nextRange.end,
+    }
+    const change = textReplacement(draft, value)
+    setEditorSelection(textarea, change.start, change.end)
+    textarea.setRangeText(
+      change.replacement,
+      change.start,
+      change.end,
+      'preserve',
+    )
+    setEditorSelection(
+      textarea,
+      selectionStart,
+      selectionEnd,
+      selectionDirection,
+    )
+    setDraft(value)
+    draftRevisionRef.current += 1
+    rangeRef.current = nextRange
+    insertedBlocksRef.current = nextInserted
+    editingBoundaryRef.current = nextBoundary
+    setInsertedBlocks(nextInserted)
+    setEditingBoundary(nextBoundary)
+    contentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
+    pushEditorUndo(
+      undoSnapshot,
+      nextContent,
+      safeActive,
+      value,
+    )
+    onChange(nextContent)
+    reportSelection(textarea)
+    deferredSelectionRef.current = {
+      start: selectionStart,
+      end: selectionEnd,
+    }
+    afterInteractionPaint(textarea, () => {
+      setEditorSelection(
+        textarea,
+        selectionStart,
+        selectionEnd,
+        selectionDirection,
+      )
+    })
   }
 
   const insertBlockAfter = (separationBlock: MarkdownBlock = active) => {
@@ -1626,60 +1926,87 @@ export function LiveEditor({
   }
 
   const exitListItem = (line: ListLine) => {
+    const snapshot = currentUndoSnapshot()
+    const previousContent = contentRef.current
+    const previousRange = { ...rangeRef.current }
+    const previousSource = previousContent.slice(
+      previousRange.start,
+      previousRange.end,
+    )
+    const eol = nearestEol(previousContent, previousRange.start)
     const before = draft.slice(0, line.start).replace(/\n$/u, '')
     const afterStart = line.end + (draft[line.end] === '\n' ? 1 : 0)
     const after = draft.slice(afterStart)
-    if (!after) {
-      if (!before) {
-        commitDraft('')
-        afterPaint(() => textareaRef.current?.setSelectionRange(0, 0))
-      } else {
-        commitDraft(before)
-        insertBlockAfter({ ...active, type: 'list', source: before })
-      }
-      return
-    }
-
-    const finalDraft = before
-      ? `${before}\n\n\n\n${after}`
-      : `\n\n${after}`
-    commitDraft(finalDraft)
-    const blockCanonical = contentRef.current.slice(
-      rangeRef.current.start,
-      rangeRef.current.end,
+    const editorSource = before
+      ? after
+        ? `${before}\n\n\n\n${after}`
+        : before
+      : after
+        ? `\n\n${after}`
+        : ''
+    let sourceValue = restoreSourceEols(
+      editorSource,
+      previousSource,
+      eol,
     )
-    const eol = nearestEol(blockCanonical, before.length)
-    const emptyEditorOffset = before ? before.length + 2 : 0
-    const emptyOffset =
-      rangeRef.current.start +
-      sourceOffsetForEditorOffset(blockCanonical, emptyEditorOffset)
-    setInsertedBlocks((current) => ({
-      content: contentRef.current,
+    if (before && !after) sourceValue += `${eol}${eol}`
+    const nextContent = replaceBlockSource(
+      previousContent,
+      previousRange,
+      sourceValue,
+    )
+    const beforeSource = restoreSourceEols(before, previousSource, eol)
+    const emptyOffset = before
+      ? previousRange.start + beforeSource.length + 2 * eol.length
+      : previousRange.start
+    const replacementDelta =
+      sourceValue.length - (previousRange.end - previousRange.start)
+    const existing =
+      insertedBlocksRef.current.content === previousContent
+        ? insertedBlocksRef.current.blocks
+        : []
+    const nextInserted = {
+      content: nextContent,
       blocks: [
-        ...(current.content === contentRef.current ? current.blocks : []),
+        ...existing.map((block) =>
+          block.offset > previousRange.end
+            ? { ...block, offset: block.offset + replacementDelta }
+            : { ...block },
+        ),
         {
           offset: emptyOffset,
           length: 0,
-          leftPadding: before ? eol.length * 2 : 0,
-          rightPadding: before ? 0 : eol.length * 2,
+          leftPadding: before ? 2 * eol.length : 0,
+          rightPadding: before ? 0 : 2 * eol.length,
         },
       ],
-    }))
-    if (!before) rotateEditorSession()
+    }
     const boundary = {
-      content: contentRef.current,
+      content: nextContent,
       start: emptyOffset,
       end: emptyOffset,
       retainOnActivation: true,
     }
-    editingBoundaryRef.current = boundary
-    setEditingBoundary(boundary)
     const targetIndex = safeActive + (before ? 1 : 0)
-    if (!before) {
-      setDraft('')
-      rangeRef.current = { start: emptyOffset, end: emptyOffset }
-    }
+    rotateEditorSession(true)
+    setDraft('')
+    rangeRef.current = { start: emptyOffset, end: emptyOffset }
+    insertedBlocksRef.current = nextInserted
+    editingBoundaryRef.current = boundary
+    setInsertedBlocks(nextInserted)
+    setEditingBoundary(boundary)
+    contentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
+    pushEditorUndo(snapshot, nextContent, targetIndex, '')
+    onChange(nextContent)
     onActiveBlockChange(targetIndex)
+    afterPaint(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      setEditorSelection(textarea, 0)
+      reportSelection(textarea)
+    })
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1756,11 +2083,25 @@ export function LiveEditor({
     const firstLineIndent = /^[ \t]*$/u.test(sourcePrefix)
       ? sourcePrefix
       : ''
-    const listLine = listLineAt(
-      draft,
-      textarea.selectionStart,
-      firstLineIndent,
+    const semanticListBlock = model.blocks.find(
+      (block) =>
+        block.type === 'list' &&
+        block.start <= rangeRef.current.start &&
+        block.end >= rangeRef.current.start,
     )
+    const inSemanticList =
+      !fencedCode &&
+      !displayMath &&
+      !activeFrontmatter &&
+      active.type === 'list' &&
+      semanticListBlock !== undefined
+    const listLine = inSemanticList
+      ? listLineAt(
+          draft,
+          textarea.selectionStart,
+          firstLineIndent,
+        )
+      : null
     if (
       listLine &&
       unmodifiedEnter &&
@@ -1783,41 +2124,130 @@ export function LiveEditor({
         listLine.nextPrefix +
         suffix
       const caret = start + 1 + listLine.nextPrefix.length
-      commitDraft(nextDraft)
-      afterPaint(() => {
-        textareaRef.current?.setSelectionRange(caret, caret)
-      })
+      const snapshot = currentUndoSnapshot()
+      applyControlledTextareaEdit(
+        draft,
+        nextDraft,
+        caret,
+        caret,
+        undefined,
+        snapshot,
+      )
       return
     }
 
     if (
-      listLine &&
+      inSemanticList &&
       event.key === 'Tab' &&
       !event.ctrlKey &&
       !event.metaKey &&
-      !event.altKey
-    ) {
-      event.preventDefault()
-      const removableIndent =
-        listLine.indent.startsWith('\t')
-          ? 1
-          : Math.min(2, listLine.indent.length)
-      const nextDraft = event.shiftKey
-        ? draft.slice(0, listLine.start) +
-          draft.slice(listLine.start + removableIndent)
-        : draft.slice(0, listLine.start) +
-          '  ' +
-          draft.slice(listLine.start)
-      const delta = event.shiftKey ? -removableIndent : 2
-      const nextStart = Math.max(
-        listLine.start,
-        textarea.selectionStart + delta,
+      !event.altKey &&
+      !selectionIsInNonListMarkdown(
+        draft,
+        textarea.selectionStart,
+        textarea.selectionEnd,
       )
-      const nextEnd = Math.max(nextStart, textarea.selectionEnd + delta)
-      commitDraft(nextDraft)
-      afterPaint(() => {
-        textareaRef.current?.setSelectionRange(nextStart, nextEnd)
-      })
+    ) {
+      const selectedRange = selectedListItemRange(
+        draft,
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        firstLineIndent,
+      )
+      if (!selectedRange) return
+      const items = listItemRanges(draft, firstLineIndent)
+      const indentUnit = existingListIndentUnit(items)
+      if (!event.shiftKey) {
+        const selectedRoot = items.find(
+          (item) => item.start === selectedRange.start,
+        )
+        const hasPreviousSibling =
+          selectedRoot !== undefined &&
+          items.some(
+            (item) =>
+              item.logicalIndent === selectedRoot.logicalIndent &&
+              item.itemEnd === selectedRange.start,
+          )
+        if (!hasPreviousSibling) return
+      }
+      const edits: TextIndentEdit[] = []
+      let nextSourcePrefix = sourcePrefix
+      let lineStart = selectedRange.start
+      while (lineStart < selectedRange.end) {
+        const nextBreak = draft.indexOf('\n', lineStart)
+        const lineEnd = nextBreak < 0 ? draft.length : nextBreak
+        const line = draft.slice(lineStart, lineEnd)
+        if (line.trim()) {
+          if (lineStart === 0 && sourcePrefix) {
+            if (event.shiftKey) {
+              const removable =
+                indentUnit === '\t' && sourcePrefix.endsWith('\t')
+                  ? 1
+                  : Math.min(
+                      indentUnit === '\t' ? 4 : indentUnit.length,
+                      sourcePrefix.match(/ +$/u)?.[0].length ?? 0,
+                    )
+              nextSourcePrefix = sourcePrefix.slice(
+                0,
+                sourcePrefix.length - removable,
+              )
+            } else {
+              nextSourcePrefix = `${sourcePrefix}${indentUnit}`
+            }
+          } else if (event.shiftKey) {
+            const indentation =
+              indentUnit === '\t' && line.startsWith('\t')
+                ? '\t'
+                : line.match(
+                    new RegExp(`^ {1,${indentUnit === '\t' ? 4 : indentUnit.length}}`, 'u'),
+                  )?.[0] ?? ''
+            if (indentation) {
+              edits.push({
+                start: lineStart,
+                remove: indentation.length,
+                insert: '',
+              })
+            }
+          } else {
+            edits.push({
+              start: lineStart,
+              remove: 0,
+              insert: indentUnit,
+            })
+          }
+        }
+        if (nextBreak < 0) break
+        lineStart = nextBreak + 1
+      }
+      if (edits.length === 0 && nextSourcePrefix === sourcePrefix) return
+      event.preventDefault()
+      const nextDraft = applyTextIndentEdits(draft, edits)
+      const nextStart = mapSelectionOffset(textarea.selectionStart, edits)
+      const nextEnd = mapSelectionOffset(textarea.selectionEnd, edits)
+      const direction = textarea.selectionDirection ?? 'none'
+      const snapshot = currentUndoSnapshot()
+      if (nextSourcePrefix !== sourcePrefix) {
+        applyCanonicalListEdit(
+          nextDraft,
+          nextStart,
+          nextEnd,
+          direction,
+          sourcePrefix,
+          nextSourcePrefix,
+          snapshot,
+        )
+      } else {
+        applyControlledTextareaEdit(
+          draft,
+          nextDraft,
+          nextStart,
+          nextEnd,
+          undefined,
+          snapshot,
+        )
+        setEditorSelection(textarea, nextStart, nextEnd, direction)
+        reportSelection(textarea)
+      }
       return
     }
 
@@ -1825,20 +2255,28 @@ export function LiveEditor({
       listLine &&
       event.key === 'Backspace' &&
       textarea.selectionStart === listLine.prefixEnd &&
-      textarea.selectionEnd === listLine.prefixEnd
+      textarea.selectionEnd === listLine.prefixEnd &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
     ) {
       event.preventDefault()
       const nextDraft =
         draft.slice(0, listLine.start) +
+        listLine.indent +
         listLine.content +
         draft.slice(listLine.end)
-      commitDraft(nextDraft)
-      afterPaint(() => {
-        textareaRef.current?.setSelectionRange(
-          listLine.start,
-          listLine.start,
-        )
-      })
+      const caret = listLine.start + listLine.indent.length
+      const snapshot = currentUndoSnapshot()
+      applyControlledTextareaEdit(
+        draft,
+        nextDraft,
+        caret,
+        caret,
+        undefined,
+        snapshot,
+      )
       return
     }
 

@@ -648,7 +648,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
 
     expect(result.onChange).toHaveBeenLastCalledWith('')
-    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
   })
 
   it('splits a list around an empty middle item and focuses a paragraph', () => {
@@ -680,18 +680,59 @@ describe('LiveEditor keyboard and composition behavior', () => {
   })
 
   it('indents and outdents the current list item with Tab', async () => {
-    const result = renderEditor('- nested')
+    const result = renderEditor('- parent\n- nested')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length - 6, editor.value.length - 6)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n    - nested')
+    await waitFor(() => expect(editor.selectionStart).toBe(15))
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n- nested')
+  })
+
+  it('does not indent the first list item into indented code', () => {
+    const result = renderEditor('- first')
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
     editor.setSelectionRange(2, 2)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['two-space', '- parent\n  - existing\n- next', '  ', '- parent\n  - existing\n  - next'],
+    ['tab', '- parent\n\t- existing\n- next', '\t', '- parent\n\t- existing\n\t- next'],
+  ])('uses an existing %s nesting style', (
+    _name,
+    source,
+    _indent,
+    expected,
+  ) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      source.lastIndexOf('- next') + 2,
+      source.lastIndexOf('- next') + 2,
+    )
 
     fireEvent.keyDown(editor, { key: 'Tab' })
-    expect(result.onChange).toHaveBeenLastCalledWith('  - nested')
-    await waitFor(() => expect(editor.selectionStart).toBe(4))
 
-    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
-    expect(result.onChange).toHaveBeenLastCalledWith('- nested')
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
   })
 
   it('removes an empty list marker with Backspace', () => {
@@ -704,6 +745,447 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Backspace' })
 
     expect(result.onChange).toHaveBeenLastCalledWith('')
+  })
+
+  it.each([
+    ['indented code', '    - code', 'Active Markdown block', 6],
+    ['YAML front matter', '---\n- metadata\n---', 'Active YAML front matter block', 12],
+    ['TOML front matter', '+++\n- metadata\n+++', 'Active TOML front matter block', 12],
+    ['display math', '$$\n- equation\n$$', 'Active math block', 13],
+    ['HTML metadata', '<section>\n- metadata\n</section>', 'Active Markdown block', 20],
+    ['presentation directive', '::right::\n3. not-a-list', 'Active Markdown block', 23],
+    ['ordinary paragraph', 'Paragraph\n3. not-a-list', 'Active Markdown block', 23],
+  ])(
+    'does not intercept marker-shaped lines in %s',
+    (_name, source, label, caret) => {
+      const result = renderEditor(source)
+      const editor = screen.getByLabelText(label) as HTMLTextAreaElement
+      editor.setSelectionRange(caret, caret)
+
+      const event = new KeyboardEvent('keydown', {
+        key: 'Backspace',
+        bubbles: true,
+        cancelable: true,
+      })
+      fireEvent(editor, event)
+      expect(event.defaultPrevented).toBe(false)
+      expect(result.onChange).not.toHaveBeenCalled()
+    },
+  )
+
+  it('gives fenced-code Tab handling priority over marker-shaped code', () => {
+    const result = renderEditor('```\n- code\n```')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    editor.setSelectionRange(6, 6)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('```\n-   code\n```')
+  })
+
+  it.each([
+    [
+      'fenced code',
+      '- preceding\n- item\n    ```\n    - code\n    ```',
+      '- code',
+    ],
+    ['indented code', '- preceding\n- item\n\n        - code', '- code'],
+    [
+      'math',
+      '- preceding\n- item\n    $$\n    - equation\n    $$',
+      '- equation',
+    ],
+    [
+      'HTML',
+      '- preceding\n- item\n    <aside>\n    - metadata\n    </aside>',
+      '- metadata',
+    ],
+  ])('does not treat marker-shaped %s inside a list as an item', (
+    _name,
+    source,
+    marker,
+  ) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(editor.value).toBe(source)
+    const caret = source.indexOf(marker) + 2
+    editor.setSelectionRange(caret, caret)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
+  it('indents complete selected items with continuations and nested children', async () => {
+    const onSelectionChange = vi.fn()
+    const source = [
+      '- preceding',
+      '- first',
+      '  continuation',
+      '    - child',
+      '      child continuation',
+      '- second',
+      '  second continuation',
+    ].join('\n')
+    const expected = [
+      '- preceding',
+      '    - first',
+      '      continuation',
+      '        - child',
+      '          child continuation',
+      '    - second',
+      '      second continuation',
+    ].join('\n')
+    const result = renderEditor(source, { onSelectionChange })
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const start = source.indexOf('- first') + 2
+    const end = source.indexOf('- second') + 2
+    editor.setSelectionRange(start, end, 'forward')
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+    await waitFor(() => {
+      expect(editor.selectionStart).toBe(start + 4)
+      expect(editor.selectionEnd).toBe(end + 20)
+      expect(editor.selectionDirection).toBe('forward')
+    })
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      start: start + 4,
+      end: end + 20,
+      direction: 'forward',
+    })
+  })
+
+  it('indents the current item together with its nested subtree only', () => {
+    const source = [
+      '- preceding',
+      '- parent',
+      '    continued',
+      '    - child',
+      '        nested',
+      '- sibling',
+    ].join('\n')
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(source.indexOf('- parent') + 2, source.indexOf('- parent') + 2)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      [
+        '- preceding',
+        '    - parent',
+        '        continued',
+        '        - child',
+        '            nested',
+        '- sibling',
+      ].join('\n'),
+    )
+  })
+
+  it('outdents complete selected items while preserving relative indentation', () => {
+    const source = [
+      '- parent',
+      '    - first',
+      '        continuation',
+      '        - child',
+      '    - second',
+      '        continuation',
+    ].join('\n')
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(
+      source.indexOf('- first') + 2,
+      source.length - 3,
+      'backward',
+    )
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      [
+        '- parent',
+        '- first',
+        '    continuation',
+        '    - child',
+        '- second',
+        '    continuation',
+      ].join('\n'),
+    )
+    expect(editor.selectionDirection).toBe('backward')
+  })
+
+  it('edits AST-external leading indentation without losing canonical source', async () => {
+    const result = renderEditor('   - item')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(editor.value).toBe('- item')
+    editor.setSelectionRange(2, 2)
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith('- item')
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith('   - item')
+    await waitFor(() => expect(editor.value).toBe('- item'))
+  })
+
+  it.each([
+    ['009. padded', '009. padded\n010. '],
+    ['3) parenthesized', '3) parenthesized\n4) '],
+    ['- [X] completed', '- [X] completed\n- [ ] '],
+  ])('preserves list marker style when continuing %s', (source, expected) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it('removes only marker and task prefixes without flattening hierarchy', () => {
+    const result = renderEditor('- parent\n    - [x] child')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length - 5, editor.value.length - 5)
+
+    fireEvent.keyDown(editor, { key: 'Backspace' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n    child')
+  })
+
+  it.each([
+    { ctrlKey: true },
+    { altKey: true },
+    { metaKey: true },
+  ])('does not remove a marker with modified Backspace: %o', (modifier) => {
+    const result = renderEditor('- item')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, 2)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      bubbles: true,
+      cancelable: true,
+      ...modifier,
+    })
+
+    fireEvent(editor, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
+  it('ignores list shortcuts during IME composition', () => {
+    const result = renderEditor('- item')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.compositionStart(editor)
+
+    for (const key of ['Enter', 'Tab', 'Backspace']) {
+      fireEvent.keyDown(editor, { key })
+    }
+
+    expect(result.onChange).not.toHaveBeenCalled()
+  })
+
+  it('preserves CRLF while continuing and indenting list items', () => {
+    const source = '- parent\r\n- first\r\n  continuation'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(11, 11)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- parent\r\n    - first\r\n      continuation',
+    )
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect((result.onChange.mock.calls.at(-1)?.[0] as string).includes('\r\n')).toBe(
+      true,
+    )
+  })
+
+  it.each([
+    {
+      name: 'continuation',
+      source: '- item',
+      caret: 6,
+      key: 'Enter',
+    },
+    {
+      name: 'indent',
+      source: '- parent\n- item',
+      caret: 11,
+      key: 'Tab',
+    },
+    {
+      name: 'marker removal',
+      source: '- item',
+      caret: 2,
+      key: 'Backspace',
+    },
+  ])('undoes list $name as one controlled transaction', async ({
+    source,
+    caret,
+    key,
+  }) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.focus()
+    editor.setSelectionRange(caret, caret)
+    fireEvent.keyDown(editor, { key })
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    await waitFor(() => {
+      expect(editor.value).toBe(source)
+      expect(editor.selectionStart).toBe(caret)
+    })
+  })
+
+  it.each([
+    {
+      name: 'first',
+      source: '- \n- after',
+      caret: 2,
+      expected: '\n\n- after',
+      active: 0,
+    },
+    {
+      name: 'middle',
+      source: '- before\n- \n- after',
+      caret: 11,
+      expected: '- before\n\n\n\n- after',
+      active: 1,
+    },
+    {
+      name: 'last',
+      source: '- before\n- ',
+      caret: 11,
+      expected: '- before\n\n',
+      active: 1,
+    },
+  ])(
+    'creates an explicit paragraph block when exiting the $name empty item',
+    async ({ source, caret, expected, active }) => {
+      const onEphemeralStateChange = vi.fn()
+      const result = renderEditor(source, { onEphemeralStateChange })
+      const editor = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      editor.focus()
+      editor.setSelectionRange(caret, caret)
+
+      fireEvent.keyDown(editor, { key: 'Enter' })
+
+      expect(result.onChange).toHaveBeenLastCalledWith(expected)
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(active)
+      await waitFor(() => {
+        const state = onEphemeralStateChange.mock.calls.at(-1)?.[0]
+        expect(state.insertedBlocks.content).toBe(expected)
+        expect(state.insertedBlocks.blocks).toContainEqual(
+          expect.objectContaining({ length: 0 }),
+        )
+      })
+      result.rerender(
+        <LiveEditor
+          content={expected}
+          activeBlock={active}
+          onChange={result.onChange}
+          onActiveBlockChange={result.onActiveBlockChange}
+          onEphemeralStateChange={onEphemeralStateChange}
+          initialEphemeralState={
+            onEphemeralStateChange.mock.calls.at(-1)?.[0]
+          }
+        />,
+      )
+      const paragraph = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      await waitFor(() => {
+        expect(paragraph.value).toBe('')
+        expect(document.activeElement).toBe(paragraph)
+      })
+      expect(screen.getByRole('button', { name: 'Move block 1' })).not.toBeNull()
+      expect(
+        paragraph.closest('.editor-block-row')?.querySelector('.block-drag-handle'),
+      ).toBeNull()
+    },
+  )
+
+  it('undoes an empty-item exit after the parent rerenders the new paragraph', async () => {
+    const result = renderEditor('- before\n- ')
+    const list = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    list.setSelectionRange(list.value.length, list.value.length)
+    fireEvent.keyDown(list, { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'- before\n\n'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    const paragraph = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(paragraph, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith('- before\n- ')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+    await waitFor(() => expect(list.value).toBe('- before\n- '))
   })
 
   it('shows a rendered KaTeX preview while editing inline and display math', async () => {
