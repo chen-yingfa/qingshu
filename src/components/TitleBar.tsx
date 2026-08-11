@@ -25,13 +25,11 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
           : undefined
       }
     >
-      <div
-        className="brand-mark"
-        aria-hidden="true"
-        style={usesNativeControls ? { marginLeft: 82 } : undefined}
-      >
-        Q
-      </div>
+      {!usesNativeControls && (
+        <div className="brand-mark" aria-hidden="true">
+          Q
+        </div>
+      )}
       <div className="document-title" title={path ?? 'Untitled document'}>
         {name}
         {dirty && <span className="dirty-indicator" aria-label="Unsaved changes" />}

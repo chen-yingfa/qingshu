@@ -23,9 +23,8 @@ describe('TitleBar', () => {
       ),
     ).toBe(true)
     const titleBar = container.querySelector('.title-bar') as HTMLElement
-    const brand = container.querySelector('.brand-mark') as HTMLElement
     expect(titleBar.style.gridTemplateColumns).toBe('116px 1fr 116px')
-    expect(brand.style.marginLeft).toBe('82px')
+    expect(container.querySelector('.brand-mark')).toBeNull()
   })
 
   it('does not reserve the native traffic-light inset on other platforms', () => {
@@ -41,5 +40,6 @@ describe('TitleBar', () => {
     const brand = container.querySelector('.brand-mark') as HTMLElement
     expect(titleBar.style.gridTemplateColumns).toBe('')
     expect(brand.style.marginLeft).toBe('')
+    expect(brand.textContent).toBe('Q')
   })
 })

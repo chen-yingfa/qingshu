@@ -90,6 +90,7 @@ button {
 }
 
 .document-title {
+  grid-column: 2;
   overflow: hidden;
   justify-self: center;
   max-width: 52vw;
