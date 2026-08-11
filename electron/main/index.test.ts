@@ -52,6 +52,7 @@ vi.mock('electron', () => ({
   app: {
     disableHardwareAcceleration: vi.fn(),
     getName: () => 'Qingshu',
+    getPath: () => '/user-data',
     isPackaged: false,
     on: vi.fn((name: string, listener: (...args: any[]) => unknown) => {
       mocks.appListeners.set(name, listener)
@@ -170,11 +171,81 @@ describe('desktop IPC', () => {
       'qingshu:close-response',
       'qingshu:export-html',
       'qingshu:export-pdf',
+      'qingshu:list-recent-files',
       'qingshu:open-file',
+      'qingshu:open-recent-file',
       'qingshu:save-file',
       'qingshu:show-item-in-folder',
       'qingshu:window-action',
     ])
+  })
+
+  it('persists canonical recents, removes missing entries, and opens only stored paths', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.readFile.mockResolvedValue(
+      JSON.stringify(['/notes/recent.md', '/notes/missing.md']),
+    )
+    mocks.realpath.mockImplementation(async (path: string) => {
+      if (path === '/notes/missing.md') throw missing
+      return path
+    })
+
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toEqual({
+      paths: ['/notes/recent.md'],
+      removed: ['/notes/missing.md'],
+    })
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      '/user-data/recent-files.json',
+      JSON.stringify(['/notes/recent.md']),
+      { encoding: 'utf8', mode: 0o600 },
+    )
+
+    await expect(
+      mocks.handlers
+        .get('qingshu:open-recent-file')
+        ?.(event, '/private/not-recent.md'),
+    ).rejects.toThrow('Recent file is not authorized')
+    await expect(
+      mocks.handlers
+        .get('qingshu:open-recent-file')
+        ?.(event, '/notes/recent.md'),
+    ).resolves.toEqual({
+      canceled: false,
+      path: '/notes/recent.md',
+      content: '# Hello',
+    })
+    expect(mocks.open).toHaveBeenCalledWith('/notes/recent.md', 'r')
+  })
+
+  it('removes and reports a recent file that disappears when opened', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.realpath.mockRejectedValueOnce(missing)
+
+    await expect(
+      mocks.handlers
+        .get('qingshu:open-recent-file')
+        ?.(event, '/notes/recent.md'),
+    ).rejects.toThrow('Recent file no longer exists and was removed')
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toMatchObject({ paths: [] })
+  })
+
+  it('removes a recent file that disappears after canonical validation', async () => {
+    const path = '/notes/raced-away.md'
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    mocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [path] })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    mocks.open.mockRejectedValueOnce(missing)
+
+    await expect(
+      mocks.handlers.get('qingshu:open-recent-file')?.(event, path),
+    ).rejects.toThrow('Recent file no longer exists and was removed')
+    await expect(
+      mocks.handlers.get('qingshu:list-recent-files')?.(event),
+    ).resolves.toEqual({ paths: [], removed: [path] })
   })
 
   it.each(['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'])(

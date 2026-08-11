@@ -1,5 +1,6 @@
 import {
   open,
+  readFile,
   realpath,
   rename,
   stat,
@@ -56,6 +57,11 @@ const exportedFiles = new WeakMap<
   Electron.WebContents,
   Map<string, ExportedFile>
 >()
+const RECENT_FILES_LIMIT = 12
+let recentFiles: string[] | null = null
+let recentFilesLoad: Promise<void> | null = null
+let removedRecentFiles: string[] = []
+let recentFilesWrite = Promise.resolve()
 let tempSequence = 0
 
 interface CloseState {
@@ -114,6 +120,79 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean
 
 function assertNoPayload(channel: string, args: unknown[]): void {
   if (args.length !== 0) invalidPayload(channel)
+}
+
+function recentFilesPath(): string {
+  return join(app.getPath('userData'), 'recent-files.json')
+}
+
+function persistRecentFiles(): Promise<void> {
+  const content = JSON.stringify(recentFiles ?? [])
+  recentFilesWrite = recentFilesWrite.then(() =>
+    writeFile(recentFilesPath(), content, { encoding: 'utf8', mode: 0o600 }),
+  )
+  return recentFilesWrite
+}
+
+async function ensureRecentFiles(): Promise<void> {
+  if (recentFiles) return
+  if (recentFilesLoad) return recentFilesLoad
+  recentFilesLoad = (async () => {
+    let stored: unknown = []
+    try {
+      stored = JSON.parse(await readFile(recentFilesPath(), 'utf8'))
+    } catch (error) {
+      if (!isMissingFile(error) && !(error instanceof SyntaxError)) throw error
+    }
+    const candidates = Array.isArray(stored)
+      ? stored.filter(
+          (path): path is string =>
+            typeof path === 'string' && path === resolve(path),
+        )
+      : []
+    const valid: string[] = []
+    const removed: string[] = []
+    for (const path of candidates.slice(0, RECENT_FILES_LIMIT)) {
+      try {
+        const canonical = await realpath(path)
+        if (canonical === path && !valid.includes(path)) valid.push(path)
+        else removed.push(path)
+      } catch (error) {
+        if (!isMissingFile(error)) throw error
+        removed.push(path)
+      }
+    }
+    recentFiles = valid
+    removedRecentFiles = removed
+    if (
+      removed.length > 0 ||
+      valid.length !== candidates.length ||
+      !Array.isArray(stored)
+    ) {
+      await persistRecentFiles()
+    }
+  })()
+  try {
+    await recentFilesLoad
+  } finally {
+    recentFilesLoad = null
+  }
+}
+
+async function rememberRecent(path: string): Promise<void> {
+  await ensureRecentFiles()
+  recentFiles = [
+    path,
+    ...(recentFiles ?? []).filter((candidate) => candidate !== path),
+  ].slice(0, RECENT_FILES_LIMIT)
+  await persistRecentFiles()
+}
+
+async function removeRecent(path: string): Promise<void> {
+  await ensureRecentFiles()
+  recentFiles = (recentFiles ?? []).filter((candidate) => candidate !== path)
+  removedRecentFiles = [...removedRecentFiles, path]
+  await persistRecentFiles()
 }
 
 async function rememberExport(
@@ -401,6 +480,7 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
   const documentPath = await canonicalDocumentPath(path)
   const { content, revision } = await readStableDocument(documentPath)
   authorizeDocument(documentsFor(event.sender), documentPath, revision)
+  await rememberRecent(documentPath)
 
   return {
     canceled: false,
@@ -408,6 +488,64 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
     content,
   }
 })
+
+ipcMain.handle(
+  'qingshu:list-recent-files',
+  async (event, ...args: unknown[]): Promise<{
+    paths: string[]
+    removed: string[]
+  }> => {
+    assertTrustedIpcSender(event)
+    assertNoPayload('qingshu:list-recent-files', args)
+    await ensureRecentFiles()
+    const removed = removedRecentFiles
+    removedRecentFiles = []
+    return { paths: [...(recentFiles ?? [])], removed }
+  },
+)
+
+ipcMain.handle(
+  'qingshu:open-recent-file',
+  async (
+    event: IpcMainInvokeEvent,
+    rawPath: unknown,
+    ...extra: unknown[]
+  ): Promise<FileResult> => {
+    assertTrustedIpcSender(event)
+    if (extra.length !== 0 || typeof rawPath !== 'string') {
+      invalidPayload('qingshu:open-recent-file')
+    }
+    const path = rawPath as string
+    await ensureRecentFiles()
+    if (!(recentFiles ?? []).includes(path)) {
+      throw new Error('Recent file is not authorized')
+    }
+    let canonical: string
+    try {
+      canonical = await realpath(path)
+    } catch (error) {
+      if (!isMissingFile(error)) throw error
+      await removeRecent(path)
+      throw new Error('Recent file no longer exists and was removed')
+    }
+    if (canonical !== path) {
+      await removeRecent(path)
+      throw new Error('Recent file changed and was removed')
+    }
+    let opened: Awaited<ReturnType<typeof readStableDocument>>
+    try {
+      opened = await readStableDocument(path)
+    } catch (error) {
+      if (!isMissingFile(error)) throw error
+      await removeRecent(path)
+      throw new Error('Recent file no longer exists and was removed')
+    }
+    const { content, revision } = opened
+    authorizeDocument(documentsFor(event.sender), path, revision)
+    await rememberRecent(path)
+    return { canceled: false, path, content }
+  },
+)
 
 ipcMain.handle(
   'qingshu:save-file',
@@ -453,6 +591,7 @@ ipcMain.handle(
         document.revision,
       )
       document.revision = committed.revision
+      await rememberRecent(targetPath)
       return {
         canceled: false,
         path: targetPath,

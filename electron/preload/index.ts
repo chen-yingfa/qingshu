@@ -8,6 +8,9 @@ import type {
 
 const api: QingshuApi = {
   openFile: () => ipcRenderer.invoke('qingshu:open-file'),
+  listRecentFiles: () => ipcRenderer.invoke('qingshu:list-recent-files'),
+  openRecentFile: path =>
+    ipcRenderer.invoke('qingshu:open-recent-file', path),
   saveFile: request => ipcRenderer.invoke('qingshu:save-file', request),
   exportHtml: (request: ExportHtmlRequest) =>
     ipcRenderer.invoke('qingshu:export-html', request),
