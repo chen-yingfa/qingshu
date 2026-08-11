@@ -249,10 +249,10 @@ function parseListLine(
   if (!ordered) return null
   const sourceIndent = start === 0 ? firstLineIndent : ''
   const prefixLength = line.length - ordered[4].length
-  const nextNumber = String(Number(ordered[2]) + 1).padStart(
-    ordered[2].length,
-    '0',
-  )
+  const incremented = Number(ordered[2]) + 1
+  const nextNumber = String(
+    incremented > 999_999_999 ? 1 : incremented,
+  ).padStart(incremented > 999_999_999 ? 1 : ordered[2].length, '0')
   return {
     start,
     end,
@@ -322,7 +322,9 @@ function listLineAt(
   const line = parseListLine(value, start, end, firstLineIndent)
   if (!line) return null
   const starts = listItemStarts(value)
-  return starts.has(start) || starts.has(start + line.indent.length)
+  return starts.has(start) ||
+    starts.has(start + line.indent.length) ||
+    !line.content.trim()
     ? line
     : null
 }
@@ -346,7 +348,8 @@ function listItemRanges(
     if (
       line &&
       (semanticStarts.has(start) ||
-        semanticStarts.has(start + line.indent.length))
+        semanticStarts.has(start + line.indent.length) ||
+        !line.content.trim())
     ) {
       lines.push(line)
     }
@@ -407,22 +410,50 @@ function selectedListItemRange(
   }
 }
 
-function existingListIndentUnit(items: ListItemRange[]): string {
-  for (const item of items) {
-    const parent = [...items]
-      .reverse()
-      .find(
-        (candidate) =>
-          candidate.start < item.start &&
-          candidate.logicalIndent < item.logicalIndent &&
-          candidate.itemEnd >= item.itemEnd,
-      )
-    if (!parent) continue
-    if (item.indent.includes('\t')) return '\t'
-    const difference = item.logicalIndent - parent.logicalIndent
-    if (difference > 0 && difference <= 4) return ' '.repeat(difference)
+function listParent(
+  items: ListItemRange[],
+  item: ListItemRange,
+): ListItemRange | undefined {
+  return items
+    .filter(
+      (candidate) =>
+        candidate.start < item.start &&
+        candidate.logicalIndent < item.logicalIndent &&
+        candidate.itemEnd >= item.itemEnd,
+    )
+    .sort((left, right) => right.logicalIndent - left.logicalIndent)[0]
+}
+
+function listIndentUnitForParent(
+  items: ListItemRange[],
+  parent: ListItemRange,
+): string {
+  const existingChild = items
+    .filter(
+      (candidate) =>
+        candidate.start > parent.start &&
+        candidate.start < parent.itemEnd &&
+        candidate.logicalIndent > parent.logicalIndent,
+    )
+    .sort(
+      (left, right) =>
+        left.logicalIndent - right.logicalIndent || left.start - right.start,
+    )[0]
+  if (existingChild) {
+    if (existingChild.indent.includes('\t')) return '\t'
+    return ' '.repeat(existingChild.logicalIndent - parent.logicalIndent)
   }
-  return '    '
+  return ' '.repeat(parent.marker.length + 1)
+}
+
+function listOutdentWidth(
+  items: ListItemRange[],
+  item: ListItemRange,
+  sourcePrefix = '',
+): number {
+  const parent = listParent(items, item)
+  if (parent) return item.logicalIndent - parent.logicalIndent
+  return item.start === 0 ? sourcePrefix.length : 0
 }
 
 interface TextIndentEdit {
@@ -434,7 +465,7 @@ interface TextIndentEdit {
 function mapSelectionOffset(offset: number, edits: TextIndentEdit[]): number {
   let mapped = offset
   for (const edit of [...edits].sort((left, right) => left.start - right.start)) {
-    if (offset <= edit.start) continue
+    if (offset < edit.start) continue
     if (offset < edit.start + edit.remove) {
       mapped = edit.start + edit.insert.length
       continue
@@ -456,6 +487,35 @@ function applyTextIndentEdits(
       result.slice(edit.start + edit.remove)
   }
   return result
+}
+
+function textOutdentEdits(
+  value: string,
+  start: number,
+  end: number,
+  width: number,
+  skipFirstLine: boolean,
+): TextIndentEdit[] | null {
+  if (width <= 0) return []
+  const edits: TextIndentEdit[] = []
+  let lineStart = start
+  while (lineStart < end) {
+    const nextBreak = value.indexOf('\n', lineStart)
+    const lineEnd = nextBreak < 0 ? value.length : nextBreak
+    const line = value.slice(lineStart, lineEnd)
+    if (line.trim() && !(skipFirstLine && lineStart === start)) {
+      const indentation = line.match(/^[ \t]*/u)?.[0] ?? ''
+      if (indentation.length < width) return null
+      edits.push({
+        start: lineStart,
+        remove: width,
+        insert: '',
+      })
+    }
+    if (nextBreak < 0) break
+    lineStart = nextBreak + 1
+  }
+  return edits
 }
 
 function editorBlocks(
@@ -1965,20 +2025,27 @@ export function LiveEditor({
       insertedBlocksRef.current.content === previousContent
         ? insertedBlocksRef.current.blocks
         : []
+    const paragraphBlock = {
+      offset: emptyOffset,
+      length: 0,
+      leftPadding: before ? 2 * eol.length : 0,
+      rightPadding: !before && after ? 2 * eol.length : 0,
+    }
     const nextInserted = {
       content: nextContent,
       blocks: [
-        ...existing.map((block) =>
-          block.offset > previousRange.end
-            ? { ...block, offset: block.offset + replacementDelta }
-            : { ...block },
-        ),
-        {
-          offset: emptyOffset,
-          length: 0,
-          leftPadding: before ? 2 * eol.length : 0,
-          rightPadding: !before && after ? 2 * eol.length : 0,
-        },
+        ...existing
+          .filter(
+            (block) =>
+              block.offset !== previousRange.start &&
+              block.offset !== emptyOffset,
+          )
+          .map((block) =>
+            block.offset > previousRange.end
+              ? { ...block, offset: block.offset + replacementDelta }
+              : { ...block },
+          ),
+        paragraphBlock,
       ],
     }
     const boundary = {
@@ -2110,6 +2177,33 @@ export function LiveEditor({
     ) {
       event.preventDefault()
       if (!listLine.content.trim()) {
+        const items = listItemRanges(draft, firstLineIndent)
+        const item = items.find((candidate) => candidate.start === listLine.start)
+        const parent = item ? listParent(items, item) : undefined
+        if (item && parent) {
+          const width = item.logicalIndent - parent.logicalIndent
+          const edits = textOutdentEdits(
+            draft,
+            item.start,
+            item.itemEnd,
+            width,
+            false,
+          )
+          if (edits && edits.length > 0) {
+            const nextDraft = applyTextIndentEdits(draft, edits)
+            const caret = mapSelectionOffset(textarea.selectionStart, edits)
+            const snapshot = currentUndoSnapshot()
+            applyControlledTextareaEdit(
+              draft,
+              nextDraft,
+              caret,
+              caret,
+              undefined,
+              snapshot,
+            )
+            return
+          }
+        }
         exitListItem(listLine)
         return
       }
@@ -2156,19 +2250,79 @@ export function LiveEditor({
       )
       if (!selectedRange) return
       const items = listItemRanges(draft, firstLineIndent)
-      const indentUnit = existingListIndentUnit(items)
+      const selectedRoot = items.find(
+        (item) => item.start === selectedRange.start,
+      )
+      if (!selectedRoot) return
+      let indentUnit = ''
       if (!event.shiftKey) {
-        const selectedRoot = items.find(
-          (item) => item.start === selectedRange.start,
+        const previousSibling = items.find(
+          (item) =>
+            item.logicalIndent === selectedRoot.logicalIndent &&
+            item.itemEnd === selectedRange.start,
         )
-        const hasPreviousSibling =
-          selectedRoot !== undefined &&
-          items.some(
-            (item) =>
-              item.logicalIndent === selectedRoot.logicalIndent &&
-              item.itemEnd === selectedRange.start,
+        if (!previousSibling) return
+        indentUnit = listIndentUnitForParent(items, previousSibling)
+      } else {
+        const width = listOutdentWidth(items, selectedRoot, sourcePrefix)
+        if (width === 0) return
+        const outdentEdits = textOutdentEdits(
+          draft,
+          selectedRange.start,
+          selectedRange.end,
+          width,
+          selectedRange.start === 0 && sourcePrefix.length > 0,
+        )
+        if (!outdentEdits) return
+        const nextSourcePrefix =
+          selectedRange.start === 0 && sourcePrefix.length > 0
+            ? sourcePrefix.slice(0, sourcePrefix.length - width)
+            : sourcePrefix
+        if (
+          selectedRange.start > 0 &&
+          draft.slice(
+            Math.max(0, selectedRange.start - 2),
+            selectedRange.start,
+          ) === '\n\n'
+        ) {
+          outdentEdits.push({
+            start: selectedRange.start - 1,
+            remove: 1,
+            insert: '',
+          })
+        }
+        event.preventDefault()
+        const nextDraft = applyTextIndentEdits(draft, outdentEdits)
+        const nextStart = mapSelectionOffset(
+          textarea.selectionStart,
+          outdentEdits,
+        )
+        const nextEnd = mapSelectionOffset(textarea.selectionEnd, outdentEdits)
+        const direction = textarea.selectionDirection ?? 'none'
+        const snapshot = currentUndoSnapshot()
+        if (nextSourcePrefix !== sourcePrefix) {
+          applyCanonicalListEdit(
+            nextDraft,
+            nextStart,
+            nextEnd,
+            direction,
+            sourcePrefix,
+            nextSourcePrefix,
+            snapshot,
           )
-        if (!hasPreviousSibling) return
+        } else {
+          applyControlledTextareaEdit(
+            draft,
+            nextDraft,
+            nextStart,
+            nextEnd,
+            undefined,
+            snapshot,
+          )
+          setEditorSelection(textarea, nextStart, nextEnd, direction)
+          reportSelection(textarea)
+        }
+        return
       }
       const edits: TextIndentEdit[] = []
       let nextSourcePrefix = sourcePrefix
@@ -2179,35 +2333,7 @@ export function LiveEditor({
         const line = draft.slice(lineStart, lineEnd)
         if (line.trim()) {
           if (lineStart === 0 && sourcePrefix) {
-            if (event.shiftKey) {
-              const removable =
-                indentUnit === '\t' && sourcePrefix.endsWith('\t')
-                  ? 1
-                  : Math.min(
-                      indentUnit === '\t' ? 4 : indentUnit.length,
-                      sourcePrefix.match(/ +$/u)?.[0].length ?? 0,
-                    )
-              nextSourcePrefix = sourcePrefix.slice(
-                0,
-                sourcePrefix.length - removable,
-              )
-            } else {
-              nextSourcePrefix = `${sourcePrefix}${indentUnit}`
-            }
-          } else if (event.shiftKey) {
-            const indentation =
-              indentUnit === '\t' && line.startsWith('\t')
-                ? '\t'
-                : line.match(
-                    new RegExp(`^ {1,${indentUnit === '\t' ? 4 : indentUnit.length}}`, 'u'),
-                  )?.[0] ?? ''
-            if (indentation) {
-              edits.push({
-                start: lineStart,
-                remove: indentation.length,
-                insert: '',
-              })
-            }
+            nextSourcePrefix = `${sourcePrefix}${indentUnit}`
           } else {
             edits.push({
               start: lineStart,
@@ -2218,6 +2344,19 @@ export function LiveEditor({
         }
         if (nextBreak < 0) break
         lineStart = nextBreak + 1
+      }
+      if (
+        /^\d+[.)]$/u.test(selectedRoot.marker) &&
+        !/^1[.)]$/u.test(selectedRoot.marker) &&
+        selectedRange.start > 0 &&
+        draft[selectedRange.start - 1] === '\n' &&
+        draft[selectedRange.start - 2] !== '\n'
+      ) {
+        edits.push({
+          start: selectedRange.start,
+          remove: 0,
+          insert: '\n',
+        })
       }
       if (edits.length === 0 && nextSourcePrefix === sourcePrefix) return
       event.preventDefault()

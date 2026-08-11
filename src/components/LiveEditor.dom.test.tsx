@@ -701,8 +701,8 @@ describe('LiveEditor keyboard and composition behavior', () => {
     editor.setSelectionRange(editor.value.length - 6, editor.value.length - 6)
 
     fireEvent.keyDown(editor, { key: 'Tab' })
-    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n    - nested')
-    await waitFor(() => expect(editor.selectionStart).toBe(15))
+    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n  - nested')
+    await waitFor(() => expect(editor.selectionStart).toBe(13))
 
     fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
     expect(result.onChange).toHaveBeenLastCalledWith('- parent\n- nested')
@@ -851,12 +851,12 @@ describe('LiveEditor keyboard and composition behavior', () => {
     ].join('\n')
     const expected = [
       '- preceding',
-      '    - first',
-      '      continuation',
-      '        - child',
-      '          child continuation',
-      '    - second',
-      '      second continuation',
+      '  - first',
+      '    continuation',
+      '      - child',
+      '        child continuation',
+      '  - second',
+      '    second continuation',
     ].join('\n')
     const result = renderEditor(source, { onSelectionChange })
     const editor = screen.getByLabelText(
@@ -870,13 +870,13 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(result.onChange).toHaveBeenLastCalledWith(expected)
     await waitFor(() => {
-      expect(editor.selectionStart).toBe(start + 4)
-      expect(editor.selectionEnd).toBe(end + 20)
+      expect(editor.selectionStart).toBe(start + 2)
+      expect(editor.selectionEnd).toBe(end + 10)
       expect(editor.selectionDirection).toBe('forward')
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
-      start: start + 4,
-      end: end + 20,
+      start: start + 2,
+      end: end + 10,
       direction: 'forward',
     })
   })
@@ -901,10 +901,10 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith(
       [
         '- preceding',
-        '    - parent',
-        '        continued',
-        '        - child',
-        '            nested',
+        '  - parent',
+        '      continued',
+        '      - child',
+        '          nested',
         '- sibling',
       ].join('\n'),
     )
@@ -944,6 +944,181 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(editor.selectionDirection).toBe('backward')
   })
 
+  it('leaves a root item and its complete subtree unchanged on Shift+Tab', () => {
+    const source = [
+      '- root',
+      '  continuation',
+      '    - child',
+      '      child continuation',
+    ].join('\n')
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, 2)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+    expect(editor.value).toBe(source)
+  })
+
+  it('leaves selected root items and descendants unchanged on Shift+Tab', () => {
+    const source = [
+      '- first',
+      '    - first child',
+      '- second',
+      '  second continuation',
+    ].join('\n')
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, source.indexOf('- second') + 2)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenCalled()
+    expect(editor.value).toBe(source)
+  })
+
+  it.each([1, 2, 3])(
+    'removes the same external %i-space outdent width from the subtree',
+    (width) => {
+      const external = ' '.repeat(width)
+      const source = [
+        `${external}- root`,
+        `${external}    continuation`,
+        `${external}    - child`,
+      ].join('\n')
+      const expected = [
+        '- root',
+        '    continuation',
+        '    - child',
+      ].join('\n')
+      const result = renderEditor(source)
+      const editor = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      editor.setSelectionRange(2, 2)
+
+      fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+
+      expect(result.onChange).toHaveBeenLastCalledWith(expected)
+    },
+  )
+
+  it('uses the selected nested marker width for every descendant outdent', () => {
+    const source = [
+      '- parent',
+      '   - child',
+      '      continuation',
+      '      - grandchild',
+    ].join('\n')
+    const expected = [
+      '- parent',
+      '- child',
+      '   continuation',
+      '   - grandchild',
+    ].join('\n')
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(source.indexOf('- child') + 2, source.indexOf('- child') + 2)
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it.each([
+    {
+      name: 'ordered parent and non-one ordered child',
+      source: '1. parent\n2. child',
+      expected: '1. parent\n\n   2. child',
+      ordered: true,
+      start: 2,
+    },
+    {
+      name: 'wide ordered parent',
+      source: '10. parent\n11. child',
+      expected: '10. parent\n\n    11. child',
+      ordered: true,
+      start: 11,
+    },
+    {
+      name: 'unordered parent with a different child marker',
+      source: '+ parent\n+ child',
+      expected: '+ parent\n  + child',
+      ordered: false,
+      start: null,
+    },
+  ])('creates parser-correct nesting for $name', ({
+    source,
+    expected,
+    ordered,
+    start,
+  }) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const childMarker = source.lastIndexOf('\n') + 1
+    editor.setSelectionRange(childMarker, childMarker)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+    const rootList = markdown.parseDocument(expected).ast.children[0]
+    expect(rootList).toMatchObject({
+      type: 'list',
+      ordered,
+      children: [{
+        type: 'listItem',
+        children: [
+          { type: 'paragraph' },
+          {
+            type: 'list',
+            ordered,
+            start,
+            children: [{ type: 'listItem' }],
+          },
+        ],
+      }],
+    })
+    expect(expected).toContain(source.slice(childMarker, childMarker + 2).trim())
+  })
+
+  it('keeps a caret attached to the marker when indenting from line start', async () => {
+    const source = '- parent\n- child'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const markerStart = source.indexOf('- child')
+    editor.setSelectionRange(markerStart, markerStart)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('- parent\n  - child')
+    await waitFor(() => expect(editor.selectionStart).toBe(markerStart + 2))
+  })
+
   it('edits AST-external leading indentation without losing canonical source', async () => {
     const result = renderEditor('   - item')
     const editor = screen.getByLabelText(
@@ -980,6 +1155,24 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
 
     expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it('keeps a nine-digit ordered continuation marker CommonMark-valid', () => {
+    const result = renderEditor('999999999. item')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    const next = result.onChange.mock.calls.at(-1)?.[0] as string
+    expect(next).toBe('999999999. item\n1. ')
+    expect(markdown.parseDocument(next).ast.children[0]).toMatchObject({
+      type: 'list',
+      ordered: true,
+      children: [{ type: 'listItem' }, { type: 'listItem' }],
+    })
   })
 
   it('removes only marker and task prefixes without flattening hierarchy', () => {
@@ -1042,7 +1235,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).toHaveBeenLastCalledWith(
-      '- parent\r\n    - first\r\n      continuation',
+      '- parent\r\n  - first\r\n    continuation',
     )
     editor.setSelectionRange(editor.value.length, editor.value.length)
     fireEvent.keyDown(editor, { key: 'Enter' })
@@ -1200,6 +1393,138 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('- before\n- ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
     await waitFor(() => expect(list.value).toBe('- before\n- '))
+  })
+
+  it('outdents an empty nested item before exiting the list', async () => {
+    const source = '- parent\n    - \n    - sibling\n- after'
+    const outdented = '- parent\n- \n    - sibling\n- after'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(source.indexOf('    - ') + 6, source.indexOf('    - ') + 6)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(outdented)
+    expect(editor.value).toBe(outdented)
+    await waitFor(() => expect(editor.selectionStart).toBe(outdented.indexOf('\n- ') + 3))
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- parent\n\n\n\n    - sibling\n- after',
+    )
+  })
+
+  it('preserves CRLF when outdenting an empty nested item', () => {
+    const source = '- parent\r\n  - \r\n  - sibling'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(13, 13)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- parent\r\n- \r\n  - sibling',
+    )
+  })
+
+  it('renders task siblings after nested empty-item outdent and parent rerender', async () => {
+    const source = '- [ ] parent\n  - [ ] \n  - [ ] sibling\n\nAfter'
+    const outdented = '- [ ] parent\n- [ ] \n  - [ ] sibling\n\nAfter'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(source.indexOf('  - [ ] ') + 8, source.indexOf('  - [ ] ') + 8)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(outdented)
+    result.rerender(
+      <LiveEditor
+        content={outdented}
+        contentRevision={1}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
+      expect(result.container.querySelector('.rendered-block')?.textContent).toContain(
+        'sibling',
+      )
+    })
+    expect(
+      markdown.parseDocument(outdented).ast.children[0],
+    ).toMatchObject({ type: 'list' })
+  })
+
+  it('undoes an empty nested-item outdent as one transaction', async () => {
+    const source = '- parent\n  - '
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    await waitFor(() => expect(editor.value).toBe(source))
+  })
+
+  it('deduplicates synthetic paragraph metadata when exiting a typed marker', async () => {
+    const onEphemeralStateChange = vi.fn()
+    const result = renderEditor('Before\n\n', {
+      activeBlock: 1,
+      onEphemeralStateChange,
+    })
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(editor, {
+      target: { value: '- ', selectionStart: 2, selectionEnd: 2 },
+    })
+    const markerState = onEphemeralStateChange.mock.calls.at(-1)?.[0]
+    result.rerender(
+      <LiveEditor
+        content={'Before\n\n- '}
+        contentRevision={1}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+        onEphemeralStateChange={onEphemeralStateChange}
+        initialEphemeralState={markerState}
+      />,
+    )
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('Before\n\n')
+    await waitFor(() => {
+      const state = onEphemeralStateChange.mock.calls.at(-1)?.[0]
+      expect(state.insertedBlocks).toEqual({
+        content: 'Before\n\n',
+        blocks: [{
+          offset: 8,
+          length: 0,
+          leftPadding: 0,
+          rightPadding: 0,
+        }],
+      })
+    })
   })
 
   it('shows a rendered KaTeX preview while editing inline and display math', async () => {
