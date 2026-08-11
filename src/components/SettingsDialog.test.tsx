@@ -84,7 +84,7 @@ describe('SettingsDialog', () => {
     fireEvent.keyDown(bold, { key: 'i', ctrlKey: true })
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.getByRole('alert').textContent).toContain(
-      'Already assigned to Italic',
+      'already assigned to Italic',
     )
 
     const tab = new KeyboardEvent('keydown', {

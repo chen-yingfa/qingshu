@@ -660,10 +660,32 @@ function formattedValue(
       return applyInlineFormat(value, start, end, '**', '**')
     case 'italic':
       return applyInlineFormat(value, start, end, '_', '_')
-    case 'code':
-      return applyInlineFormat(value, start, end, '`', '`')
-    case 'math':
-      return applyInlineFormat(value, start, end, '$', '$')
+    case 'code': {
+      const selection = value.slice(start, end)
+      const longestRun = Math.max(
+        0,
+        ...Array.from(selection.matchAll(/`+/gu), (match) => match[0].length),
+      )
+      const delimiter = '`'.repeat(longestRun + 1)
+      const padding =
+        selection.startsWith('`') || selection.endsWith('`') ? ' ' : ''
+      return applyInlineFormat(
+        value,
+        start,
+        end,
+        delimiter + padding,
+        padding + delimiter,
+      )
+    }
+    case 'math': {
+      const selection = value.slice(start, end)
+      const escaped = selection.replace(/(?<!\\)\$/gu, '\\$')
+      return {
+        value: value.slice(0, start) + '$' + escaped + '$' + value.slice(end),
+        selectionStart: start + 1,
+        selectionEnd: start + 1 + escaped.length,
+      }
+    }
     case 'link':
       return applyInlineFormat(value, start, end, '[', '](url)')
     case 'heading':

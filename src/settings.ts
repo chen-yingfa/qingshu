@@ -68,8 +68,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     exportPdf: '',
     bold: 'Mod+B',
     italic: 'Mod+I',
-    inlineCode: 'Mod+`',
-    inlineMath: 'Mod+M',
+    inlineCode: 'Mod+Shift+C',
+    inlineMath: 'Mod+Shift+M',
     theme: '',
     focus: '',
     a4: '',
@@ -84,7 +84,11 @@ function cloneDefaults(): AppSettings {
   }
 }
 
-export function loadSettings(raw: string | null): AppSettings {
+export function loadSettings(
+  raw: string | null,
+  isMac = typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/u.test(navigator.platform),
+): AppSettings {
   const settings = cloneDefaults()
   if (!raw) return settings
   try {
@@ -115,9 +119,10 @@ export function loadSettings(raw: string | null): AppSettings {
           typeof shortcut === 'string' && isValidShortcut(shortcut)
             ? shortcut
             : settings.shortcuts[id]
+        const effective = shortcutLabel(candidate, isMac)
         settings.shortcuts[id] =
-          candidate && used.has(candidate) ? '' : candidate
-        if (settings.shortcuts[id]) used.add(settings.shortcuts[id])
+          effective && used.has(effective) ? '' : candidate
+        if (effective && settings.shortcuts[id]) used.add(effective)
       }
     }
   } catch {
@@ -136,6 +141,7 @@ interface ShortcutEvent {
 
 function normalizedKey(key: string): string {
   if (key === ' ') return 'Space'
+  if (key === '+') return 'Plus'
   if (key.length === 1) return key.toUpperCase()
   return key
 }
@@ -208,7 +214,8 @@ export function isValidShortcut(shortcut: string): boolean {
   if (
     modifiers.some((modifier) => !allowed.has(modifier)) ||
     new Set(modifiers).size !== modifiers.length ||
-    !key
+    !key ||
+    allowed.has(key)
   ) {
     return false
   }

@@ -54,8 +54,10 @@ export function SettingsDialog({
     }
   }, [])
 
-  const update = (patch: Partial<AppSettings>) =>
+  const update = (patch: Partial<AppSettings>) => {
+    setShortcutConflict(null)
     onChange({ ...settings, ...patch })
+  }
   const updateShortcut = (id: ShortcutAction, shortcut: string) => {
     const owner = SHORTCUT_ACTIONS.find(
       (action) =>
@@ -67,7 +69,7 @@ export function SettingsDialog({
     if (owner) {
       setShortcutConflict({
         id,
-        message: `Already assigned to ${owner.label}`,
+        message: `${shortcutLabel(shortcut, isMac)} is already assigned to ${owner.label}`,
       })
       return
     }
@@ -228,8 +230,7 @@ export function SettingsDialog({
                             : ''
                         }
                         aria-invalid={
-                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
-                          shortcutConflict?.id === id
+                          duplicates.has(shortcutLabel(shortcut, isMac))
                         }
                         aria-describedby={
                           duplicates.has(shortcutLabel(shortcut, isMac)) ||
@@ -272,7 +273,13 @@ export function SettingsDialog({
         </div>
 
         <footer className="settings-footer">
-          <button type="button" onClick={() => onChange(loadSettings(null))}>
+          <button
+            type="button"
+            onClick={() => {
+              setShortcutConflict(null)
+              onChange(loadSettings(null))
+            }}
+          >
             Reset defaults
           </button>
           <button type="button" className="settings-done" onClick={onDismiss}>

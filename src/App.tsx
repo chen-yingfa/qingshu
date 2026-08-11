@@ -109,6 +109,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const toastId = useRef(0)
+  const settingsStorageWarned = useRef(false)
   const activePdfExport = useRef<ActivePdfExport | null>(null)
   const [formatRequest, setFormatRequest] = useState<
     { id: number; command: FormatCommand } | undefined
@@ -168,9 +169,15 @@ export default function App() {
       window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
       window.localStorage.setItem('qingshu:document-font', settings.font)
     } catch {
-      // Settings remain active for this session when storage is unavailable.
+      if (!settingsStorageWarned.current) {
+        settingsStorageWarned.current = true
+        addToast(
+          'warning',
+          'Settings could not be saved and will apply only for this session.',
+        )
+      }
     }
-  }, [settings])
+  }, [addToast, settings])
 
   useEffect(() => {
     if (settings.theme !== 'system') return undefined
@@ -558,6 +565,7 @@ export default function App() {
       if (
         settingsOpen ||
         event.repeat ||
+        event.defaultPrevented ||
         event.isComposing ||
         event.key === 'Process'
       ) {

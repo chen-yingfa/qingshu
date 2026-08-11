@@ -125,5 +125,22 @@ describe('settings', () => {
     expect(settings.shortcuts.bold).toBe('Mod+I')
     expect(settings.shortcuts.italic).toBe('')
     expect(settings.shortcuts.inlineMath).toBe(DEFAULT_SETTINGS.shortcuts.inlineMath)
+
+    expect(
+      loadSettings(
+        JSON.stringify({
+          shortcuts: { bold: 'Mod+B', italic: 'Ctrl+B' },
+        }),
+        false,
+      ).shortcuts.italic,
+    ).toBe('')
+    expect(
+      loadSettings(
+        JSON.stringify({
+          shortcuts: { bold: 'Mod+B', italic: 'Cmd+B' },
+        }),
+        true,
+      ).shortcuts.italic,
+    ).toBe('')
   })
 })

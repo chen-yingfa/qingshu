@@ -57,8 +57,8 @@ directives and component blocks unchanged.
 | `Ctrl+Shift+S` | Save as |
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
-| `` Ctrl+` `` | Inline code |
-| `Ctrl+M` | Inline math |
+| `Ctrl+Shift+C` | Inline code |
+| `Ctrl+Shift+M` | Inline math |
 | `Ctrl+,` | Open settings |
 | `Escape` | Close the command palette or leave focus mode |
 | `↑` / `↓`, `Enter`, `Escape` | Navigate, run, or dismiss the palette |

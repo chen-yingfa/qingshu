@@ -313,8 +313,8 @@ describe('commands and operation feedback', () => {
   it.each([
     ['b', false, '**word**'],
     ['i', false, '_word_'],
-    ['`', false, '`word`'],
-    ['m', false, '$word$'],
+    ['c', true, '`word`'],
+    ['m', true, '$word$'],
   ])(
     'runs configurable formatting hotkey Ctrl+%s',
     async (key, shiftKey, expected) => {
@@ -330,6 +330,25 @@ describe('commands and operation feedback', () => {
       await waitFor(() => expect(editor.value).toBe(expected))
     },
   )
+
+  it('ignores formatting shortcuts already handled by the editor', () => {
+    render(<App />)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: 'word' } })
+    editor.setSelectionRange(0, 4)
+    const handled = new KeyboardEvent('keydown', {
+      key: 'b',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    handled.preventDefault()
+
+    editor.dispatchEvent(handled)
+    expect(editor.value).toBe('word')
+  })
 
   it('opens settings and applies font size and a recorded hotkey', async () => {
     const { container } = render(<App />)
@@ -421,7 +440,9 @@ describe('commands and operation feedback', () => {
       screen.getByRole('option', { name: /^Bold, Ctrl\+B$/ }),
     ).not.toBeNull()
     expect(
-      screen.getByRole('option', { name: /^Inline math, Ctrl\+M$/ }),
+      screen.getByRole('option', {
+        name: /^Inline math, Ctrl\+Shift\+M$/,
+      }),
     ).not.toBeNull()
     fireEvent.click(
       screen.getByRole('option', { name: /^Settings, Ctrl\+,$/ }),
