@@ -850,6 +850,9 @@ export function LiveEditor({
       fencedCode &&
       event.key === 'Enter' &&
       !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
       !(
         fencedCode.closed &&
         textarea.selectionStart === draft.length &&
@@ -985,6 +988,9 @@ export function LiveEditor({
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
       textarea.selectionStart === draft.length &&
       textarea.selectionEnd === draft.length
     ) {

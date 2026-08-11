@@ -448,6 +448,28 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('New first\n\nCurrent')
   })
 
+  it('inserts before a CRLF fenced-code block without mixing line endings', () => {
+    const result = renderEditor('```ts\r\nconst value = 1\r\n```')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '\r\n\r\n```ts\r\nconst value = 1\r\n```',
+    )
+    result.rerender(
+      <LiveEditor
+        content={'\r\n\r\n```ts\r\nconst value = 1\r\n```'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('')
+  })
+
   it('removes a still-empty block inserted before current content', () => {
     const result = renderEditor('First\n\nSecond', { activeBlock: 1 })
     const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
@@ -486,8 +508,18 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.keyDown(editor(), { key: 'Backspace' })
     expect(result.onChange).toHaveBeenLastCalledWith('Current')
+    result.rerender(
+      <LiveEditor
+        content="Current"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
     expect(editor().value).toBe('Current')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+    fireEvent.change(editor(), { target: { value: 'Current!' } })
+    expect(result.onChange).toHaveBeenLastCalledWith('Current!')
   })
 
   it('does not intercept Backspace for a non-empty selection at block start', () => {
@@ -517,6 +549,33 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     editor.dispatchEvent(enter)
     expect(enter.defaultPrevented).toBe(false)
+  })
+
+  it('leaves modified Enter untouched at block end and inside code', () => {
+    const plain = renderEditor('Current')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    const endEnter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    editor.dispatchEvent(endEnter)
+    expect(endEnter.defaultPrevented).toBe(false)
+    plain.unmount()
+
+    renderEditor('```ts\nvalue\n```')
+    const code = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    code.setSelectionRange(code.value.indexOf('value'), code.value.indexOf('value'))
+    const codeEnter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    code.dispatchEvent(codeEnter)
+    expect(codeEnter.defaultPrevented).toBe(false)
   })
 
   it('inserts a block after a heading separated from content by one newline', () => {
