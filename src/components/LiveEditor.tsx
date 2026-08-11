@@ -283,8 +283,21 @@ function reorderInsertedBlocks(
         block.end === insertion.offset + insertion.length,
     )
     if (sourceBlock >= 0) {
-      const next = nextBlocks[newIndexByOld.get(sourceBlock) ?? sourceBlock]
-      return next ? { ...insertion, offset: next.start } : insertion
+      const nextIndex = newIndexByOld.get(sourceBlock) ?? sourceBlock
+      const next = nextBlocks[nextIndex]
+      if (!next) return insertion
+      const leftPadding =
+        nextIndex > 0 ? next.start - nextBlocks[nextIndex - 1].end : 0
+      const rightPadding =
+        nextIndex === 0 && nextBlocks.length > 1
+          ? nextBlocks[1].start - next.end
+          : 0
+      return {
+        ...insertion,
+        offset: next.start,
+        leftPadding,
+        rightPadding,
+      }
     }
 
     const gap = previousBlocks.findIndex(
@@ -625,11 +638,13 @@ function BlockDragHandle({
 function BlockDropZone({
   boundary,
   dragging,
+  pointerId,
   active,
   onTarget,
 }: {
   boundary: number
   dragging: boolean
+  pointerId: number | null
   active: boolean
   onTarget(boundary: number): void
 }) {
@@ -642,12 +657,12 @@ function BlockDropZone({
       ].join(' ')}
       data-drop-boundary={boundary}
       aria-hidden="true"
-      onPointerEnter={() => {
-        if (dragging) onTarget(boundary)
+      onPointerEnter={(event) => {
+        if (dragging && event.pointerId === pointerId) onTarget(boundary)
       }}
       onPointerUp={(event) => {
         event.preventDefault()
-        if (!dragging) return
+        if (!dragging || event.pointerId !== pointerId) return
         onTarget(boundary)
       }}
     />
@@ -1217,19 +1232,27 @@ export function LiveEditor({
       (block) => block.start >= nextProtectedEnd,
     )
     const moved = nextBlocks[reordered.index]
-    const editorIndex = nextModel.blocks.findIndex(
+    const currentInsertions =
+      insertedBlocks.content === currentContent ? insertedBlocks.blocks : []
+    const reorderedInsertions = reorderInsertedBlocks(
+      currentInsertions,
+      currentBlocks,
+      nextBlocks,
+      fromIndex,
+      boundary,
+    )
+    const nextEditorBlocks = editorBlocks(
+      reordered.content,
+      nextModel.blocks,
+      reorderedInsertions,
+    )
+    const editorIndex = nextEditorBlocks.findIndex(
       (block) => block.start === moved?.start && block.end === moved?.end,
     )
-    setInsertedBlocks((current) => ({
+    setInsertedBlocks({
       content: reordered.content,
-      blocks: reorderInsertedBlocks(
-        current.content === currentContent ? current.blocks : [],
-        currentBlocks,
-        nextBlocks,
-        fromIndex,
-        boundary,
-      ),
-    }))
+      blocks: reorderedInsertions,
+    })
     setDraft(toEditorValue(moved?.source ?? ''))
     rangeRef.current = {
       start: moved?.start ?? 0,
@@ -1314,7 +1337,9 @@ export function LiveEditor({
       aria-label="Markdown document"
       ref={editorRef}
       onPointerUp={(event) => finishPointerMove(event.pointerId)}
-      onPointerCancel={clearDragState}
+      onPointerCancel={(event) => {
+        if (event.pointerId === dragPointerRef.current) clearDragState()
+      }}
     >
       {previewAll ? (
         <FullDocumentPreview content={content} onReady={onPreviewReady} />
@@ -1328,6 +1353,7 @@ export function LiveEditor({
                   <BlockDropZone
                     boundary={realIndex}
                     dragging={draggedBlock !== null}
+                    pointerId={dragPointerRef.current}
                     active={dropBoundary === realIndex}
                     onTarget={targetDropBoundary}
                   />
@@ -1433,6 +1459,7 @@ export function LiveEditor({
             <BlockDropZone
               boundary={movableBlocks.length}
               dragging={draggedBlock !== null}
+              pointerId={dragPointerRef.current}
               active={dropBoundary === movableBlocks.length}
               onTarget={targetDropBoundary}
             />

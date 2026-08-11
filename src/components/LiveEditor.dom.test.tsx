@@ -1122,4 +1122,82 @@ describe('LiveEditor block reordering', () => {
     expect(screen.getByRole('button', { name: 'Move block 1' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Move block 2' })).not.toBeNull()
   })
+
+  it('keeps the moved block active across an interior synthetic block', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond\n\nThird'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Move block 1' }), {
+      pointerId: 11,
+      button: 0,
+      isPrimary: true,
+    })
+    fireEvent.pointerEnter(
+      result.container.querySelector('[data-drop-boundary="3"]') as HTMLElement,
+      { pointerId: 11 },
+    )
+    fireEvent.pointerUp(window, { pointerId: 11 })
+
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(3)
+  })
+
+  it('recalculates deletion padding when a typed inserted block moves first', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: 'Inserted' } })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\nInserted\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 2' }), {
+      key: 'ArrowUp',
+      altKey: true,
+    })
+    result.rerender(
+      <LiveEditor
+        content={'Inserted\n\nFirst\n\nSecond'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: '' } })
+    result.rerender(
+      <LiveEditor
+        content={'\n\nFirst\n\nSecond'}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
+  })
 })
