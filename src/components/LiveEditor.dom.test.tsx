@@ -510,6 +510,22 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(preview?.querySelector('.katex-html')).not.toBeNull()
   })
 
+  it('hides the active live preview when its input block loses focus', async () => {
+    const result = renderEditor('$x_t$')
+    const editor = screen.getByLabelText('Active Markdown block')
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+
+    fireEvent.blur(editor)
+    expect(result.container.querySelector('.active-live-preview')).toBeNull()
+
+    fireEvent.focus(editor)
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+  })
+
   it('shows a live preview for standard multiline display math', async () => {
     const result = renderEditor('$$\n\\left(\\frac{x_i}{\\mathbb R}\\right)\n$$')
 

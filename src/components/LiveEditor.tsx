@@ -1048,6 +1048,7 @@ export function LiveEditor({
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(toEditorValue(active.source))
+  const [activeInputFocused, setActiveInputFocused] = useState(true)
   const [activeSession, setActiveSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1836,6 +1837,7 @@ export function LiveEditor({
                         autoFocus
                         spellCheck={!fencedCode}
                         value={draft}
+                        onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           const textarea = event.currentTarget
                           commitDraft(textarea.value)
@@ -1848,6 +1850,7 @@ export function LiveEditor({
                           }
                         }}
                         onBlur={(event) => {
+                          setActiveInputFocused(false)
                           codeTabEscapeRef.current = false
                           normalize(
                             event.currentTarget.value,
@@ -1868,7 +1871,9 @@ export function LiveEditor({
                         }}
                         onKeyDown={handleKeyDown}
                       />
-                      <ActiveBlockPreview source={draft} />
+                      {activeInputFocused && (
+                        <ActiveBlockPreview source={draft} />
+                      )}
                     </div>
                   ) : (
                     <RenderedBlock
