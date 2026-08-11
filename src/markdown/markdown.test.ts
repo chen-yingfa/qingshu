@@ -69,6 +69,16 @@ describe('renderMarkdown', () => {
     expect(html).toContain('∫')
   })
 
+  it('syntax-highlights fenced code in rendered Markdown blocks', async () => {
+    const html = await renderMarkdown(
+      '```python\ndef bin_search(values, target):\n    return target in values\n```',
+    )
+
+    expect(html).toContain('class="hljs language-python"')
+    expect(html).toContain('class="hljs-keyword">def</span>')
+    expect(html).toContain('class="hljs-keyword">return</span>')
+  })
+
   it('preserves scalable delimiters, blackboard symbols, and scripts in KaTeX HTML', async () => {
     const html = await renderMarkdown(
       '$$\\left(\\frac{x_t}{\\mathbb R}\\right) \\in \\mathbb N_0$$',

@@ -1,3 +1,4 @@
+import { fromHtmlIsomorphic } from 'hast-util-from-html-isomorphic'
 import rehypeKatex from 'rehype-katex'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import rehypeStringify from 'rehype-stringify'
@@ -6,6 +7,8 @@ import remarkMath from 'remark-math'
 import remarkParse from 'remark-parse'
 import remarkRehype from 'remark-rehype'
 import { unified } from 'unified'
+
+import { highlightCode } from './code'
 
 export interface MarkdownBlock {
   id: string
@@ -52,9 +55,47 @@ interface MarkdownRoot {
 
 interface HastNode {
   type: string
+  value?: string
   tagName?: string
   properties?: Record<string, unknown>
   children?: HastNode[]
+}
+
+function highlightRenderedCode() {
+  return (tree: HastNode) => {
+    const visit = (node: HastNode) => {
+      if (node.tagName === 'pre') {
+        const code = node.children?.find((child) => child.tagName === 'code')
+        if (code) {
+          const className = code.properties?.className
+          const classes = Array.isArray(className)
+            ? className.map(String)
+            : className
+              ? [String(className)]
+              : []
+          const languageClass = classes.find((name) =>
+            name.startsWith('language-'),
+          )
+          const language = languageClass?.slice('language-'.length) ?? ''
+          const source =
+            code.children
+              ?.map((child) => (child.type === 'text' ? child.value ?? '' : ''))
+              .join('') ?? ''
+          const fragment = fromHtmlIsomorphic(
+            highlightCode(source, language),
+            { fragment: true },
+          ) as HastNode
+          code.properties = {
+            ...code.properties,
+            className: ['hljs', ...classes],
+          }
+          code.children = fragment.children ?? []
+        }
+      }
+      node.children?.forEach(visit)
+    }
+    visit(tree)
+  }
 }
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
@@ -241,6 +282,7 @@ async function processMarkdown(
     .use(remarkRehype)
     .use(canonicalizeHastFootnoteReferences, { references })
     .use(rehypeSanitize, { ...defaultSchema, clobberPrefix: '' })
+    .use(highlightRenderedCode)
     .use(rehypeKatex)
     .use(rehypeStringify)
   return String(await renderer.process(source))
