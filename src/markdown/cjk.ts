@@ -181,7 +181,7 @@ export function remapProtectedRanges(
   const previousEnd = before.length - suffix
   const nextEnd = after.length - suffix
   const delta = after.length - before.length
-  return ranges.map(range => ({
+  const remapped = ranges.map(range => ({
     start:
       range.start <= prefix
         ? range.start
@@ -195,6 +195,84 @@ export function remapProtectedRanges(
           ? range.end + delta
           : nextEnd,
   }))
+
+  if (before === after) return remapped
+
+  const changedBefore = before.slice(prefix, previousEnd)
+  const changedAfter = after.slice(prefix, nextEnd)
+  const markdownDelimiter = /[\r\n`~$<>\[\]()!\\:+\-./@"'￥·]/u
+  if (markdownDelimiter.test(changedBefore + changedAfter)) {
+    return protectedMarkdownRanges(after)
+  }
+
+  const touchesRange = (
+    range: SourceRange,
+    start: number,
+    end: number,
+  ) => start === end
+    ? start >= range.start && start <= range.end
+    : start < range.end && end > range.start
+  const changesWhitespaceNearRange = (
+    range: SourceRange,
+    start: number,
+    end: number,
+    changed: string,
+  ) => /[\t ]/u.test(changed) &&
+    start <= range.end + 1 &&
+    end >= range.start - 1
+  if (
+    ranges.some(range => touchesRange(range, prefix, previousEnd)) ||
+    remapped.some(range => touchesRange(range, prefix, nextEnd)) ||
+    ranges.some(
+      range =>
+        changesWhitespaceNearRange(
+          range,
+          prefix,
+          previousEnd,
+          changedBefore,
+        ),
+    ) ||
+    remapped.some(
+      range =>
+        changesWhitespaceNearRange(range, prefix, nextEnd, changedAfter),
+    )
+  ) {
+    return protectedMarkdownRanges(after)
+  }
+
+  const changesLeadingWhitespace = (
+    source: string,
+    start: number,
+    changed: string,
+  ) => {
+    if (!/^[ \t]+$/u.test(changed)) return false
+    const lineStart = source.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+    return /^[ \t]*$/u.test(source.slice(lineStart, start))
+  }
+  if (
+    changesLeadingWhitespace(before, prefix, changedBefore) ||
+    changesLeadingWhitespace(after, prefix, changedAfter)
+  ) {
+    return protectedMarkdownRanges(after)
+  }
+
+  const tokenAround = (source: string, start: number, end: number) => {
+    let tokenStart = start
+    let tokenEnd = end
+    while (tokenStart > 0 && !/[\s]/u.test(source[tokenStart - 1])) tokenStart -= 1
+    while (tokenEnd < source.length && !/[\s]/u.test(source[tokenEnd])) tokenEnd += 1
+    return source.slice(tokenStart, tokenEnd)
+  }
+  const structuralToken =
+    /[`~$<>\[\]()!\\@]|::|---|\+\+\+|(?:https?:\/\/|mailto:|www\.)/iu
+  if (
+    structuralToken.test(tokenAround(before, prefix, previousEnd)) ||
+    structuralToken.test(tokenAround(after, prefix, nextEnd))
+  ) {
+    return protectedMarkdownRanges(after)
+  }
+
+  return remapped
 }
 
 function transformMarkdownText(

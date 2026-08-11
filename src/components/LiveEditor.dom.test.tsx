@@ -1315,7 +1315,100 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => expect(textarea.selectionStart).toBe(7))
   })
 
-  it('uses one Markdown parse per auto-spaced keystroke with protected context', async () => {
+  it.each([
+    ['inline code', '`中文A`', '`中文A`'],
+    ['link', '[中文A](./中文React)', '[中文 A](./中文React)'],
+    ['image', '![中文A](./中文React.png)', '![中文 A](./中文React.png)'],
+    ['math', '$中文A$', '$中文A$'],
+    ['fence', '```\n中文A\n```', '```\n中文A\n```'],
+    [
+      'HTML',
+      '<div data-title="中文A">中文React</div>',
+      '<div data-title="中文A">中文React</div>',
+    ],
+    [
+      'Marp metadata',
+      '---\nmarp: true\ntheme: 中文Theme\ntitle: "中文A"\n---',
+      '---\nmarp: true\ntheme: 中文Theme\ntitle: "中文A"\n---',
+    ],
+    [
+      'Slidev metadata',
+      '+++\ntheme = "中文Theme"\n+++\n::right::\n<Tweet id="中文A" />',
+      '+++\ntheme = "中文Theme"\n+++\n::right::\n<Tweet id="中文A" />',
+    ],
+  ])('preserves protected %s content when it is pasted', (
+    _name,
+    pasted,
+    expected,
+  ) => {
+    const result = renderEditor('中文A', { autoSpacing: true })
+
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: {
+        value: pasted,
+        selectionStart: pasted.length,
+        selectionEnd: pasted.length,
+      },
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it.each([
+    ['inline code', '`中文A`', '中文A', '中文 A'],
+    [
+      'link',
+      '[中文A](./中文React)',
+      '中文A ./中文React',
+      '中文 A ./中文 React',
+    ],
+    [
+      'image',
+      '![中文A](./中文React.png)',
+      '中文A ./中文React.png',
+      '中文 A ./中文 React.png',
+    ],
+    ['math', '$中文A$', '中文A', '中文 A'],
+    ['fence', '```\n中文A\n```', '中文A', '中文 A'],
+    ['HTML', '<span>中文A</span>', '中文A', '中文 A'],
+  ])('normalizes text exposed by removing protected %s delimiters', (
+    _name,
+    before,
+    after,
+    expected,
+  ) => {
+    const result = renderEditor(before, { autoSpacing: true })
+
+    fireEvent.change(screen.getByLabelText(/Active (?:Markdown|code) block/), {
+      target: {
+        value: after,
+        selectionStart: after.length,
+        selectionEnd: after.length,
+      },
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it('reparses the edited block when protected delimiters are introduced', () => {
+    const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
+    const result = renderEditor('中文A', { autoSpacing: true })
+    const textarea = screen.getByLabelText('Active Markdown block')
+    parse.mockClear()
+
+    fireEvent.change(textarea, {
+      target: {
+        value: '`中文A`',
+        selectionStart: 5,
+        selectionEnd: 5,
+      },
+    })
+
+    expect(parse).toHaveBeenCalledOnce()
+    expect(result.onChange).toHaveBeenLastCalledWith('`中文A`')
+  })
+
+  it('reuses cached protected ranges for ordinary auto-spaced typing', async () => {
     const parse = vi.spyOn(markdownParser, 'parseMarkdownAst')
     const normalize = vi.spyOn(markdownCjk, 'normalizeCjkInput')
     const protectedTail =
@@ -1335,7 +1428,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       },
     })
 
-    expect(parse.mock.calls.length).toBeLessThanOrEqual(1)
+    expect(parse).not.toHaveBeenCalled()
     expect(normalize).toHaveBeenCalledOnce()
     expect(normalize).toHaveBeenCalledWith(
       `中文text${protectedTail}`,

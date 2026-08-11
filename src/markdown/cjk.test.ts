@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { documentStats, normalizeCjkInput, spaceCjkLatin } from './cjk'
+import {
+  documentStats,
+  normalizeCjkInput,
+  protectedMarkdownRanges,
+  remapProtectedRanges,
+  spaceCjkLatin,
+} from './cjk'
 
 const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
 
@@ -11,6 +17,78 @@ afterEach(() => {
 })
 
 describe('normalizeCjkInput', () => {
+  it.each([
+    ['inline code', '中文A', '`中文A`', '`中文A`'],
+    ['link destination', '中文A', '[中文A](./中文React)', '[中文 A](./中文React)'],
+    ['image destination', '中文A', '![中文A](./中文React.png)', '![中文 A](./中文React.png)'],
+    ['inline math', '中文A', '$中文A$', '$中文A$'],
+    ['fenced code', '中文A', '```\n中文A\n```', '```\n中文A\n```'],
+    ['indented code', '中文A', '    中文A', '    中文A'],
+    ['HTML', '中文A', '<div data-title="中文A">中文React</div>', '<div data-title="中文A">中文React</div>'],
+    [
+      'Marp front matter',
+      '中文A',
+      '---\ntheme: 中文Theme\ntitle: "中文A"\n---',
+      '---\ntheme: 中文Theme\ntitle: "中文A"\n---',
+    ],
+    ['Slidev directive', '中文A', '::right::\n中文A', '::right::\n中文 A'],
+  ])('reparses when an edit introduces protected %s syntax', (
+    _name,
+    before,
+    after,
+    expected,
+  ) => {
+    const ranges = remapProtectedRanges(
+      before,
+      after,
+      protectedMarkdownRanges(before),
+    )
+
+    expect(normalizeCjkInput(after, { start: 0, end: after.length }, true, ranges))
+      .toBe(expected)
+  })
+
+  it.each([
+    ['inline code', '`中文A`', '中文A', '中文 A'],
+    ['inline math', '$中文A$', '中文A', '中文 A'],
+    ['HTML', '<span>中文A</span>', '中文A', '中文 A'],
+    ['fenced code', '```\n中文A\n```', '中文A', '中文 A'],
+    ['indented code', '    中文A', '中文A', '中文 A'],
+    [
+      'front matter',
+      '---\ntitle: 中文A\n---',
+      'title: 中文A',
+      'title: 中文 A',
+    ],
+  ])('reparses when an edit removes protected %s syntax', (
+    _name,
+    before,
+    after,
+    expected,
+  ) => {
+    const ranges = remapProtectedRanges(
+      before,
+      after,
+      protectedMarkdownRanges(before),
+    )
+
+    expect(normalizeCjkInput(after, { start: 0, end: after.length }, true, ranges))
+      .toBe(expected)
+  })
+
+  it('reparses when deleting ordinary text exposes a presentation directive', () => {
+    const before = 'prefix::中文A::'
+    const after = '::中文A::'
+    const ranges = remapProtectedRanges(
+      before,
+      after,
+      protectedMarkdownRanges(before),
+    )
+
+    expect(normalizeCjkInput(after, { start: 0, end: after.length }, true, ranges))
+      .toBe('::中文A::')
+  })
+
   it('converts CJK-friendly Markdown shortcuts without mutating its input', () => {
     const source = '》 引用\n￥E=mc^2￥ 和 ·const值·，以及 "中文"'
 
