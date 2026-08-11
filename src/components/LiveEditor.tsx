@@ -116,6 +116,7 @@ interface LiveEditorBaseProps {
   activeBlock: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
+  cjkShortcuts?: boolean
   readOnly?: boolean
   previewAll?: boolean
   onPreviewReady?(error?: Error): void
@@ -706,6 +707,7 @@ export function LiveEditor({
   activeBlock,
   formatRequest,
   autoSpacing = false,
+  cjkShortcuts = true,
   readOnly = false,
   previewAll = false,
   sourceMode = false,
@@ -777,11 +779,16 @@ export function LiveEditor({
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
+  const displayMath = useMemo(
+    () => draft.startsWith('$$\n') && draft.endsWith('\n$$'),
+    [draft],
+  )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
   const codeTabEscapeRef = useRef(false)
+  const mathEnterArmedRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
@@ -806,6 +813,7 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
+    mathEnterArmedRef.current = false
     setActiveInputFocused(document.activeElement === textareaRef.current)
     setEditingBoundary(null)
     setActiveSession((session) => session + 1)
@@ -1014,6 +1022,7 @@ export function LiveEditor({
       editableRange,
       autoSpacing,
       localProtectedRanges,
+      cjkShortcuts,
     )
     const transformedEnd = mappedTransformOffset(
       sourceValue,
@@ -1054,6 +1063,61 @@ export function LiveEditor({
     }
   }
 
+  const insertBlockAfter = (separationBlock: MarkdownBlock = active) => {
+    const insertionPoint = rangeRef.current.end
+    const eol = nearestEol(contentRef.current, insertionPoint)
+    const insertion = `${eol}${eol}`
+    const leftSeparators = separatesParagraphWithOneEol(separationBlock)
+      ? 1
+      : 2
+    const emptyOffset = insertionPoint + leftSeparators * eol.length
+    const nextContent =
+      contentRef.current.slice(0, insertionPoint) +
+      insertion +
+      contentRef.current.slice(insertionPoint)
+    const previousContent = contentRef.current
+    setInsertedBlocks((current) => ({
+      content: nextContent,
+      blocks: [
+        ...(current.content === previousContent ? current.blocks : []).map(
+          (block) =>
+            block.offset > insertionPoint
+              ? { ...block, offset: block.offset + insertion.length }
+              : block,
+        ),
+        {
+          offset: emptyOffset,
+          length: 0,
+          leftPadding: emptyOffset - insertionPoint,
+          rightPadding: 0,
+        },
+      ].filter(
+        (block, index, blocks) =>
+          blocks.findIndex((candidate) => candidate.offset === block.offset) ===
+          index,
+      ),
+    }))
+    contentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
+    onChange(nextContent)
+    onActiveBlockChange(safeActive + 1)
+  }
+
+  const enterDisplayMathMode = (value: string): boolean => {
+    const isDollar = value === '$$'
+    const isYen =
+      cjkShortcuts && (value === '¥¥' || value === '￥￥')
+    if (!isDollar && !isYen) return false
+    const mathSource = '$$\n\n$$'
+    mathEnterArmedRef.current = false
+    commitDraft(mathSource)
+    afterPaint(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(3, 3)
+    })
+    return true
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (readOnly) return
     if (
@@ -1062,6 +1126,7 @@ export function LiveEditor({
       composingRef.current
     ) return
     const textarea = event.currentTarget
+    if (event.key !== 'Enter') mathEnterArmedRef.current = false
 
     if (
       event.ctrlKey &&
@@ -1183,6 +1248,44 @@ export function LiveEditor({
           result.selectionStart,
           result.selectionEnd,
         )
+      })
+      return
+    }
+
+    if (
+      displayMath &&
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault()
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      if (mathEnterArmedRef.current) {
+        const removeAt = Math.max(3, start - 1)
+        const cleaned =
+          draft[removeAt] === '\n'
+            ? draft.slice(0, removeAt) + draft.slice(removeAt + 1)
+            : draft
+        commitDraft(cleaned)
+        mathEnterArmedRef.current = false
+        insertBlockAfter({
+          ...active,
+          type: 'math',
+          source: cleaned,
+          end: rangeRef.current.start + cleaned.length,
+        })
+        return
+      }
+
+      const nextDraft = draft.slice(0, start) + '\n' + draft.slice(end)
+      commitDraft(nextDraft)
+      mathEnterArmedRef.current = true
+      afterPaint(() => {
+        const caret = start + 1
+        textareaRef.current?.setSelectionRange(caret, caret)
       })
       return
     }
@@ -1337,43 +1440,7 @@ export function LiveEditor({
       textarea.selectionEnd === draft.length
     ) {
       event.preventDefault()
-      const insertionPoint = rangeRef.current.end
-      const eol = nearestEol(contentRef.current, insertionPoint)
-      const insertion = `${eol}${eol}`
-      const leftSeparators = separatesParagraphWithOneEol(active)
-        ? 1
-        : 2
-      const emptyOffset = insertionPoint + leftSeparators * eol.length
-      const nextContent =
-        contentRef.current.slice(0, insertionPoint) +
-        insertion +
-        contentRef.current.slice(insertionPoint)
-      const previousContent = contentRef.current
-      setInsertedBlocks((current) => ({
-        content: nextContent,
-        blocks: [
-          ...(current.content === previousContent ? current.blocks : []).map(
-            (block) =>
-              block.offset > insertionPoint
-                ? { ...block, offset: block.offset + insertion.length }
-                : block,
-          ),
-          {
-            offset: emptyOffset,
-            length: 0,
-            leftPadding: emptyOffset - insertionPoint,
-            rightPadding: 0,
-          },
-        ].filter(
-          (block, index, blocks) =>
-            blocks.findIndex((candidate) => candidate.offset === block.offset) ===
-            index,
-        ),
-      }))
-      contentRef.current = nextContent
-      pendingAcknowledgementRef.current = nextContent
-      onChange(nextContent)
-      onActiveBlockChange(safeActive + 1)
+      insertBlockAfter()
     }
   }
 
@@ -1537,6 +1604,7 @@ export function LiveEditor({
           contentRevision={contentRevision!}
           formatRequest={formatRequest}
           autoSpacing={autoSpacing}
+          cjkShortcuts={cjkShortcuts}
           readOnly={readOnly}
           onChange={onChange}
           selection={selection}
@@ -1620,21 +1688,32 @@ export function LiveEditor({
                         className={
                           fencedCode
                             ? 'source-block source-block-code'
+                            : displayMath
+                              ? 'source-block source-block-math'
                             : 'source-block'
                         }
                         aria-label={
                           fencedCode
                             ? 'Active code block'
+                            : displayMath
+                              ? 'Active math block'
                             : 'Active Markdown block'
                         }
                         autoFocus
-                        spellCheck={!fencedCode}
+                        spellCheck={!fencedCode && !displayMath}
                         readOnly={readOnly}
                         value={draft}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
+                          if (
+                            !composingRef.current &&
+                            enterDisplayMathMode(textarea.value)
+                          ) {
+                            return
+                          }
+                          mathEnterArmedRef.current = false
                           commitDraft(textarea.value)
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
@@ -1661,6 +1740,9 @@ export function LiveEditor({
                         }}
                         onCompositionEnd={(event) => {
                           composingRef.current = false
+                          if (enterDisplayMathMode(event.currentTarget.value)) {
+                            return
+                          }
                           normalize(
                             event.currentTarget.value,
                             event.currentTarget.selectionStart,

@@ -239,6 +239,7 @@ export function DocumentSourceEditor({
   contentRevision,
   formatRequest,
   autoSpacing = false,
+  cjkShortcuts = true,
   readOnly = false,
   onChange,
   selection,
@@ -248,6 +249,7 @@ export function DocumentSourceEditor({
   contentRevision: number
   formatRequest?: FormatRequest
   autoSpacing?: boolean
+  cjkShortcuts?: boolean
   readOnly?: boolean
   onChange(content: string): void
   selection?: EditorSelection
@@ -341,7 +343,13 @@ export function DocumentSourceEditor({
   ) => {
     if (composingRef.current) return
     const canonical = canonicalContentRef.current
-    const normalizedCanonical = normalizeCjkInput(canonical, undefined, autoSpacing)
+    const normalizedCanonical = normalizeCjkInput(
+      canonical,
+      undefined,
+      autoSpacing,
+      undefined,
+      cjkShortcuts,
+    )
     const normalized = toEditorValue(normalizedCanonical)
     if (normalized === value) return
     const nextStart = mappedTransformOffset(value, normalized, selectionStart)

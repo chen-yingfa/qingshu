@@ -233,6 +233,16 @@ export function SettingsDialog({
               />
               Automatic CJK/Latin spacing
             </label>
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={settings.cjkShortcuts}
+                onChange={(event) =>
+                  update({ cjkShortcuts: event.target.checked })
+                }
+              />
+              Convert Yen and middle-dot shortcuts
+            </label>
           </fieldset>
 
           <fieldset className="settings-section">

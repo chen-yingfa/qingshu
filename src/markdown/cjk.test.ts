@@ -18,6 +18,15 @@ afterEach(() => {
 })
 
 describe('normalizeCjkInput', () => {
+  it('converts both yen variants only when shortcut conversion is enabled', () => {
+    expect(
+      normalizeCjkInput('¥中文A¥ ￥中文B￥', undefined, false, undefined, true),
+    ).toBe('$中文A$ $中文B$')
+    expect(
+      normalizeCjkInput('¥中文A¥ ￥中文B￥', undefined, false, undefined, false),
+    ).toBe('¥中文A¥ ￥中文B￥')
+  })
+
   it.each([
     ['inline code', '中文A', '`中文A`', '`中文A`'],
     ['link destination', '中文A', '[中文A](./中文React)', '[中文 A](./中文React)'],

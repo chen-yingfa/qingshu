@@ -910,6 +910,7 @@ export default function App() {
             activeBlock={state.activeBlock}
             formatRequest={formatRequest}
             autoSpacing={autoSpacing}
+            cjkShortcuts={settings.cjkShortcuts}
             readOnly={closing}
             sourceMode={sourceMode}
             selection={state.selection}

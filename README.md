@@ -11,7 +11,9 @@ Electron.
 - GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks, and
   footnotes.
 - Inline and display mathematics rendered with bundled KaTeX typography,
-  including a live preview while editing math source.
+  including a live preview while editing math source. Typing `$$` enters
+  display-math mode with an automatic closing delimiter; two consecutive
+  Enter presses continue in the next block.
 - Fenced-code input mode with automatic closing fences, Tab/Enter indentation,
   and live syntax highlighting for common web, scripting, data, and markup languages.
 - Sans-serif document typography by default, with persistent serif and monospace
@@ -36,9 +38,10 @@ Electron.
 
 Qingshu understands Han, Hiragana, Katakana, and Hangul text. It uses
 `Intl.Segmenter` where available for document statistics and Ctrl+Arrow word
-movement. Input normalization converts paired `￥…￥` to `$…$`, paired `·…·` to
-inline code, line-leading `》 ` to `> `, and straight quoted CJK text to curly quotes.
+movement. Input normalization converts paired `¥…¥` or `￥…￥` to `$…$`, paired
+`·…·` to inline code, line-leading `》 ` to `> `, and straight quoted CJK text to curly quotes.
 Normalization waits until IME composition ends and preserves the caret.
+Yen and middle-dot shortcut conversion can be disabled in Settings.
 
 Automatic CJK spacing is opt-in from the toolbar or command palette. When enabled,
 it inserts spaces at CJK/Latin-letter or CJK/digit boundaries as editing continues.

@@ -631,6 +631,51 @@ describe('LiveEditor keyboard and composition behavior', () => {
     })
   })
 
+  it('enters display-math mode at $$ and exits after two Enters', async () => {
+    const result = renderEditor('')
+    let editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+    })
+    editor = screen.getByLabelText('Active math block') as HTMLTextAreaElement
+    expect(editor.value).toBe('$$\n\n$$')
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\n\n$$')
+    await waitFor(() => expect(editor.selectionStart).toBe(3))
+
+    fireEvent.change(editor, {
+      target: { value: '$$\nx\n$$', selectionStart: 4, selectionEnd: 4 },
+    })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => expect(editor.selectionStart).toBe(5))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('$$\nx\n$$\n\n')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+  })
+
+  it('converts yen math openers only when CJK shortcuts are enabled', () => {
+    const enabled = renderEditor('', { cjkShortcuts: true })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '¥¥', selectionStart: 2, selectionEnd: 2 },
+    })
+    expect(
+      (screen.getByLabelText('Active math block') as HTMLTextAreaElement).value,
+    ).toBe('$$\n\n$$')
+    enabled.unmount()
+
+    renderEditor('', { cjkShortcuts: false })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '¥¥', selectionStart: 2, selectionEnd: 2 },
+    })
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('¥¥')
+  })
+
   it('hides a stale math preview immediately when the source is no longer math', async () => {
     const result = renderEditor('$x_t$')
     await waitFor(() =>
@@ -1457,6 +1502,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       { start: 0, end: 6 + protectedTail.length },
       true,
       expect.any(Array),
+      true,
     )
     expect(result.onChange).toHaveBeenLastCalledWith(
       `中文 text${protectedTail}`,

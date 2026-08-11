@@ -334,14 +334,16 @@ function normalizePlainText(
   start: number,
   source: string,
   onShortcut?: () => void,
+  convertShortcuts = true,
 ): string {
+  if (!convertShortcuts) return normalizeRegularText(text, start, source)
   let result = ''
   let plainStart = 0
   let index = 0
 
   while (index < text.length) {
     const delimiter = text[index]
-    if (delimiter !== '￥' && delimiter !== '·') {
+    if (delimiter !== '￥' && delimiter !== '¥' && delimiter !== '·') {
       index += 1
       continue
     }
@@ -358,7 +360,8 @@ function normalizePlainText(
       start + plainStart,
       source,
     )
-    const markdownDelimiter = delimiter === '￥' ? '$' : '`'
+    const markdownDelimiter =
+      delimiter === '￥' || delimiter === '¥' ? '$' : '`'
     result += markdownDelimiter + text.slice(index + 1, close) + markdownDelimiter
     onShortcut?.()
     index = close + 1
@@ -374,8 +377,9 @@ export function normalizeCjkInput(
   editableRange?: SourceRange,
   autoSpacing = false,
   protectedRanges?: readonly SourceRange[],
+  convertShortcuts = true,
 ): string {
-  if (autoSpacing && /[￥·]/u.test(source)) {
+  if (autoSpacing && convertShortcuts && /[￥¥·]/u.test(source)) {
     const initialRanges =
       protectedRanges ?? protectedMarkdownRanges(source)
     let convertedShortcut = false
@@ -384,7 +388,7 @@ export function normalizeCjkInput(
       (text, start, fullSource) =>
         normalizePlainText(text, start, fullSource, () => {
           convertedShortcut = true
-        }),
+        }, convertShortcuts),
       editableRange,
       initialRanges,
     )
@@ -402,7 +406,13 @@ export function normalizeCjkInput(
   return transformMarkdownText(
     source,
     (text, start, fullSource) => {
-      const normalized = normalizePlainText(text, start, fullSource)
+      const normalized = normalizePlainText(
+        text,
+        start,
+        fullSource,
+        undefined,
+        convertShortcuts,
+      )
       return autoSpacing ? spacePlainText(normalized) : normalized
     },
     editableRange,

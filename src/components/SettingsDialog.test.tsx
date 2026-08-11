@@ -42,6 +42,11 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByLabelText('Use source mode by default'))
     expect(onChange.mock.calls.at(-1)?.[0].defaultSourceMode).toBe(true)
 
+    fireEvent.click(
+      screen.getByLabelText('Convert Yen and middle-dot shortcuts'),
+    )
+    expect(onChange.mock.calls.at(-1)?.[0].cjkShortcuts).toBe(false)
+
     fireEvent.change(screen.getByLabelText('Tab placement'), {
       target: { value: 'vertical' },
     })

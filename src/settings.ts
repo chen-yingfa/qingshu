@@ -30,6 +30,7 @@ export interface AppSettings {
   defaultA4: boolean
   defaultSourceMode: boolean
   autoSpacing: boolean
+  cjkShortcuts: boolean
   font: DocumentFont
   fontSize: number
   shortcuts: Record<ShortcutAction, string>
@@ -67,6 +68,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultA4: false,
   defaultSourceMode: false,
   autoSpacing: false,
+  cjkShortcuts: true,
   font: 'sans',
   fontSize: 17,
   shortcuts: {
@@ -121,6 +123,9 @@ export function loadSettings(
     }
     if (typeof value.autoSpacing === 'boolean') {
       settings.autoSpacing = value.autoSpacing
+    }
+    if (typeof value.cjkShortcuts === 'boolean') {
+      settings.cjkShortcuts = value.cjkShortcuts
     }
     if (value.font === 'sans' || value.font === 'serif' || value.font === 'mono') {
       settings.font = value.font

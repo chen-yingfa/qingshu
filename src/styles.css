@@ -690,6 +690,14 @@ button {
   tab-size: 2;
 }
 
+.source-block-math {
+  border-color: color-mix(in srgb, #4d86d8 55%, var(--line));
+  background: color-mix(in srgb, #4d86d8 8%, var(--paper));
+  font-family:
+    "SFMono-Regular", "Cascadia Code", Consolas, "Noto Sans Mono CJK SC",
+    monospace;
+}
+
 .active-live-preview {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
