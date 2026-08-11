@@ -34,6 +34,12 @@ interface SourceRange {
   end: number
 }
 
+interface InsertedBlock {
+  offset: number
+  length: number
+  leftPadding: number
+}
+
 interface FormatRequest {
   id: number
   command: FormatCommand
@@ -43,12 +49,82 @@ function preferredEol(source: string): '\n' | '\r\n' {
   return source.includes('\r\n') ? '\r\n' : '\n'
 }
 
+function nearestEol(source: string, offset: number): '\n' | '\r\n' {
+  const before = Array.from(source.slice(0, offset).matchAll(/\r\n|\n/gu)).at(-1)?.[0]
+  if (before) return before as '\n' | '\r\n'
+  const after = source.slice(offset).match(/\r\n|\n/u)?.[0]
+  return (after as '\n' | '\r\n' | undefined) ?? preferredEol(source)
+}
+
 function toEditorValue(source: string): string {
   return source.replaceAll('\r\n', '\n')
 }
 
-function toSourceValue(value: string, eol: '\n' | '\r\n'): string {
-  return eol === '\r\n' ? value.replaceAll('\n', '\r\n') : value
+function restoreSourceEols(
+  value: string,
+  previousSource: string,
+  fallbackEol: '\n' | '\r\n',
+): string {
+  const previous = toEditorValue(previousSource)
+  const endings = new Map<number, '\n' | '\r\n'>()
+  let normalizedOffset = 0
+  for (const part of previousSource.split(/(\r\n|\n)/u)) {
+    if (part === '\n' || part === '\r\n') {
+      endings.set(normalizedOffset, part)
+      normalizedOffset += 1
+    } else {
+      normalizedOffset += part.length
+    }
+  }
+
+  let prefix = 0
+  while (
+    prefix < previous.length &&
+    prefix < value.length &&
+    previous[prefix] === value[prefix]
+  ) {
+    prefix += 1
+  }
+  let suffix = 0
+  while (
+    suffix < previous.length - prefix &&
+    suffix < value.length - prefix &&
+    previous[previous.length - 1 - suffix] === value[value.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+
+  let restored = ''
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '\n') {
+      restored += value[index]
+      continue
+    }
+    const previousIndex =
+      index < prefix
+        ? index
+        : index >= value.length - suffix
+          ? previous.length - (value.length - index)
+          : undefined
+    restored +=
+      (previousIndex === undefined ? undefined : endings.get(previousIndex)) ??
+      fallbackEol
+  }
+  return restored
+}
+
+function sourceOffsetForEditorOffset(
+  sourceValue: string,
+  editorOffset: number,
+): number {
+  let sourceOffset = 0
+  let visibleOffset = 0
+  while (sourceOffset < sourceValue.length && visibleOffset < editorOffset) {
+    if (sourceValue.startsWith('\r\n', sourceOffset)) sourceOffset += 2
+    else sourceOffset += 1
+    visibleOffset += 1
+  }
+  return sourceOffset
 }
 
 function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
@@ -120,7 +196,7 @@ export function moveByCjkWord(
 function editorBlocks(
   content: string,
   parsedBlocks: MarkdownBlock[],
-  insertedEmptyOffsets: number[],
+  insertedBlocks: InsertedBlock[],
 ): MarkdownBlock[] {
   if (parsedBlocks.length === 0) {
     return [{
@@ -133,7 +209,8 @@ function editorBlocks(
   }
 
   const editable = [...parsedBlocks]
-  for (const offset of insertedEmptyOffsets) {
+  for (const insertion of insertedBlocks) {
+    const { offset, length } = insertion
     if (
       offset < 0 ||
       offset > content.length ||
@@ -147,9 +224,9 @@ function editorBlocks(
     editable.push({
       id: `empty-inserted-${offset}`,
       type: 'paragraph',
-      source: '',
+      source: content.slice(offset, offset + length),
       start: offset,
-      end: offset,
+      end: offset + length,
     })
   }
 
@@ -451,11 +528,16 @@ export function LiveEditor({
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
-  const insertedEmptyOffsetsRef = useRef<number[]>([])
+  const [insertedBlocks, setInsertedBlocks] = useState<{
+    content: string
+    blocks: InsertedBlock[]
+  }>({ content, blocks: [] })
+  const currentInsertedBlocks =
+    insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(() => parseDocument(content), [content])
   const blocks = useMemo(
-    () => editorBlocks(content, model.blocks, insertedEmptyOffsetsRef.current),
-    [content, model.blocks],
+    () => editorBlocks(content, model.blocks, currentInsertedBlocks),
+    [content, currentInsertedBlocks, model.blocks],
   )
   const renderContext = model.renderContext
   const safeActive = Math.min(activeBlock, blocks.length - 1)
@@ -492,7 +574,7 @@ export function LiveEditor({
       setDraft(toEditorValue(active.source))
       rangeRef.current = { start: active.start, end: active.end }
     }
-    if (externalChange) insertedEmptyOffsetsRef.current = []
+    if (externalChange) setInsertedBlocks({ content, blocks: [] })
     if (activeChanged) codeTabEscapeRef.current = false
     previousActiveRef.current = safeActive
   }, [active.end, active.source, active.start, content, safeActive])
@@ -502,21 +584,38 @@ export function LiveEditor({
   }, [draft, safeActive])
 
   function commitDraft(value: string) {
-    const eol = preferredEol(contentRef.current)
-    const sourceValue = toSourceValue(value, eol)
+    const previousContent = contentRef.current
     const previous = { ...rangeRef.current }
+    const previousSource = previousContent.slice(previous.start, previous.end)
+    const sourceValue = restoreSourceEols(
+      value,
+      previousSource,
+      nearestEol(previousContent, previous.start),
+    )
     const nextContent = replaceBlockSource(
-      contentRef.current,
+      previousContent,
       previous,
       sourceValue,
     )
     const delta = sourceValue.length - (previous.end - previous.start)
-    insertedEmptyOffsetsRef.current = insertedEmptyOffsetsRef.current
-      .filter(
-        (offset) =>
-          !(previous.start === previous.end && offset === previous.start && value),
-      )
-      .map((offset) => (offset > previous.end ? offset + delta : offset))
+    setInsertedBlocks((current) => {
+      const existing = current.content === previousContent ? current.blocks : []
+      const tracked =
+        previous.start === previous.end &&
+        !existing.some((block) => block.offset === previous.start)
+          ? [...existing, { offset: previous.start, length: 0, leftPadding: 0 }]
+          : existing
+      return {
+        content: nextContent,
+        blocks: tracked.map((block) =>
+          block.offset === previous.start
+            ? { ...block, length: sourceValue.length }
+            : block.offset > previous.end
+              ? { ...block, offset: block.offset + delta }
+              : block,
+        ),
+      }
+    })
     setDraft(value)
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
@@ -547,8 +646,15 @@ export function LiveEditor({
     selectionEnd = selectionStart,
   ) => {
     if (composingRef.current) return
-    const eol = preferredEol(contentRef.current)
-    const sourceValue = toSourceValue(value, eol)
+    const previousSource = contentRef.current.slice(
+      rangeRef.current.start,
+      rangeRef.current.end,
+    )
+    const sourceValue = restoreSourceEols(
+      value,
+      previousSource,
+      nearestEol(contentRef.current, rangeRef.current.start),
+    )
     const candidate = replaceBlockSource(
       contentRef.current,
       rangeRef.current,
@@ -577,11 +683,11 @@ export function LiveEditor({
     if (normalized !== value) {
       const transformedStart = transformTo(
         rangeRef.current.start +
-          toSourceValue(value.slice(0, selectionStart), eol).length,
+          sourceOffsetForEditorOffset(sourceValue, selectionStart),
       )
       const transformedEnd = transformTo(
         rangeRef.current.start +
-          toSourceValue(value.slice(0, selectionEnd), eol).length,
+          sourceOffsetForEditorOffset(sourceValue, selectionEnd),
       )
       const nextStart = toEditorValue(
         transformedStart.source.slice(
@@ -710,8 +816,50 @@ export function LiveEditor({
 
     if (event.key === 'Backspace' && textarea.selectionStart === 0 && safeActive > 0) {
       event.preventDefault()
-      const merged = mergeBlockAtStart(contentRef.current, rangeRef.current.start)
+      const previousContent = contentRef.current
+      const blockStart = rangeRef.current.start
+      const inserted = (
+        insertedBlocks.content === previousContent ? insertedBlocks.blocks : []
+      ).find((block) => block.offset === blockStart)
+      if (inserted?.leftPadding) {
+        const removeStart = blockStart - inserted.leftPadding
+        const mergedContent =
+          previousContent.slice(0, removeStart) +
+          previousContent.slice(blockStart)
+        setInsertedBlocks((current) => ({
+          content: mergedContent,
+          blocks: (current.content === previousContent ? current.blocks : [])
+            .filter((block) => block.offset !== blockStart)
+            .map((block) =>
+              block.offset > blockStart
+                ? { ...block, offset: block.offset - inserted.leftPadding }
+                : block,
+            ),
+        }))
+        contentRef.current = mergedContent
+        pendingAcknowledgementRef.current = mergedContent
+        onChange(mergedContent)
+        onActiveBlockChange(safeActive - 1)
+        afterPaint(() => {
+          const previousStart = blocks[safeActive - 1].start
+          const caret = Math.max(0, removeStart - previousStart)
+          textareaRef.current?.setSelectionRange(caret, caret)
+        })
+        return
+      }
+      const merged = mergeBlockAtStart(previousContent, blockStart)
+      const delta = merged.content.length - previousContent.length
       const previousStart = blocks[safeActive - 1].start
+      setInsertedBlocks((current) => ({
+        content: merged.content,
+        blocks: (current.content === previousContent ? current.blocks : [])
+          .filter((block) => block.offset !== blockStart)
+          .map((block) =>
+            block.offset > blockStart
+              ? { ...block, offset: block.offset + delta }
+              : block,
+          ),
+      }))
       contentRef.current = merged.content
       pendingAcknowledgementRef.current = merged.content
       onChange(merged.content)
@@ -752,22 +900,37 @@ export function LiveEditor({
     ) {
       event.preventDefault()
       const insertionPoint = rangeRef.current.end
-      const eol = preferredEol(contentRef.current)
+      const eol = nearestEol(contentRef.current, insertionPoint)
       const insertion = `${eol}${eol}`
       const leftSeparators = separatesParagraphWithOneEol(active.source, eol)
         ? 1
         : 2
       const emptyOffset = insertionPoint + leftSeparators * eol.length
-      insertedEmptyOffsetsRef.current = [
-        ...insertedEmptyOffsetsRef.current.map((offset) =>
-          offset > insertionPoint ? offset + insertion.length : offset,
-        ),
-        emptyOffset,
-      ].filter((offset, index, offsets) => offsets.indexOf(offset) === index)
       const nextContent =
         contentRef.current.slice(0, insertionPoint) +
         insertion +
         contentRef.current.slice(insertionPoint)
+      const previousContent = contentRef.current
+      setInsertedBlocks((current) => ({
+        content: nextContent,
+        blocks: [
+          ...(current.content === previousContent ? current.blocks : []).map(
+            (block) =>
+              block.offset > insertionPoint
+                ? { ...block, offset: block.offset + insertion.length }
+                : block,
+          ),
+          {
+            offset: emptyOffset,
+            length: 0,
+            leftPadding: emptyOffset - insertionPoint,
+          },
+        ].filter(
+          (block, index, blocks) =>
+            blocks.findIndex((candidate) => candidate.offset === block.offset) ===
+            index,
+        ),
+      }))
       contentRef.current = nextContent
       pendingAcknowledgementRef.current = nextContent
       onChange(nextContent)

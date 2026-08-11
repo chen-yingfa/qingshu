@@ -430,6 +430,94 @@ describe('LiveEditor keyboard and composition behavior', () => {
     ).toBe('Second')
   })
 
+  it('keeps whitespace and restores an inserted block after deleting its text', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: '  ' } })
+    const whitespaceSource = 'First\n\n  \n\nSecond'
+    result.rerender(
+      <LiveEditor
+        content={whitespaceSource}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(editor().value).toBe('  ')
+
+    fireEvent.change(editor(), { target: { value: 'Inserted' } })
+    const insertedSource = 'First\n\nInserted\n\nSecond'
+    result.rerender(
+      <LiveEditor
+        content={insertedSource}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    fireEvent.change(editor(), { target: { value: '' } })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(editor().value).toBe('')
+  })
+
+  it('removes an inserted block padding when Backspace merges it', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = () =>
+      screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor().setSelectionRange(editor().value.length, editor().value.length)
+    fireEvent.keyDown(editor(), { key: 'Enter' })
+    result.rerender(
+      <LiveEditor
+        content={'First\n\n\n\nSecond'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    fireEvent.keyDown(editor(), { key: 'Backspace' })
+    expect(result.onChange).toHaveBeenLastCalledWith('First\n\nSecond')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+  })
+
+  it('clears inserted block state on an external document replacement', () => {
+    const result = renderEditor('First\n\nSecond')
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    result.rerender(
+      <LiveEditor
+        content={'External\n\nDocument'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('Document')
+  })
+
   it('inserts a CRLF block after a closed fence without mixing line endings', () => {
     const result = renderEditor('```\r\ncode\r\n```\r\nAfter')
     const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
@@ -438,6 +526,18 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith(
       '```\r\ncode\r\n```\r\n\r\n\r\nAfter',
+    )
+  })
+
+  it('preserves unchanged mixed line endings while editing code', () => {
+    const result = renderEditor('```ts\r\nfirst\nsecond\r\n```\nAfter')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    const second = editor.value.indexOf('second')
+    editor.setSelectionRange(second + 'second'.length, second + 'second'.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '```ts\r\nfirst\nsecond\r\n\r\n```\nAfter',
     )
   })
 
