@@ -1,6 +1,0 @@
-{
-    "ctrl+T": "editor.insertTable",
-    "ctrl+B": "editor.insertBold",
-    "ctrl+I": "editor.insertItalic",
-    "ctrl+V": "editor.paste"
-}

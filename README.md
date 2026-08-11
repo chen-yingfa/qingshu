@@ -2,8 +2,7 @@
 
 Qingshu is a lightweight desktop Markdown editor focused on clean writing, live
 preview, and practical CJK input. It is built with React, TypeScript, Vite, and
-Electron. The active application does not use the legacy Vue sources still retained
-in the repository.
+Electron.
 
 ## Features
 
@@ -29,6 +28,8 @@ in the repository.
 - Fuzzy, keyboard-accessible command palette and dismissible success/error toasts.
 - Multi-tab editing preserves dirty documents when New or Open creates another tab;
   closing dirty tabs, native window close, and application quit require confirmation.
+- A persistent recent-files list reopens documents from the File menu and command
+  palette.
 - Local-only UI assets and no UI framework.
 
 ## CJK behavior
@@ -100,6 +101,7 @@ Useful checks:
 ```sh
 npm test
 npm run typecheck
+npm run build:renderer
 ```
 
 Create production renderer/main/preload bundles and a platform package:
@@ -110,7 +112,8 @@ npm run build
 
 Artifacts are written under `release/<version>/`. The checked-in builder configuration
 defines a Windows x64 NSIS installer, macOS DMG, and Linux AppImage with Qingshu
-application identity, desktop metadata, and local platform icons.
+application identity, desktop metadata, and generated local platform icons. Run
+`npm run clean` to remove `dist/`, `dist-electron/`, and `release/`.
 
 ## Current limitations
 

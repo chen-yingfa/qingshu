@@ -1,3 +1,8 @@
-# Development Documentation
+# Development documentation
 
-The documentation in this directory is intended to be viewed by developers who want to contribute to the project.
+- [Architecture](architecture.md) describes the React renderer and Electron process
+  boundaries.
+- [File and navigation security](file-security.md) describes the preload API,
+  authorization model, and atomic file operations.
+
+Repository setup and verification commands are in the project [README](../../README.md).
