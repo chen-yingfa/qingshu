@@ -997,7 +997,12 @@ export function LiveEditor({
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
-  if (sourceMode && contentRevision === undefined) {
+  if (
+    sourceMode &&
+    (typeof contentRevision !== 'number' ||
+      !Number.isSafeInteger(contentRevision) ||
+      contentRevision < 0)
+  ) {
     throw new Error('Source mode requires a document content revision')
   }
   const [insertedBlocks, setInsertedBlocks] = useState<{
