@@ -820,10 +820,6 @@ export function LiveEditor({
   const mathEnterTokenRef = useRef<MathEnterToken | null>(null)
   const draftRevisionRef = useRef(0)
   const editorSessionRef = useRef(0)
-  const nativeInputRef = useRef<{
-    expectedValue: string
-    observed: boolean
-  } | null>(null)
   const interactionGenerationRef = useRef(0)
   const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
   const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
@@ -983,6 +979,18 @@ export function LiveEditor({
     setInsertedBlocks(snapshot.insertedBlocks)
     setEditingBoundary(snapshot.editingBoundary)
     setDraft(snapshot.draft)
+    mathEnterTokenRef.current = null
+    deferredSelectionRef.current = {
+      start: snapshot.selection.start,
+      end: snapshot.selection.end,
+    }
+    textarea.focus()
+    selectionRef.current = { ...snapshot.selection }
+    textarea.setSelectionRange(
+      snapshot.selection.start,
+      snapshot.selection.end,
+      snapshot.selection.direction,
+    )
     mathEnterTokenRef.current = snapshot.mathToken
       ? {
           ...snapshot.mathToken,
@@ -990,32 +998,28 @@ export function LiveEditor({
           session: editorSessionRef.current,
         }
       : null
-    setEditorSelection(
-      textarea,
-      snapshot.selection.start,
-      snapshot.selection.end,
-      snapshot.selection.direction,
-    )
-    textarea.focus()
+    const generation = interactionGenerationRef.current
     afterPaint(() => {
       if (pendingUndoRestoreRef.current !== snapshot) return
       const current = textareaRef.current
-      if (!current) return
-      const deferred = {
-        start: snapshot.selection.start,
-        end: snapshot.selection.end,
+      if (current !== textarea) return
+      if (
+        interactionGenerationRef.current !== generation ||
+        document.activeElement !== textarea
+      ) {
+        pendingUndoRestoreRef.current = null
+        deferredSelectionRef.current = null
+        return
       }
-      deferredSelectionRef.current = deferred
       selectionRef.current = {
-        ...deferred,
-        direction: snapshot.selection.direction,
+        ...snapshot.selection,
       }
       current.setSelectionRange(
-        deferred.start,
-        deferred.end,
+        snapshot.selection.start,
+        snapshot.selection.end,
         snapshot.selection.direction,
       )
-      current.focus()
+      deferredSelectionRef.current = null
       mathEnterTokenRef.current = snapshot.mathToken
         ? {
             ...snapshot.mathToken,
@@ -1024,13 +1028,8 @@ export function LiveEditor({
           }
         : null
       pendingUndoRestoreRef.current = null
-      setTimeout(() => {
-        if (deferredSelectionRef.current === deferred) {
-          deferredSelectionRef.current = null
-        }
-      }, 0)
     })
-  }, [content, draft, safeActive])
+  }, [activeSession, content, draft, safeActive])
 
   useLayoutEffect(() => {
     const previous = previousDisplayModeRef.current
@@ -1127,6 +1126,11 @@ export function LiveEditor({
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
     pendingAcknowledgementRef.current = nextContent
+    const pendingUndo = editorUndoRef.current.at(-1)
+    if (pendingUndo && pendingUndo.expectedActiveBlock === safeActive) {
+      pendingUndo.expectedContent = nextContent
+      pendingUndo.expectedDraft = value
+    }
     onChange(nextContent)
   }
 
@@ -1235,6 +1239,12 @@ export function LiveEditor({
     expectedActiveBlock = safeActive,
     expectedDraft = draft,
   ) => {
+    const previous = editorUndoRef.current.at(-1)
+    if (previous) {
+      previous.expectedContent = snapshot.content
+      previous.expectedActiveBlock = snapshot.activeBlock
+      previous.expectedDraft = snapshot.draft
+    }
     editorUndoRef.current = [
       ...editorUndoRef.current,
       { ...snapshot, expectedContent, expectedActiveBlock, expectedDraft },
@@ -1255,6 +1265,12 @@ export function LiveEditor({
       return false
     }
     editorUndoRef.current = editorUndoRef.current.slice(0, -1)
+    const previous = editorUndoRef.current.at(-1)
+    if (previous) {
+      previous.expectedContent = snapshot.content
+      previous.expectedActiveBlock = snapshot.activeBlock
+      previous.expectedDraft = snapshot.draft
+    }
     invalidateMathInteraction()
     pendingUndoRestoreRef.current = snapshot
     insertedBlocksRef.current = snapshot.insertedBlocks
@@ -1270,49 +1286,36 @@ export function LiveEditor({
     return true
   }
 
-  const applyNativeTextareaEdit = (
+  const applyControlledTextareaEdit = (
     before: string,
     value: string,
     selectionStart: number,
     selectionEnd = selectionStart,
     afterCommit?: () => void,
-    afterSelection = false,
-    fallbackUndo?: EditorUndoSnapshot,
+    undoSnapshot?: EditorUndoSnapshot,
   ) => {
     const textarea = textareaRef.current
     if (!textarea) return
     const change = textReplacement(before, value)
     setEditorSelection(textarea, change.start, change.end)
-    const tracked = { expectedValue: value, observed: false }
-    nativeInputRef.current = tracked
-    const nativeApplied =
-      typeof document.execCommand === 'function' &&
-      document.execCommand('insertText', false, change.replacement)
-    if (!nativeApplied) {
-      nativeInputRef.current = null
-      textarea.setRangeText(
-        change.replacement,
-        change.start,
-        change.end,
-        'preserve',
-      )
-      commitDraft(textarea.value)
-      if (fallbackUndo) {
-        pushEditorUndo(fallbackUndo, contentRef.current, safeActive, value)
-      }
-    } else if (!tracked.observed) {
-      commitDraft(value)
+    textarea.setRangeText(
+      change.replacement,
+      change.start,
+      change.end,
+      'preserve',
+    )
+    setEditorSelection(textarea, selectionStart, selectionEnd)
+    commitDraft(textarea.value)
+    if (undoSnapshot) {
+      pushEditorUndo(undoSnapshot, contentRef.current, safeActive, value)
     }
-    nativeInputRef.current = null
-    const deferCommitCallback = afterSelection && nativeApplied
-    if (!deferCommitCallback) afterCommit?.()
+    afterCommit?.()
     deferredSelectionRef.current = {
       start: selectionStart,
       end: selectionEnd,
     }
     afterInteractionPaint(textarea, () => {
       setEditorSelection(textarea, selectionStart, selectionEnd)
-      if (deferCommitCallback) afterCommit?.()
     })
   }
 
@@ -1548,12 +1551,12 @@ export function LiveEditor({
     if (!isDollar && !isYen) return false
     const mathSource = '$$\n\n$$'
     invalidateMathInteraction()
-    const fallbackUndo = snapshotForDraft(value, {
+    const undoSnapshot = snapshotForDraft(value, {
       start: value.length,
       end: value.length,
       direction: 'none',
     })
-    applyNativeTextareaEdit(value, mathSource, 3, 3, undefined, false, fallbackUndo)
+    applyControlledTextareaEdit(value, mathSource, 3, 3, undefined, undoSnapshot)
     return true
   }
 
@@ -1753,8 +1756,8 @@ export function LiveEditor({
       const nextDraft = draft.slice(0, start) + '\n' + draft.slice(end)
       const caret = start + 1
       invalidateMathInteraction()
-      const fallbackUndo = currentUndoSnapshot()
-      applyNativeTextareaEdit(
+      const undoSnapshot = currentUndoSnapshot()
+      applyControlledTextareaEdit(
         draft,
         nextDraft,
         caret,
@@ -1767,8 +1770,7 @@ export function LiveEditor({
             session: editorSessionRef.current,
           }
         },
-        true,
-        fallbackUndo,
+        undoSnapshot,
       )
       return
     }
@@ -2190,16 +2192,6 @@ export function LiveEditor({
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
-                          const nativeInput = nativeInputRef.current
-                          if (
-                            nativeInput &&
-                            nativeInput.expectedValue === textarea.value
-                          ) {
-                            nativeInput.observed = true
-                            commitDraft(textarea.value)
-                            reportSelection(textarea)
-                            return
-                          }
                           const inputType = (event.nativeEvent as InputEvent)
                             .inputType
                           const historyInput =
