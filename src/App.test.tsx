@@ -78,6 +78,28 @@ describe('document replacement', () => {
     )
   })
 
+  it('resets a closed sole source tab and accepts subsequent typing', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    window.localStorage.setItem(
+      'qingshu:settings:v1',
+      JSON.stringify({ defaultSourceMode: true }),
+    )
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Markdown source'), {
+      target: { value: 'Old source' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Untitled' }))
+
+    const reset = await screen.findByLabelText('Markdown source')
+    await waitFor(() =>
+      expect((reset as HTMLTextAreaElement).value).toBe(''),
+    )
+    fireEvent.change(reset, { target: { value: 'New source' } })
+    expect((screen.getByLabelText('Markdown source') as HTMLTextAreaElement).value)
+      .toBe('New source')
+  })
+
   it('loads opened content into the same active block', async () => {
     api.openFile.mockResolvedValue({
       canceled: false,

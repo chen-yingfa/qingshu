@@ -87,7 +87,12 @@ export type TabsAction =
       sourceMode?: boolean
     }
   | { type: 'activate-tab'; tabId: string }
-  | { type: 'close-tab'; tabId: string; defaultSourceMode?: boolean }
+  | {
+      type: 'close-tab'
+      tabId: string
+      defaultSourceMode?: boolean
+      resetRevision?: number
+    }
   | { type: 'document'; tabId: string; action: DocumentAction }
 
 export function documentReducer(
@@ -174,6 +179,8 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
           tabs: [
             createTab(state.tabs[0].id, {
               sourceMode: action.defaultSourceMode ?? false,
+              contentRevision:
+                action.resetRevision ?? state.tabs[0].contentRevision + 1,
             }),
           ],
           activeTabId: state.tabs[0].id,
@@ -526,6 +533,9 @@ export function useDocument(defaultSourceMode = false) {
     const closing = tabsRef.current.tabs.find((tab) => tab.id === tabId)
     if (!closing) return
     const resetsOnlyTab = tabsRef.current.tabs.length === 1 && Boolean(closing)
+    const resetRevision = resetsOnlyTab
+      ? (contentRevisions.current.get(tabId) ?? closing.contentRevision) + 1
+      : undefined
     const nextLifetime = (tabLifetimes.current.get(tabId) ?? 0) + 1
     tabLifetimes.current.set(tabId, nextLifetime)
     latestSaveRequests.current.delete(tabId)
@@ -538,13 +548,14 @@ export function useDocument(defaultSourceMode = false) {
       type: 'close-tab',
       tabId,
       defaultSourceMode,
+      resetRevision,
     })
     contentRevisions.current.delete(tabId)
     latestSaveRequests.current.delete(tabId)
     activeSaveTokens.current.delete(tabId)
     tabLifetimes.current.delete(tabId)
     if (resetsOnlyTab) {
-      contentRevisions.current.set(tabId, 0)
+      contentRevisions.current.set(tabId, resetRevision!)
       tabLifetimes.current.set(tabId, nextLifetime)
     }
   }, [cancelTabSaves, defaultSourceMode, dispatchTabs])
