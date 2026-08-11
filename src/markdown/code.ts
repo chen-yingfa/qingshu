@@ -30,6 +30,11 @@ const aliases: Record<string, string> = {
   tsx: 'typescript',
 }
 
+export function normalizeCodeLanguage(language: string): string {
+  const normalized = language.toLowerCase()
+  return aliases[normalized] ?? normalized
+}
+
 export interface FencedCode {
   fence: string
   language: string
@@ -67,18 +72,26 @@ export function parseFencedCode(source: string): FencedCode | null {
 
   return {
     fence,
-    language: aliases[opening[2].toLowerCase()] ?? opening[2].toLowerCase(),
+    language: normalizeCodeLanguage(opening[2]),
     code,
     closed,
   }
 }
 
 export function highlightCode(code: string, language: string): string {
-  if (code.length > 100_000 || !language || !hljs.getLanguage(language)) {
+  const normalizedLanguage = normalizeCodeLanguage(language)
+  if (
+    code.length > 100_000 ||
+    !normalizedLanguage ||
+    !hljs.getLanguage(normalizedLanguage)
+  ) {
     return escapeHtml(code)
   }
-  if (language) {
-    return hljs.highlight(code, { language, ignoreIllegals: true }).value
+  if (normalizedLanguage) {
+    return hljs.highlight(code, {
+      language: normalizedLanguage,
+      ignoreIllegals: true,
+    }).value
   }
   return escapeHtml(code)
 }

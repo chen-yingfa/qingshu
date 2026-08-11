@@ -13,6 +13,11 @@ blockquote{margin-left:0;padding:.15em 0 .15em 1.15em;border-left:3px solid var(
 code,pre{font-family:"SFMono-Regular","Cascadia Code",Consolas,"Noto Sans Mono CJK SC",monospace}
 :not(pre)>code{padding:.14em .34em;border-radius:4px;background:var(--wash);font-size:.88em}
 pre{overflow:auto;padding:1.15em 1.3em;border:1px solid var(--line);border-radius:9px;background:var(--wash);font-size:.88em;line-height:1.6}
+.hljs-keyword,.hljs-selector-tag,.hljs-built_in,.hljs-type{color:#9a3e58;font-weight:600}
+.hljs-string,.hljs-attr,.hljs-template-variable{color:#557548}
+.hljs-number,.hljs-literal{color:#9a5d2d}
+.hljs-comment,.hljs-quote{color:#8b857d;font-style:italic}
+.hljs-title,.hljs-function .hljs-title{color:var(--accent)}
 table{display:block;width:100%;overflow:auto;border-collapse:collapse}
 th,td{padding:.52em .75em;border:1px solid var(--line);text-align:left}
 th{background:var(--wash);font-weight:650}

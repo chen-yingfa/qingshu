@@ -32,6 +32,17 @@ describe('createHtmlDocument', () => {
     expect(html).not.toContain('$$')
   })
 
+  it('includes visible syntax colors for rendered fenced code', async () => {
+    const html = await createHtmlDocument(
+      '```python\ndef greet(name):\n    return f"Hello {name}"\n```',
+    )
+
+    expect(html).toContain('class="hljs language-python"')
+    expect(html).toContain('class="hljs-keyword">def</span>')
+    expect(html).toContain('.hljs-keyword')
+    expect(html).toContain('.hljs-string')
+  })
+
   it('keeps cross-block footnotes linked when exporting the full source', async () => {
     const html = await createHtmlDocument(
       'First block references a note.[^shared]\n\nSecond block.\n\n[^shared]: Shared footnote.',

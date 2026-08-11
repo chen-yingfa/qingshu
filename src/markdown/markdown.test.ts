@@ -79,6 +79,26 @@ describe('renderMarkdown', () => {
     expect(html).toContain('class="hljs-keyword">return</span>')
   })
 
+  it('uses the same language aliases in active and rendered code previews', async () => {
+    const html = await renderMarkdown('```shell\nif true; then echo ready; fi\n```')
+
+    expect(html).toContain('class="hljs language-shell"')
+    expect(html).toContain('class="hljs-keyword">if</span>')
+    expect(html).toContain('class="hljs-keyword">then</span>')
+  })
+
+  it('leaves inline code plain and escapes hostile fenced-code content', async () => {
+    const html = await renderMarkdown(
+      'Inline `const value`.\n\n```custom\n<script>alert("x")</script>\n```',
+    )
+
+    expect(html).toContain('<p>Inline <code>const value</code>.</p>')
+    expect(html).toContain(
+      '<code class="hljs language-custom">&#x3C;script>alert("x")&#x3C;/script>',
+    )
+    expect(html).not.toContain('<script>')
+  })
+
   it('preserves scalable delimiters, blackboard symbols, and scripts in KaTeX HTML', async () => {
     const html = await renderMarkdown(
       '$$\\left(\\frac{x_t}{\\mathbb R}\\right) \\in \\mathbb N_0$$',
