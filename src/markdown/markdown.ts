@@ -120,20 +120,39 @@ function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
       return []
     }
 
-    const blockSource = source.slice(start, end)
-    const identity = `${node.type}-${sourceHash(blockSource)}`
-    const occurrence = (identities.get(identity) ?? 0) + 1
-    identities.set(identity, occurrence)
+    const ranges: Array<{ start: number; end: number }> = []
+    if (node.type === 'list' && node.children && node.children.length > 1) {
+      let groupStart = node.children[0].position?.start.offset ?? start
+      let groupEnd = node.children[0].position?.end.offset ?? end
+      for (const item of node.children.slice(1)) {
+        const itemStart = item.position?.start.offset
+        const itemEnd = item.position?.end.offset
+        if (itemStart === undefined || itemEnd === undefined) continue
+        if (/\r?\n[ \t]*\r?\n/u.test(source.slice(groupEnd, itemStart))) {
+          ranges.push({ start: groupStart, end: groupEnd })
+          groupStart = itemStart
+        }
+        groupEnd = itemEnd
+      }
+      ranges.push({ start: groupStart, end: groupEnd })
+    } else {
+      ranges.push({ start, end })
+    }
 
-    return [
-      {
+    return ranges.map((range) => {
+      const blockSource = source.slice(range.start, range.end)
+      const identity = `${node.type}-${sourceHash(blockSource)}`
+      const occurrence = (identities.get(identity) ?? 0) + 1
+      identities.set(identity, occurrence)
+
+      return {
         id: `${identity}-${occurrence}`,
         type: node.type,
         source: blockSource,
-        start,
-        end,
-      },
-    ]
+        start: range.start,
+        end: range.end,
+      }
+    })
   })
 }
 

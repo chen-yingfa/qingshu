@@ -11,6 +11,23 @@ import {
 } from './markdown'
 
 describe('parseBlocks', () => {
+  it('keeps blank-line-separated list items as distinct editor blocks', () => {
+    const blocks = parseBlocks('- Previous item\n\n-')
+
+    expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
+      { type: 'list', source: '- Previous item' },
+      { type: 'list', source: '-' },
+    ])
+  })
+
+  it('keeps adjacent items in one tight list block', () => {
+    const blocks = parseBlocks('- First\n- Second')
+
+    expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
+      { type: 'list', source: '- First\n- Second' },
+    ])
+  })
+
   it('preserves exact source slices and offsets for top-level blocks', () => {
     const source = '# 标题  \r\n\r\n- first\r\n  continued\r\n- second\r\n\r\n```ts\r\nconst n = 1\r\n```\r\n'
 

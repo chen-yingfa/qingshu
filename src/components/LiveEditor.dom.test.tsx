@@ -62,6 +62,35 @@ describe('LiveEditor state synchronization', () => {
     expect(synchronized.selectionEnd).toBe(4)
   })
 
+  it('keeps focus when a block after a list becomes an empty list item', () => {
+    const result = renderEditor('- Previous item\n\nCurrent', {
+      activeBlock: 1,
+    })
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(0, editor.value.length)
+
+    fireEvent.change(editor, {
+      target: { value: '-', selectionStart: 1, selectionEnd: 1 },
+    })
+    result.rerender(
+      <LiveEditor
+        content={'- Previous item\n\n-'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    const current = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(current).toBe(editor)
+    expect(current.value).toBe('-')
+    expect(current.selectionStart).toBe(1)
+  })
+
   it('synchronizes the active draft after a same-index document replacement', () => {
     const result = renderEditor('Old document')
     const previous = screen.getByLabelText('Active Markdown block')
