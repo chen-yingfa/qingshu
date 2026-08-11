@@ -27,8 +27,8 @@ in the repository.
 - Complete UTF-8 HTML export with rendered GFM and accessible standards-based MathML;
   all styling is inlined and equations need no bundled or network fonts.
 - Fuzzy, keyboard-accessible command palette and dismissible success/error toasts.
-- Dirty-document confirmation for New, Open, native window close, and application
-  quit.
+- Multi-tab editing preserves dirty documents when New or Open creates another tab;
+  closing dirty tabs, native window close, and application quit require confirmation.
 - Local-only UI assets and no UI framework.
 
 ## CJK behavior
@@ -114,8 +114,7 @@ application identity, desktop metadata, and local platform icons.
 
 ## Current limitations
 
-- Qingshu edits one document/window at a time and has no autosave, tabs, workspace,
-  plugin, or knowledge-base layer.
+- Qingshu has no autosave, workspace, plugin, or knowledge-base layer.
 - Table manipulation, image importing/embedding, and Marp/Slidev-specific tooling
   are not implemented. Languages outside the built-in syntax-highlighting set use
   automatic or plain-text highlighting.
