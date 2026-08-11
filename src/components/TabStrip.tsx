@@ -63,7 +63,11 @@ export function TabStrip({
               className="document-tab"
               aria-label={accessibleName}
               aria-selected={tab.id === activeTabId}
-              aria-controls={`document-panel-${tab.id}`}
+              aria-controls={
+                tab.id === activeTabId
+                  ? `document-panel-${tab.id}`
+                  : undefined
+              }
               tabIndex={tab.id === activeTabId ? 0 : -1}
               onClick={() => onActivate(tab.id)}
               onKeyDown={(event) => navigate(event, index)}

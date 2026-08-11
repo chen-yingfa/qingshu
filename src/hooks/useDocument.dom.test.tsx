@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { QingshuApi } from '../types/electron'
@@ -11,6 +11,161 @@ afterEach(() => {
 })
 
 describe('useDocument save lifecycle', () => {
+  it('preserves the configured source mode when resetting the only tab', () => {
+    const { result } = renderHook(() => useDocument(true))
+    expect(result.current.state.sourceMode).toBe(true)
+
+    act(() => result.current.closeTab('tab-1'))
+
+    expect(result.current.state.sourceMode).toBe(true)
+  })
+
+  it('uses canonical path selection before an ordinary Save on an untitled tab', async () => {
+    const chooseSavePath = vi.fn().mockResolvedValue({
+      canceled: false,
+      path: '/notes/ordinary-save.md',
+    })
+    const saveFile = vi.fn().mockResolvedValue({
+      canceled: false,
+      path: '/notes/ordinary-save.md',
+    })
+    window.qingshu = {
+      chooseSavePath,
+      saveFile,
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: '# Draft' }))
+
+    await act(async () => {
+      await result.current.saveDocument()
+    })
+
+    expect(chooseSavePath).toHaveBeenCalledOnce()
+    expect(saveFile).toHaveBeenCalledWith({
+      content: '# Draft',
+      path: '/notes/ordinary-save.md',
+    })
+  })
+
+  it('atomically reserves an overlapping Save As path for exactly one tab', async () => {
+    let finishWinner!: (value: {
+      canceled: false
+      path: string
+    }) => void
+    const saveFile = vi.fn(
+      () =>
+        new Promise<{ canceled: false; path: string }>((resolve) => {
+          finishWinner = resolve
+        }),
+    )
+    window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/shared.md',
+      }),
+      saveFile,
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: '# First' }))
+    act(() => result.current.newDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: '# Second' }))
+
+    let secondSave!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      secondSave = result.current.saveDocument(true)
+    })
+    act(() => result.current.activateTab('tab-1'))
+    let firstSave!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      firstSave = result.current.saveDocument(true)
+    })
+
+    await waitFor(() => expect(saveFile).toHaveBeenCalledOnce())
+    expect(saveFile).toHaveBeenCalledWith({
+      content: '# Second',
+      path: '/notes/shared.md',
+    })
+    await expect(firstSave).resolves.toEqual({
+      status: 'error',
+      message:
+        'shared.md is already being saved or opened in another tab. Choose a different path.',
+    })
+    finishWinner({ canceled: false, path: '/notes/shared.md' })
+    await act(async () => {
+      await secondSave
+    })
+
+    expect(
+      result.current.tabs.filter((tab) => tab.path === '/notes/shared.md'),
+    ).toHaveLength(1)
+    const loser = result.current.tabs.find((tab) => tab.id === 'tab-1')
+    expect(loser).toMatchObject({
+      content: '# First',
+      dirty: true,
+    })
+    expect(loser?.path).toBeUndefined()
+    expect(result.current.tabs.find((tab) => tab.id === 'tab-2')).toMatchObject({
+      content: '# Second',
+      dirty: false,
+      path: '/notes/shared.md',
+    })
+  })
+
+  it('does not write a selected path after its originating tab closes', async () => {
+    let finishSelection!: (value: {
+      canceled: false
+      path: string
+    }) => void
+    const saveFile = vi.fn()
+    window.qingshu = {
+      chooseSavePath: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishSelection = resolve
+          }),
+      ),
+      saveFile,
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    act(() => result.current.newDocument())
+    act(() => result.current.dispatch({ type: 'edit', content: '# Closing' }))
+
+    let save!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      save = result.current.saveDocument(true)
+    })
+    act(() => result.current.closeTab('tab-2'))
+    finishSelection({ canceled: false, path: '/notes/closed.md' })
+
+    await expect(save).resolves.toEqual({ status: 'superseded' })
+    expect(saveFile).not.toHaveBeenCalled()
+  })
+
+  it('deduplicates simultaneous opens before allocating tab resources', async () => {
+    window.qingshu = {
+      openFile: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/concurrent.md',
+        content: '# Concurrent',
+      }),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+
+    await act(async () => {
+      await Promise.all([
+        result.current.openDocument(),
+        result.current.openDocument(),
+      ])
+    })
+    act(() => result.current.newDocument())
+
+    expect(result.current.tabs.map((tab) => tab.id)).toEqual([
+      'tab-1',
+      'tab-2',
+      'tab-3',
+    ])
+  })
+
   it('does not consume tab IDs or revision entries for duplicate opens', async () => {
     window.qingshu = {
       openFile: vi.fn().mockResolvedValue({
@@ -74,7 +229,7 @@ describe('useDocument save lifecycle', () => {
       expect(operation).toEqual({
         status: 'error',
         message:
-          'existing.md is already open in another tab. Choose a different path.',
+          'existing.md is already being saved or opened in another tab. Choose a different path.',
       })
       expect(saveFile).not.toHaveBeenCalled()
       expect(result.current.tabs).toHaveLength(3)
@@ -139,6 +294,10 @@ describe('useDocument save lifecycle', () => {
   it('supersedes a save after an edit even when content is reverted byte-for-byte', async () => {
     let finishSave!: (result: { canceled: false; path: string }) => void
     window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/reverted.md',
+      }),
       saveFile: vi.fn(
         () =>
           new Promise((resolve) => {
@@ -154,6 +313,9 @@ describe('useDocument save lifecycle', () => {
     })
     act(() => result.current.dispatch({ type: 'edit', content: 'temporary edit' }))
     act(() => result.current.dispatch({ type: 'edit', content: 'same text' }))
+    await act(async () => {
+      await Promise.resolve()
+    })
     finishSave({ canceled: false, path: '/notes/reverted.md' })
 
     let operation: Awaited<typeof save>
@@ -171,6 +333,10 @@ describe('useDocument save lifecycle', () => {
 
   it('reports a committed save with a durability warning as clean', async () => {
     window.qingshu = {
+      chooseSavePath: vi.fn().mockResolvedValue({
+        canceled: false,
+        path: '/notes/warning.md',
+      }),
       saveFile: vi.fn().mockResolvedValue({
         canceled: false,
         path: '/notes/warning.md',

@@ -58,7 +58,11 @@ describe('TabStrip', () => {
     expect(
       screen.getByRole('tab', { name: 'one.md' }).getAttribute('aria-controls'),
     ).toBe('document-panel-one')
-    expect(screen.getByRole('tab', { name: 'Untitled, unsaved' })).not.toBeNull()
+    expect(
+      screen
+        .getByRole('tab', { name: 'Untitled, unsaved' })
+        .getAttribute('aria-controls'),
+    ).toBeNull()
     expect(screen.getByRole('button', { name: 'Close one.md' }).tabIndex).toBe(0)
     expect(screen.getByRole('button', { name: 'Close Untitled' }).tabIndex).toBe(
       -1,

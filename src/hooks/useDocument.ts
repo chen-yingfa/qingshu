@@ -87,7 +87,7 @@ export type TabsAction =
       sourceMode?: boolean
     }
   | { type: 'activate-tab'; tabId: string }
-  | { type: 'close-tab'; tabId: string }
+  | { type: 'close-tab'; tabId: string; defaultSourceMode?: boolean }
   | { type: 'document'; tabId: string; action: DocumentAction }
 
 export function documentReducer(
@@ -171,7 +171,11 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       if (index < 0) return state
       if (state.tabs.length === 1) {
         return {
-          tabs: [createTab(state.tabs[0].id)],
+          tabs: [
+            createTab(state.tabs[0].id, {
+              sourceMode: action.defaultSourceMode ?? false,
+            }),
+          ],
           activeTabId: state.tabs[0].id,
         }
       }
@@ -219,6 +223,42 @@ export function useDocument(defaultSourceMode = false) {
   const tabId = useRef(1)
   const contentRevisions = useRef(new Map<string, number>([['tab-1', 0]]))
   const latestSaveRequests = useRef(new Map<string, number>())
+  const tabLifetimes = useRef(new Map<string, number>([['tab-1', 0]]))
+  const tabsRef = useRef(tabsState)
+  const pathOwners = useRef(new Map<string, string>())
+  const pathReservations = useRef(
+    new Map<string, { ownerId: string; tokens: Set<symbol> }>(),
+  )
+  tabsRef.current = tabsState
+  const dispatchTabs = useCallback((action: TabsAction) => {
+    tabsRef.current = tabsReducer(tabsRef.current, action)
+    tabsDispatch(action)
+  }, [])
+  const reservePath = useCallback((path: string, ownerId: string) => {
+    const owner = pathOwners.current.get(path)
+    const reservation = pathReservations.current.get(path)
+    if (
+      (owner !== undefined && owner !== ownerId) ||
+      (reservation !== undefined && reservation.ownerId !== ownerId)
+    ) {
+      return null
+    }
+    const token = Symbol(path)
+    if (reservation) reservation.tokens.add(token)
+    else {
+      pathReservations.current.set(path, {
+        ownerId,
+        tokens: new Set([token]),
+      })
+    }
+    return token
+  }, [])
+  const releasePath = useCallback((path: string, token: symbol) => {
+    const reservation = pathReservations.current.get(path)
+    if (!reservation) return
+    reservation.tokens.delete(token)
+    if (reservation.tokens.size === 0) pathReservations.current.delete(path)
+  }, [])
   const state =
     tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId) ??
     tabsState.tabs[0]
@@ -230,27 +270,42 @@ export function useDocument(defaultSourceMode = false) {
         (contentRevisions.current.get(activeTabId) ?? 0) + 1,
       )
     }
-    tabsDispatch({ type: 'document', tabId: activeTabId, action })
-  }, [tabsState.activeTabId])
+    dispatchTabs({ type: 'document', tabId: activeTabId, action })
+  }, [dispatchTabs, tabsState.activeTabId])
 
   const newDocument = useCallback(() => {
     const id = `tab-${++tabId.current}`
     contentRevisions.current.set(id, 0)
-    tabsDispatch({ type: 'new-tab', id, sourceMode: defaultSourceMode })
-  }, [defaultSourceMode])
+    tabLifetimes.current.set(id, 0)
+    dispatchTabs({ type: 'new-tab', id, sourceMode: defaultSourceMode })
+  }, [defaultSourceMode, dispatchTabs])
 
   const openDocument = useCallback(async () => {
     try {
       const result = await window.qingshu.openFile()
       if (result.canceled) return { status: 'canceled' } as const
-      const existing = tabsState.tabs.find((tab) => tab.path === result.path)
-      if (existing) {
-        tabsDispatch({ type: 'activate-tab', tabId: existing.id })
+      const existingOwner = pathOwners.current.get(result.path)
+      if (existingOwner) {
+        dispatchTabs({ type: 'activate-tab', tabId: existingOwner })
         return { status: 'success', path: result.path } as const
       }
-      const id = `tab-${++tabId.current}`
+      const id = `tab-${tabId.current + 1}`
+      const reservation = reservePath(result.path, id)
+      if (!reservation) {
+        const message = `${filename(result.path)} is already being saved or opened in another tab.`
+        dispatchTabs({
+          type: 'document',
+          tabId: tabsRef.current.activeTabId,
+          action: { type: 'error', message },
+        })
+        return { status: 'error', message } as const
+      }
+      tabId.current += 1
       contentRevisions.current.set(id, 1)
-      tabsDispatch({
+      tabLifetimes.current.set(id, 0)
+      pathOwners.current.set(result.path, id)
+      releasePath(result.path, reservation)
+      dispatchTabs({
         type: 'open-tab',
         id,
         content: result.content ?? '',
@@ -261,26 +316,40 @@ export function useDocument(defaultSourceMode = false) {
       return { status: 'success', path: result.path } as const
     } catch (error) {
       const message = errorMessage(error)
-      tabsDispatch({
+      dispatchTabs({
         type: 'document',
-        tabId: tabsState.activeTabId,
+        tabId: tabsRef.current.activeTabId,
         action: { type: 'error', message },
       })
       return { status: 'error', message } as const
     }
-  }, [defaultSourceMode, tabsState.activeTabId, tabsState.tabs])
+  }, [defaultSourceMode, dispatchTabs, releasePath, reservePath])
 
   const openRecentDocument = useCallback(async (path: string) => {
     try {
       const result = await window.qingshu.openRecentFile(path)
-      const existing = tabsState.tabs.find((tab) => tab.path === result.path)
-      if (existing) {
-        tabsDispatch({ type: 'activate-tab', tabId: existing.id })
+      const existingOwner = pathOwners.current.get(result.path)
+      if (existingOwner) {
+        dispatchTabs({ type: 'activate-tab', tabId: existingOwner })
         return { status: 'success', path: result.path } as const
       }
-      const id = `tab-${++tabId.current}`
+      const id = `tab-${tabId.current + 1}`
+      const reservation = reservePath(result.path, id)
+      if (!reservation) {
+        const message = `${filename(result.path)} is already being saved or opened in another tab.`
+        dispatchTabs({
+          type: 'document',
+          tabId: tabsRef.current.activeTabId,
+          action: { type: 'error', message },
+        })
+        return { status: 'error', message } as const
+      }
+      tabId.current += 1
       contentRevisions.current.set(id, 1)
-      tabsDispatch({
+      tabLifetimes.current.set(id, 0)
+      pathOwners.current.set(result.path, id)
+      releasePath(result.path, reservation)
+      dispatchTabs({
         type: 'open-tab',
         id,
         content: result.content ?? '',
@@ -291,52 +360,62 @@ export function useDocument(defaultSourceMode = false) {
       return { status: 'success', path: result.path } as const
     } catch (error) {
       const message = errorMessage(error)
-      tabsDispatch({
+      dispatchTabs({
         type: 'document',
-        tabId: tabsState.activeTabId,
+        tabId: tabsRef.current.activeTabId,
         action: { type: 'error', message },
       })
       return { status: 'error', message } as const
     }
-  }, [defaultSourceMode, tabsState.activeTabId, tabsState.tabs])
+  }, [defaultSourceMode, dispatchTabs, releasePath, reservePath])
 
   const saveDocument = useCallback(
     async (saveAs = false) => {
-      const activeTabId = tabsState.activeTabId
-      const content = state.content
+      const activeTabId = tabsRef.current.activeTabId
+      const origin = tabsRef.current.tabs.find((tab) => tab.id === activeTabId)
+      if (!origin) {
+        return { status: 'error', message: 'Document tab no longer exists.' } as const
+      }
+      const content = origin.content
+      const originLifetime = tabLifetimes.current.get(activeTabId)
       const savedContentRevision =
-        contentRevisions.current.get(activeTabId) ?? state.contentRevision
-      let savePath = state.path
-      if (saveAs) {
+        contentRevisions.current.get(activeTabId) ?? origin.contentRevision
+      let savePath = origin.path
+      if (saveAs || !savePath) {
         try {
           const selected = await window.qingshu.chooseSavePath()
           if (selected.canceled) return { status: 'canceled' } as const
-          const owner = tabsState.tabs.find(
-            (tab) => tab.id !== activeTabId && tab.path === selected.path,
-          )
-          if (owner) {
-            const message = `${filename(selected.path)} is already open in another tab. Choose a different path.`
-            tabsDispatch({
+          savePath = selected.path
+        } catch (error) {
+          const message = errorMessage(error)
+          if (tabsRef.current.tabs.some((tab) => tab.id === activeTabId)) {
+            dispatchTabs({
               type: 'document',
               tabId: activeTabId,
               action: { type: 'error', message },
             })
-            return { status: 'error', message } as const
           }
-          savePath = selected.path
-        } catch (error) {
-          const message = errorMessage(error)
-          tabsDispatch({
+          return { status: 'error', message } as const
+        }
+      }
+      if (tabLifetimes.current.get(activeTabId) !== originLifetime) {
+        return { status: 'superseded' } as const
+      }
+      const reservation = reservePath(savePath, activeTabId)
+      if (!reservation) {
+        const message = `${filename(savePath)} is already being saved or opened in another tab. Choose a different path.`
+        if (tabsRef.current.tabs.some((tab) => tab.id === activeTabId)) {
+          dispatchTabs({
             type: 'document',
             tabId: activeTabId,
             action: { type: 'error', message },
           })
-          return { status: 'error', message } as const
         }
+        return { status: 'error', message } as const
       }
       const currentRequest = ++requestId.current
       latestSaveRequests.current.set(activeTabId, currentRequest)
-      tabsDispatch({
+      dispatchTabs({
         type: 'document',
         tabId: activeTabId,
         action: { type: 'save-started', requestId: currentRequest },
@@ -357,17 +436,27 @@ export function useDocument(defaultSourceMode = false) {
           return { status: 'superseded' } as const
         }
         if (result.canceled) return { status: 'canceled' } as const
-        tabsDispatch({
-          type: 'document',
-          tabId: activeTabId,
-          action: {
-            type: 'saved',
-            content,
-            path: result.path,
-            requestId: currentRequest,
-            contentRevision: savedContentRevision,
-          },
-        })
+        if (tabsRef.current.tabs.some((tab) => tab.id === activeTabId)) {
+          if (
+            origin.path &&
+            origin.path !== result.path &&
+            pathOwners.current.get(origin.path) === activeTabId
+          ) {
+            pathOwners.current.delete(origin.path)
+          }
+          pathOwners.current.set(result.path, activeTabId)
+          dispatchTabs({
+            type: 'document',
+            tabId: activeTabId,
+            action: {
+              type: 'saved',
+              content,
+              path: result.path,
+              requestId: currentRequest,
+              contentRevision: savedContentRevision,
+            },
+          })
+        }
         if (
           savedContentRevision !==
           (contentRevisions.current.get(activeTabId) ?? 0)
@@ -392,32 +481,37 @@ export function useDocument(defaultSourceMode = false) {
         if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           return { status: 'superseded' } as const
         }
-        tabsDispatch({
+        dispatchTabs({
           type: 'document',
           tabId: activeTabId,
           action: { type: 'save-error', message, requestId: currentRequest },
         })
         return { status: 'error', message } as const
+      } finally {
+        releasePath(savePath, reservation)
       }
     },
-    [
-      state.content,
-      state.contentRevision,
-      state.path,
-      tabsState.activeTabId,
-      tabsState.tabs,
-    ],
+    [dispatchTabs, releasePath, reservePath],
   )
 
   const activateTab = useCallback((tabId: string) => {
-    tabsDispatch({ type: 'activate-tab', tabId })
-  }, [])
+    dispatchTabs({ type: 'activate-tab', tabId })
+  }, [dispatchTabs])
 
   const closeTab = useCallback((tabId: string) => {
-    tabsDispatch({ type: 'close-tab', tabId })
+    const closing = tabsRef.current.tabs.find((tab) => tab.id === tabId)
+    if (closing?.path && pathOwners.current.get(closing.path) === tabId) {
+      pathOwners.current.delete(closing.path)
+    }
+    dispatchTabs({
+      type: 'close-tab',
+      tabId,
+      defaultSourceMode,
+    })
     contentRevisions.current.delete(tabId)
     latestSaveRequests.current.delete(tabId)
-  }, [])
+    tabLifetimes.current.set(tabId, (tabLifetimes.current.get(tabId) ?? 0) + 1)
+  }, [defaultSourceMode, dispatchTabs])
 
   return {
     state,
