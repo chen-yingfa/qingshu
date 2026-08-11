@@ -1476,6 +1476,42 @@ describe('LiveEditor block reordering', () => {
 })
 
 describe('LiveEditor source mode', () => {
+  it('does not overwrite rapid local edits with intermediate acknowledgements', () => {
+    const result = renderEditor('abc', { sourceMode: true })
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    source.setSelectionRange(3, 3)
+    fireEvent.change(source, {
+      target: { value: 'abcX', selectionStart: 4, selectionEnd: 4 },
+    })
+    fireEvent.change(source, {
+      target: { value: 'abcXY', selectionStart: 5, selectionEnd: 5 },
+    })
+
+    result.rerender(
+      <LiveEditor
+        content="abcX"
+        activeBlock={0}
+        sourceMode
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(source.value).toBe('abcXY')
+    expect(source.selectionStart).toBe(5)
+
+    result.rerender(
+      <LiveEditor
+        content="abcXY"
+        activeBlock={0}
+        sourceMode
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(source.value).toBe('abcXY')
+    expect(source.selectionStart).toBe(5)
+  })
+
   it('edits the canonical document directly and supports Tab indentation', async () => {
     const result = renderEditor('# Title\n\nBody', { sourceMode: true })
     const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement

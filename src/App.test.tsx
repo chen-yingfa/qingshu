@@ -439,6 +439,28 @@ describe('commands and operation feedback', () => {
     expect(screen.getByLabelText('Markdown source')).not.toBeNull()
   })
 
+  it('keeps palette, settings, and formatting hotkeys active in source mode', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle source mode' }))
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    fireEvent.change(source, { target: { value: 'word' } })
+    source.setSelectionRange(0, 4)
+    fireEvent.keyDown(source, { key: 'b', ctrlKey: true })
+    await waitFor(() => expect(source.value).toBe('**word**'))
+
+    fireEvent.keyDown(source, { key: 'p', ctrlKey: true })
+    expect(
+      screen.getByRole('dialog', { name: 'Command palette' }),
+    ).not.toBeNull()
+    fireEvent.keyDown(
+      screen.getByRole('dialog', { name: 'Command palette' }),
+      { key: 'Escape' },
+    )
+
+    fireEvent.keyDown(source, { key: ',', ctrlKey: true })
+    expect(screen.getByRole('dialog', { name: 'Settings' })).not.toBeNull()
+  })
+
   it('opens the palette with Ctrl+P and runs view commands from filtered keyboard input', () => {
     const { container } = render(<App />)
 

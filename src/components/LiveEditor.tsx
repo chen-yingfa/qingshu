@@ -720,19 +720,25 @@ function DocumentSourceEditor({
   const handledFormatRef = useRef(0)
   const [draft, setDraft] = useState(content)
   const parentContentRef = useRef(content)
-  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+  const pendingAcknowledgementsRef = useRef<string[]>([])
 
   useLayoutEffect(() => {
     if (content === parentContentRef.current) return
-    const acknowledged = pendingAcknowledgementRef.current === content
+    const acknowledgementIndex =
+      pendingAcknowledgementsRef.current.indexOf(content)
+    const acknowledged = acknowledgementIndex >= 0
     parentContentRef.current = content
-    pendingAcknowledgementRef.current = undefined
-    if (!acknowledged) setDraft(content)
+    if (acknowledged) {
+      pendingAcknowledgementsRef.current.splice(0, acknowledgementIndex + 1)
+    } else {
+      pendingAcknowledgementsRef.current = []
+      setDraft(content)
+    }
   }, [content])
 
   const commit = (value: string) => {
     setDraft(value)
-    pendingAcknowledgementRef.current = value
+    pendingAcknowledgementsRef.current.push(value)
     onChange(value)
   }
 
