@@ -69,6 +69,17 @@ describe('renderMarkdown', () => {
     expect(html).toContain('∫')
   })
 
+  it('preserves scalable delimiters, blackboard symbols, and scripts in KaTeX HTML', async () => {
+    const html = await renderMarkdown(
+      '$$\\left(\\frac{x_t}{\\mathbb R}\\right) \\in \\mathbb N_0$$',
+    )
+
+    expect(html).toContain('class="mopen delimcenter"')
+    expect(html).toContain('class="mfrac"')
+    expect(html).toContain('mathbb')
+    expect(html).toContain('msupsub')
+  })
+
   it('sanitizes unsafe rendered HTML and protocols', async () => {
     const html = await renderMarkdown(
       '<script>alert("xss")</script>\n\n[bad](javascript:alert(1))\n\n![x](https://example.com/x.png)',

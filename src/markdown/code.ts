@@ -37,9 +37,21 @@ export interface FencedCode {
   closed: boolean
 }
 
+function escapeHtml(source: string): string {
+  return source
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 export function parseFencedCode(source: string): FencedCode | null {
   const firstBreak = source.indexOf('\n')
-  const openingLine = firstBreak < 0 ? source : source.slice(0, firstBreak)
+  const openingLine = (firstBreak < 0 ? source : source.slice(0, firstBreak)).replace(
+    /\r$/u,
+    '',
+  )
   const opening = openingLine.match(/^ {0,3}(`{3,}|~{3,})[ \t]*([^ \t`]*)[^\n]*$/u)
   if (!opening) return null
 
@@ -49,7 +61,7 @@ export function parseFencedCode(source: string): FencedCode | null {
     `^ {0,3}${fence[0].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}{${fence.length},}[ \\t]*$`,
     'u',
   )
-  const lines = source.slice(bodyStart).split('\n')
+  const lines = source.slice(bodyStart).split(/\r?\n/u)
   const closed = lines.length > 0 && closingPattern.test(lines.at(-1) ?? '')
   const code = (closed ? lines.slice(0, -1) : lines).join('\n')
 
@@ -62,8 +74,11 @@ export function parseFencedCode(source: string): FencedCode | null {
 }
 
 export function highlightCode(code: string, language: string): string {
-  if (language && hljs.getLanguage(language)) {
+  if (code.length > 100_000 || !language || !hljs.getLanguage(language)) {
+    return escapeHtml(code)
+  }
+  if (language) {
     return hljs.highlight(code, { language, ignoreIllegals: true }).value
   }
-  return hljs.highlightAuto(code).value
+  return escapeHtml(code)
 }

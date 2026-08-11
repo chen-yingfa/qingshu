@@ -122,8 +122,10 @@ function editorBlocks(
     if (!next) continue
     const gap = content.slice(block.end, next.start)
     const endings = Array.from(gap.matchAll(/\r?\n/gu))
-    for (let empty = 2; empty + 1 < endings.length; empty += 2) {
-      const offset = block.end + endings[empty - 1].index! + endings[empty - 1][0].length
+    const baseline = endings.length % 2 === 0 ? 2 : 1
+    for (let empty = baseline; empty < endings.length; empty += 2) {
+      const offset =
+        block.end + endings[empty - 1].index! + endings[empty - 1][0].length
       editable.push({
         id: `empty-gap-${offset}`,
         type: 'paragraph',
@@ -152,23 +154,37 @@ function editorBlocks(
 }
 
 function containsMath(source: string): boolean {
-  return /(^|[^\\])\${1,2}(?=\S)[\s\S]*?\${1,2}/u.test(source)
+  return (
+    /(^|[^\\])\$\$[\s\S]+?\$\$/u.test(source) ||
+    /(^|[^\\])\$(?!\$)(?:\\.|[^$\n])+\$/u.test(source)
+  )
 }
 
 function ActiveBlockPreview({ source }: { source: string }) {
   const code = useMemo(() => parseFencedCode(source), [source])
   const [mathHtml, setMathHtml] = useState('')
+  const [codeHtml, setCodeHtml] = useState('')
 
   useEffect(() => {
-    if (code || !containsMath(source)) {
-      setMathHtml('')
-      return
-    }
     let current = true
     const timer = window.setTimeout(() => {
-      void renderMarkdown(source).then((html) => {
-        if (current) setMathHtml(html)
-      })
+      if (code) {
+        setMathHtml('')
+        setCodeHtml(highlightCode(code.code, code.language))
+      } else if (containsMath(source)) {
+        setCodeHtml('')
+        void renderMarkdown(source).then(
+          (html) => {
+            if (current) setMathHtml(html)
+          },
+          () => {
+            if (current) setMathHtml('')
+          },
+        )
+      } else {
+        setCodeHtml('')
+        setMathHtml('')
+      }
     }, 80)
     return () => {
       current = false
@@ -177,7 +193,6 @@ function ActiveBlockPreview({ source }: { source: string }) {
   }, [code, source])
 
   if (code) {
-    const html = highlightCode(code.code, code.language)
     return (
       <div className="active-live-preview active-code-preview" aria-label="Live code preview">
         <div className="preview-label">
@@ -186,7 +201,7 @@ function ActiveBlockPreview({ source }: { source: string }) {
         <pre>
           <code
             className={`hljs${code.language ? ` language-${code.language}` : ''}`}
-            dangerouslySetInnerHTML={{ __html: html }}
+            dangerouslySetInnerHTML={{ __html: codeHtml }}
           />
         </pre>
       </div>
@@ -431,6 +446,7 @@ export function LiveEditor({
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
   const composingRef = useRef(false)
+  const codeTabEscapeRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
@@ -569,8 +585,34 @@ export function LiveEditor({
       return
     }
 
+    if (fencedCode && event.key === 'Escape') {
+      codeTabEscapeRef.current = true
+      return
+    }
+    if (event.key !== 'Tab') codeTabEscapeRef.current = false
+
     if (fencedCode && event.key === 'Tab') {
+      if (codeTabEscapeRef.current) {
+        codeTabEscapeRef.current = false
+        return
+      }
       event.preventDefault()
+      if (event.shiftKey) {
+        const lineStart =
+          draft.lastIndexOf('\n', Math.max(0, textarea.selectionStart - 1)) + 1
+        const indentation = draft.slice(lineStart).match(/^(?: {1,2}|\t)/u)?.[0] ?? ''
+        if (!indentation) return
+        const nextDraft =
+          draft.slice(0, lineStart) +
+          draft.slice(lineStart + indentation.length)
+        const nextStart = Math.max(lineStart, textarea.selectionStart - indentation.length)
+        const nextEnd = Math.max(nextStart, textarea.selectionEnd - indentation.length)
+        commitDraft(nextDraft)
+        afterPaint(() => {
+          textareaRef.current?.setSelectionRange(nextStart, nextEnd)
+        })
+        return
+      }
       const result = applyInlineFormat(
         draft,
         textarea.selectionStart,
