@@ -270,6 +270,23 @@ describe('LiveEditor keyboard and composition behavior', () => {
     })
   })
 
+  it('hides a stale math preview immediately when the source is no longer math', async () => {
+    const result = renderEditor('$x_t$')
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-math-preview')).not.toBeNull(),
+    )
+
+    result.rerender(
+      <LiveEditor
+        content="plain text"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(result.container.querySelector('.active-math-preview')).toBeNull()
+  })
+
   it('enters fenced code mode with a highlighted live preview', async () => {
     const result = renderEditor('```ts\nconst total = value + 1\n```')
 
@@ -322,7 +339,13 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => {
       expect(result.container.querySelector('.active-code-preview .hljs-keyword')).not.toBeNull()
     })
-    expect(result.onChange).not.toHaveBeenCalled()
+    const textarea = editor as HTMLTextAreaElement
+    const lineEnd = textarea.value.indexOf('\n```')
+    textarea.setSelectionRange(lineEnd, lineEnd)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '```ts\r\nconst value = 1\r\n\r\n```',
+    )
     expect(result.container.querySelector('.preview-label')?.textContent).toContain(
       'typescript',
     )
@@ -341,6 +364,17 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
     editor.dispatchEvent(tab)
     expect(tab.defaultPrevented).toBe(false)
+  })
+
+  it('resets the code Tab escape after blur', () => {
+    renderEditor('```ts\nvalue\n```')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    fireEvent.keyDown(editor, { key: 'Escape' })
+    fireEvent.blur(editor)
+
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    editor.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(true)
   })
 
   it('inserts an editable block between blocks when Enter is pressed at the end', () => {
@@ -386,6 +420,24 @@ describe('LiveEditor keyboard and composition behavior', () => {
     })
     expect(result.onChange).toHaveBeenLastCalledWith(
       '# Heading\nInserted\n\nParagraph',
+    )
+  })
+
+  it('does not invent an editable paragraph inside three natural paragraph newlines', () => {
+    renderEditor('First\n\n\nSecond', { activeBlock: 1 })
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('Second')
+  })
+
+  it('inserts a CRLF block after a closed fence without mixing line endings', () => {
+    const result = renderEditor('```\r\ncode\r\n```\r\nAfter')
+    const editor = screen.getByLabelText('Active code block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '```\r\ncode\r\n```\r\n\r\n\r\nAfter',
     )
   })
 

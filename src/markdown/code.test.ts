@@ -17,4 +17,12 @@ describe('fenced code preview', () => {
       '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;',
     )
   })
+
+  it('skips grammar highlighting for very large known-language blocks', () => {
+    const source = `const value = "<unsafe>";\n${'x'.repeat(100_000)}`
+    const html = highlightCode(source, 'typescript')
+
+    expect(html).toContain('&lt;unsafe&gt;')
+    expect(html).not.toContain('<span')
+  })
 })

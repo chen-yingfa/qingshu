@@ -39,6 +39,22 @@ interface FormatRequest {
   command: FormatCommand
 }
 
+function preferredEol(source: string): '\n' | '\r\n' {
+  return source.includes('\r\n') ? '\r\n' : '\n'
+}
+
+function toEditorValue(source: string): string {
+  return source.replaceAll('\r\n', '\n')
+}
+
+function toSourceValue(value: string, eol: '\n' | '\r\n'): string {
+  return eol === '\r\n' ? value.replaceAll('\n', '\r\n') : value
+}
+
+function separatesParagraphWithOneEol(source: string, eol: '\n' | '\r\n') {
+  return parseDocument(`${source}${eol}qingshu-empty-probe`).blocks.length > 1
+}
+
 interface LiveEditorProps {
   content: string
   activeBlock: number
@@ -66,7 +82,7 @@ export function mergeBlockAtStart(
   if (separatorStart < 0) return { content: source, caret: blockStart }
   const left = source.slice(0, separatorStart).replace(/[ \t]+$/u, '')
   const right = source.slice(blockStart).replace(/^[ \t]+/u, '')
-  const separator = left && right ? '\n' : ''
+  const separator = left && right ? preferredEol(source) : ''
   return { content: left + separator + right, caret: left.length + separator.length }
 }
 
@@ -104,6 +120,7 @@ export function moveByCjkWord(
 function editorBlocks(
   content: string,
   parsedBlocks: MarkdownBlock[],
+  insertedEmptyOffsets: number[],
 ): MarkdownBlock[] {
   if (parsedBlocks.length === 0) {
     return [{
@@ -115,25 +132,25 @@ function editorBlocks(
     }]
   }
 
-  const editable: MarkdownBlock[] = []
-  for (const [index, block] of parsedBlocks.entries()) {
-    editable.push(block)
-    const next = parsedBlocks[index + 1]
-    if (!next) continue
-    const gap = content.slice(block.end, next.start)
-    const endings = Array.from(gap.matchAll(/\r?\n/gu))
-    const baseline = endings.length % 2 === 0 ? 2 : 1
-    for (let empty = baseline; empty < endings.length; empty += 2) {
-      const offset =
-        block.end + endings[empty - 1].index! + endings[empty - 1][0].length
-      editable.push({
-        id: `empty-gap-${offset}`,
-        type: 'paragraph',
-        source: '',
-        start: offset,
-        end: offset,
-      })
+  const editable = [...parsedBlocks]
+  for (const offset of insertedEmptyOffsets) {
+    if (
+      offset < 0 ||
+      offset > content.length ||
+      parsedBlocks.some(
+        (block) =>
+          block.start === offset || (offset > block.start && offset < block.end),
+      )
+    ) {
+      continue
     }
+    editable.push({
+      id: `empty-inserted-${offset}`,
+      type: 'paragraph',
+      source: '',
+      start: offset,
+      end: offset,
+    })
   }
 
   const last = parsedBlocks.at(-1)!
@@ -142,15 +159,17 @@ function editorBlocks(
   for (let empty = 0; empty + 1 < trailingEndings.length; empty += 2) {
     const second = trailingEndings[empty + 1]
     const offset = last.end + second.index! + second[0].length
-    editable.push({
-      id: `empty-tail-${offset}`,
-      type: 'paragraph',
-      source: '',
-      start: offset,
-      end: offset,
-    })
+    if (!editable.some((block) => block.start === offset && block.source === '')) {
+      editable.push({
+        id: `empty-tail-${offset}`,
+        type: 'paragraph',
+        source: '',
+        start: offset,
+        end: offset,
+      })
+    }
   }
-  return editable
+  return editable.sort((left, right) => left.start - right.start)
 }
 
 function containsMath(source: string): boolean {
@@ -208,7 +227,7 @@ function ActiveBlockPreview({ source }: { source: string }) {
     )
   }
 
-  if (!mathHtml) return null
+  if (!containsMath(source) || !mathHtml) return null
   return (
     <div className="active-live-preview active-math-preview" aria-label="Live math preview">
       <div className="preview-label">Math · live preview</div>
@@ -432,15 +451,16 @@ export function LiveEditor({
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
+  const insertedEmptyOffsetsRef = useRef<number[]>([])
   const model = useMemo(() => parseDocument(content), [content])
   const blocks = useMemo(
-    () => editorBlocks(content, model.blocks),
+    () => editorBlocks(content, model.blocks, insertedEmptyOffsetsRef.current),
     [content, model.blocks],
   )
   const renderContext = model.renderContext
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
-  const [draft, setDraft] = useState(active.source)
+  const [draft, setDraft] = useState(toEditorValue(active.source))
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
@@ -469,15 +489,40 @@ export function LiveEditor({
     }
     const externalChange = parentChanged && !acknowledged
     if (activeChanged || externalChange) {
-      setDraft(active.source)
+      setDraft(toEditorValue(active.source))
       rangeRef.current = { start: active.start, end: active.end }
     }
+    if (externalChange) insertedEmptyOffsetsRef.current = []
+    if (activeChanged) codeTabEscapeRef.current = false
     previousActiveRef.current = safeActive
   }, [active.end, active.source, active.start, content, safeActive])
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current)
   }, [draft, safeActive])
+
+  function commitDraft(value: string) {
+    const eol = preferredEol(contentRef.current)
+    const sourceValue = toSourceValue(value, eol)
+    const previous = { ...rangeRef.current }
+    const nextContent = replaceBlockSource(
+      contentRef.current,
+      previous,
+      sourceValue,
+    )
+    const delta = sourceValue.length - (previous.end - previous.start)
+    insertedEmptyOffsetsRef.current = insertedEmptyOffsetsRef.current
+      .filter(
+        (offset) =>
+          !(previous.start === previous.end && offset === previous.start && value),
+      )
+      .map((offset) => (offset > previous.end ? offset + delta : offset))
+    setDraft(value)
+    rangeRef.current.end = rangeRef.current.start + sourceValue.length
+    contentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
+    onChange(nextContent)
+  }
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -489,30 +534,12 @@ export function LiveEditor({
       textarea.selectionStart,
       textarea.selectionEnd,
     )
-    setDraft(result.value)
-    const nextContent = replaceBlockSource(
-      contentRef.current,
-      rangeRef.current,
-      result.value,
-    )
-    contentRef.current = nextContent
-    pendingAcknowledgementRef.current = nextContent
-    onChange(nextContent)
-    rangeRef.current.end = rangeRef.current.start + result.value.length
+    commitDraft(result.value)
     afterPaint(() => {
       textarea.focus()
       textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
     })
   }, [content, draft, formatRequest, onChange])
-
-  const commitDraft = (value: string) => {
-    setDraft(value)
-    const nextContent = replaceBlockSource(contentRef.current, rangeRef.current, value)
-    rangeRef.current.end = rangeRef.current.start + value.length
-    contentRef.current = nextContent
-    pendingAcknowledgementRef.current = nextContent
-    onChange(nextContent)
-  }
 
   const normalize = (
     value: string,
@@ -520,10 +547,12 @@ export function LiveEditor({
     selectionEnd = selectionStart,
   ) => {
     if (composingRef.current) return
+    const eol = preferredEol(contentRef.current)
+    const sourceValue = toSourceValue(value, eol)
     const candidate = replaceBlockSource(
       contentRef.current,
       rangeRef.current,
-      value,
+      sourceValue,
     )
     const transformTo = (end: number) => {
       const range = { start: rangeRef.current.start, end }
@@ -539,18 +568,33 @@ export function LiveEditor({
       }
       return { source: transformed, end: transformedEnd }
     }
-    const transformed = transformTo(rangeRef.current.start + value.length)
-    const normalized = transformed.source.slice(
-      rangeRef.current.start,
-      transformed.end,
+    const transformed = transformTo(
+      rangeRef.current.start + sourceValue.length,
+    )
+    const normalized = toEditorValue(
+      transformed.source.slice(rangeRef.current.start, transformed.end),
     )
     if (normalized !== value) {
-      const nextStart =
-        transformTo(rangeRef.current.start + selectionStart).end -
-        rangeRef.current.start
-      const nextEnd =
-        transformTo(rangeRef.current.start + selectionEnd).end -
-        rangeRef.current.start
+      const transformedStart = transformTo(
+        rangeRef.current.start +
+          toSourceValue(value.slice(0, selectionStart), eol).length,
+      )
+      const transformedEnd = transformTo(
+        rangeRef.current.start +
+          toSourceValue(value.slice(0, selectionEnd), eol).length,
+      )
+      const nextStart = toEditorValue(
+        transformedStart.source.slice(
+          rangeRef.current.start,
+          transformedStart.end,
+        ),
+      ).length
+      const nextEnd = toEditorValue(
+        transformedEnd.source.slice(
+          rangeRef.current.start,
+          transformedEnd.end,
+        ),
+      ).length
       commitDraft(normalized)
       afterPaint(() => {
         textareaRef.current?.setSelectionRange(nextStart, nextEnd)
@@ -708,9 +752,21 @@ export function LiveEditor({
     ) {
       event.preventDefault()
       const insertionPoint = rangeRef.current.end
+      const eol = preferredEol(contentRef.current)
+      const insertion = `${eol}${eol}`
+      const leftSeparators = separatesParagraphWithOneEol(active.source, eol)
+        ? 1
+        : 2
+      const emptyOffset = insertionPoint + leftSeparators * eol.length
+      insertedEmptyOffsetsRef.current = [
+        ...insertedEmptyOffsetsRef.current.map((offset) =>
+          offset > insertionPoint ? offset + insertion.length : offset,
+        ),
+        emptyOffset,
+      ].filter((offset, index, offsets) => offsets.indexOf(offset) === index)
       const nextContent =
         contentRef.current.slice(0, insertionPoint) +
-        '\n\n' +
+        insertion +
         contentRef.current.slice(insertionPoint)
       contentRef.current = nextContent
       pendingAcknowledgementRef.current = nextContent
@@ -747,13 +803,14 @@ export function LiveEditor({
                     )
                   }
                 }}
-                onBlur={(event) =>
+                onBlur={(event) => {
+                  codeTabEscapeRef.current = false
                   normalize(
                     event.currentTarget.value,
                     event.currentTarget.selectionStart,
                     event.currentTarget.selectionEnd,
                   )
-                }
+                }}
                 onCompositionStart={() => {
                   composingRef.current = true
                 }}
