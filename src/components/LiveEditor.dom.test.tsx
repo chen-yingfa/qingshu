@@ -21,6 +21,7 @@ function renderEditor(
   const result = render(
     <LiveEditor
       content={content}
+      contentRevision={options.contentRevision ?? 0}
       activeBlock={0}
       onChange={onChange}
       onActiveBlockChange={onActiveBlockChange}
@@ -1508,6 +1509,7 @@ describe('LiveEditor source mode', () => {
     result.rerender(
       <LiveEditor
         content="abcX"
+        contentRevision={1}
         activeBlock={0}
         sourceMode
         onChange={result.onChange}
@@ -1520,6 +1522,7 @@ describe('LiveEditor source mode', () => {
     result.rerender(
       <LiveEditor
         content="abcXY"
+        contentRevision={2}
         activeBlock={0}
         sourceMode
         onChange={result.onChange}
@@ -1592,6 +1595,7 @@ describe('LiveEditor source mode', () => {
     result.rerender(
       <LiveEditor
         content="abc"
+        contentRevision={0}
         activeBlock={0}
         sourceMode
         formatRequest={{ id: 1, command: 'heading' }}

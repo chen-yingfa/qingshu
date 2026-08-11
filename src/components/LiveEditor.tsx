@@ -750,7 +750,7 @@ function DocumentSourceEditor({
   onChange,
 }: {
   content: string
-  contentRevision?: number
+  contentRevision: number
   formatRequest?: FormatRequest
   onChange(content: string): void
 }) {
@@ -759,61 +759,49 @@ function DocumentSourceEditor({
   const [draft, setDraft] = useState(toEditorValue(content))
   const parentContentRef = useRef(content)
   const canonicalContentRef = useRef(content)
-  const lastParentRevisionRef = useRef(contentRevision ?? 0)
-  const nextLocalRevisionRef = useRef(contentRevision ?? 0)
+  const lastParentRevisionRef = useRef(contentRevision)
+  const nextLocalRevisionRef = useRef(contentRevision)
   const pendingAcknowledgementsRef = useRef(
     new Map<number, string>(),
   )
-  const pendingTextsRef = useRef<string[]>([])
 
   useLayoutEffect(() => {
     if (
       content === parentContentRef.current &&
-      (contentRevision === undefined ||
-        contentRevision === lastParentRevisionRef.current)
+      contentRevision === lastParentRevisionRef.current
     ) {
       return
     }
     if (
-      contentRevision !== undefined &&
       contentRevision < lastParentRevisionRef.current
     ) {
       return
     }
 
     let acknowledged = false
-    if (contentRevision !== undefined) {
-      const pending = pendingAcknowledgementsRef.current
-      acknowledged = pending.get(contentRevision) === content
-      if (acknowledged) {
-        for (const revision of pending.keys()) {
-          if (revision <= contentRevision) pending.delete(revision)
-        }
-      } else if (
-        contentRevision <= nextLocalRevisionRef.current &&
-        contentRevision > lastParentRevisionRef.current
-      ) {
-        // A coalesced intermediate acknowledgement no longer retained in the
-        // bounded queue; it must not overwrite a newer local draft.
-        acknowledged = true
+    const pending = pendingAcknowledgementsRef.current
+    acknowledged = pending.get(contentRevision) === content
+    if (acknowledged) {
+      for (const revision of pending.keys()) {
+        if (revision <= contentRevision) pending.delete(revision)
       }
-      lastParentRevisionRef.current = contentRevision
-      nextLocalRevisionRef.current = Math.max(
-        nextLocalRevisionRef.current,
-        contentRevision,
-      )
-    } else {
-      const acknowledgementIndex = pendingTextsRef.current.indexOf(content)
-      acknowledged = acknowledgementIndex >= 0
-      if (acknowledged) {
-        pendingTextsRef.current.splice(0, acknowledgementIndex + 1)
-      }
+    } else if (
+      contentRevision <= nextLocalRevisionRef.current &&
+      contentRevision > lastParentRevisionRef.current
+    ) {
+      // A coalesced intermediate acknowledgement no longer retained in the
+      // bounded queue; it must not overwrite a newer local draft.
+      acknowledged = true
     }
+    lastParentRevisionRef.current = contentRevision
+    nextLocalRevisionRef.current = Math.max(
+      nextLocalRevisionRef.current,
+      contentRevision,
+    )
 
     parentContentRef.current = content
     if (!acknowledged) {
       pendingAcknowledgementsRef.current.clear()
-      pendingTextsRef.current = []
       canonicalContentRef.current = content
       setDraft(toEditorValue(content))
     }
@@ -832,22 +820,12 @@ function DocumentSourceEditor({
     )
     canonicalContentRef.current = canonical
     setDraft(value)
-    if (contentRevision !== undefined) {
-      const revision = ++nextLocalRevisionRef.current
-      pendingAcknowledgementsRef.current.set(revision, canonical)
-      while (pendingAcknowledgementsRef.current.size > 32) {
-        const oldest = pendingAcknowledgementsRef.current.keys().next().value
-        if (oldest === undefined) break
-        pendingAcknowledgementsRef.current.delete(oldest)
-      }
-    } else {
-      pendingTextsRef.current.push(canonical)
-      if (pendingTextsRef.current.length > 32) {
-        pendingTextsRef.current.splice(
-          0,
-          pendingTextsRef.current.length - 32,
-        )
-      }
+    const revision = ++nextLocalRevisionRef.current
+    pendingAcknowledgementsRef.current.set(revision, canonical)
+    while (pendingAcknowledgementsRef.current.size > 32) {
+      const oldest = pendingAcknowledgementsRef.current.keys().next().value
+      if (oldest === undefined) break
+      pendingAcknowledgementsRef.current.delete(oldest)
     }
     onChange(canonical)
   }
@@ -1014,6 +992,9 @@ export function LiveEditor({
   onChange,
   onActiveBlockChange,
 }: LiveEditorProps) {
+  if (sourceMode && contentRevision === undefined) {
+    throw new Error('Source mode requires a document content revision')
+  }
   const [insertedBlocks, setInsertedBlocks] = useState<{
     content: string
     blocks: InsertedBlock[]
@@ -1753,7 +1734,7 @@ export function LiveEditor({
       ) : sourceMode ? (
         <DocumentSourceEditor
           content={content}
-          contentRevision={contentRevision}
+          contentRevision={contentRevision!}
           formatRequest={formatRequest}
           onChange={onChange}
         />
