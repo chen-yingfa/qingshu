@@ -87,11 +87,8 @@ export function highlightCode(code: string, language: string): string {
   ) {
     return escapeHtml(code)
   }
-  if (normalizedLanguage) {
-    return hljs.highlight(code, {
-      language: normalizedLanguage,
-      ignoreIllegals: true,
-    }).value
-  }
-  return escapeHtml(code)
+  return hljs.highlight(code, {
+    language: normalizedLanguage,
+    ignoreIllegals: true,
+  }).value
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canonicalFootnoteId,
   createDocumentRenderContext,
+  hasRenderableMath,
   parseDocument,
   parseBlocks,
   renderDocumentFootnotes,
@@ -59,6 +60,12 @@ describe('parseBlocks', () => {
 })
 
 describe('renderMarkdown', () => {
+  it('distinguishes currency prose from semantic inline and display math', () => {
+    expect(hasRenderableMath('Price is $5 and $10')).toBe(false)
+    expect(hasRenderableMath('Inline $E=mc^2$.')).toBe(true)
+    expect(hasRenderableMath('$$\nE=mc^2\n$$')).toBe(true)
+  })
+
   it('renders GFM tables', async () => {
     const html = await renderMarkdown('| Name | Value |\n| --- | ---: |\n| Qingshu | 2 |')
 
@@ -141,6 +148,28 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<script')
     expect(html).not.toContain('javascript:')
     expect(html).toContain('src="https://example.com/x.png"')
+  })
+
+  it('performs a final sanitization after highlighting and KaTeX expansion', async () => {
+    const html = await renderMarkdown(
+      '```html\n<img src=x onerror=alert(1)>\n```\n\n$<img src=x onerror=alert(1)>$',
+    )
+
+    expect(html).not.toMatch(/<[^>]+\sonerror=/u)
+    expect(html).not.toContain('<script')
+    expect(html).toContain('class="hljs language-html"')
+    expect(html).toContain('class="katex"')
+    expect(html).toContain('<math')
+  })
+
+  it('allows HTTPS and blob image sources but rejects active protocols', async () => {
+    const html = await renderMarkdown(
+      '![remote](https://example.com/a.png)\n\n![blob](blob:https://example.com/id)\n\n![bad](javascript:alert(1))',
+    )
+
+    expect(html).toContain('src="https://example.com/a.png"')
+    expect(html).toContain('src="blob:https://example.com/id"')
+    expect(html).not.toContain('javascript:')
   })
 
   it('resolves reference links from definitions in another block', async () => {

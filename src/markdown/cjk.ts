@@ -1,7 +1,7 @@
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import remarkParse from 'remark-parse'
-import { unified } from 'unified'
+import {
+  parseMarkdownAst,
+  type MarkdownAstNode as MarkdownNode,
+} from './parser'
 
 export interface DocumentStats {
   words: number
@@ -16,17 +16,6 @@ export interface SourceRange {
   end: number
 }
 
-interface MarkdownNode {
-  type: string
-  url?: string
-  children?: MarkdownNode[]
-  position?: {
-    start: { offset?: number }
-    end: { offset?: number }
-  }
-}
-
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 const protectedNodeTypes = new Set([
   'code',
   'html',
@@ -126,7 +115,7 @@ function collectProtectedRanges(
   source: string,
   editableRange?: SourceRange,
 ): SourceRange[] {
-  const tree = markdownParser.parse(source) as MarkdownNode
+  const tree = parseMarkdownAst(source)
   const ranges: SourceRange[] = collectPresentationRanges(source)
   if (editableRange) {
     ranges.push({ start: 0, end: Math.max(0, editableRange.start) })
@@ -293,6 +282,29 @@ function fallbackCharacterCount(source: string): number {
 }
 
 export function documentStats(source: string): DocumentStats {
+  const frontMatter = collectPresentationRanges(source).find(
+    (range) => range.start === 0,
+  )?.end ?? 0
+  const tree = parseMarkdownAst(source)
+  const readableBlocks: string[] = []
+  for (const block of tree.children) {
+    const pieces: string[] = []
+    const visit = (node: MarkdownNode) => {
+      const start = node.position?.start.offset
+      if (
+        (start !== undefined && start < frontMatter) ||
+        protectedNodeTypes.has(node.type) ||
+        node.type === 'definition' ||
+        node.type === 'footnoteDefinition'
+      ) return
+      if (node.type === 'text' && node.value) pieces.push(node.value)
+      node.children?.forEach(visit)
+    }
+    visit(block)
+    const text = pieces.join('').trim()
+    if (text) readableBlocks.push(text)
+  }
+  const readable = readableBlocks.join('\n')
   const Segmenter = Intl.Segmenter
   let words: number
   let characters: number
@@ -301,13 +313,13 @@ export function documentStats(source: string): DocumentStats {
     const wordSegmenter = new Segmenter('zh', { granularity: 'word' })
     const characterSegmenter = new Segmenter('zh', { granularity: 'grapheme' })
 
-    words = Array.from(wordSegmenter.segment(source)).filter(
+    words = Array.from(wordSegmenter.segment(readable)).filter(
       (segment) => segment.isWordLike,
     ).length
-    characters = Array.from(characterSegmenter.segment(source)).length
+    characters = Array.from(characterSegmenter.segment(readable)).length
   } else {
-    words = fallbackWordCount(source)
-    characters = fallbackCharacterCount(source)
+    words = fallbackWordCount(readable)
+    characters = fallbackCharacterCount(readable)
   }
 
   return {

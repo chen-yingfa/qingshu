@@ -261,4 +261,25 @@ describe('documentStats', () => {
       readingMinutes: 1,
     })
   })
+
+  it('counts readable prose rather than front matter, code, URLs, or Markdown syntax', () => {
+    const source = [
+      '---',
+      'title: Hidden Metadata',
+      '---',
+      '# Visible **words**',
+      '',
+      'Read [the guide](https://example.com/long/path) now.',
+      '',
+      '```ts',
+      'const hidden = 123',
+      '```',
+    ].join('\n')
+
+    expect(documentStats(source)).toEqual({
+      words: 6,
+      characters: 33,
+      readingMinutes: 1,
+    })
+  })
 })

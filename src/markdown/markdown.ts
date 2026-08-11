@@ -9,6 +9,11 @@ import remarkRehype from 'remark-rehype'
 import { unified } from 'unified'
 
 import { highlightCode } from './code'
+import {
+  parseMarkdownAst,
+  type MarkdownAstNode as PositionedNode,
+  type MarkdownAstRoot as MarkdownRoot,
+} from './parser'
 
 export interface MarkdownBlock {
   id: string
@@ -16,17 +21,6 @@ export interface MarkdownBlock {
   source: string
   start: number
   end: number
-}
-
-interface PositionedNode {
-  type: string
-  identifier?: string
-  label?: string
-  children?: PositionedNode[]
-  position?: {
-    start: { offset?: number }
-    end: { offset?: number }
-  }
 }
 
 interface FootnoteReference {
@@ -42,15 +36,13 @@ export interface DocumentRenderContext {
   footnoteSource: string
   references: FootnoteReference[]
   signature: string
+  eol: '\n' | '\r\n'
 }
 
 export interface MarkdownDocumentModel {
   blocks: MarkdownBlock[]
   renderContext: DocumentRenderContext
-}
-
-interface MarkdownRoot {
-  children: PositionedNode[]
+  ast: MarkdownRoot
 }
 
 interface HastNode {
@@ -98,7 +90,67 @@ function highlightRenderedCode() {
   }
 }
 
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
+const safeProtocols = {
+  ...defaultSchema.protocols,
+  src: [...(defaultSchema.protocols?.src ?? []), 'blob'],
+}
+
+const initialRenderSchema = {
+  ...defaultSchema,
+  clobberPrefix: '',
+  protocols: safeProtocols,
+}
+
+const mathMlTags = [
+  'annotation',
+  'math',
+  'menclose',
+  'mfrac',
+  'mglyph',
+  'mi',
+  'mn',
+  'mo',
+  'mover',
+  'mpadded',
+  'mphantom',
+  'mroot',
+  'mrow',
+  'mspace',
+  'msqrt',
+  'mstyle',
+  'msub',
+  'msubsup',
+  'msup',
+  'mtable',
+  'mtd',
+  'mtext',
+  'mtr',
+  'munder',
+  'munderover',
+  'semantics',
+]
+
+const finalRenderSchema = {
+  ...initialRenderSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), ...mathMlTags],
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [
+      ...(defaultSchema.attributes?.['*'] ?? []),
+      'className',
+      'style',
+      'ariaHidden',
+    ],
+    annotation: ['encoding'],
+    math: ['display', 'xmlns'],
+    menclose: ['notation'],
+    mo: ['accent', 'fence', 'largeop', 'minsize', 'movablelimits', 'separator', 'stretchy', 'symmetric'],
+    mspace: ['depth', 'height', 'width'],
+    mstyle: ['displaystyle', 'mathcolor', 'mathsize', 'scriptlevel'],
+    mtable: ['columnalign', 'columnlines', 'columnspacing', 'rowalign', 'rowlines', 'rowspacing'],
+    mtd: ['columnalign', 'columnspan', 'rowalign', 'rowspan'],
+  },
+}
 
 function sourceHash(source: string): string {
   let hash = 2166136261
@@ -195,11 +247,14 @@ function renderContextFromTree(
   }
   tree.children.forEach(visit)
 
-  const supportSource = support.join('\n\n')
+  const eol = source.match(/\r\n|\n/u)?.[0] === '\r\n' ? '\r\n' : '\n'
+  const separator = eol + eol
+  const supportSource = support.join(separator)
   return {
     supportSource,
-    footnoteSource: footnotes.join('\n\n'),
+    footnoteSource: footnotes.join(separator),
     references,
+    eol,
     signature: `${supportSource}\u0000${references
       .map(({ identifier, ordinal }) => `${identifier}:${ordinal}`)
       .join(',')}`,
@@ -207,10 +262,11 @@ function renderContextFromTree(
 }
 
 export function parseDocument(source: string): MarkdownDocumentModel {
-  const tree = markdownParser.parse(source) as MarkdownRoot
+  const tree = parseMarkdownAst(source)
   return {
     blocks: blocksFromTree(source, tree),
     renderContext: renderContextFromTree(source, tree),
+    ast: tree,
   }
 }
 
@@ -273,6 +329,7 @@ function canonicalizeHastFootnoteReferences(options?: {
 async function processMarkdown(
   source: string,
   references?: FootnoteReference[],
+  ast?: MarkdownRoot,
 ): Promise<string> {
   const renderer = unified()
     .use(remarkParse)
@@ -281,11 +338,16 @@ async function processMarkdown(
     .use(canonicalizeMdastFootnotes)
     .use(remarkRehype)
     .use(canonicalizeHastFootnoteReferences, { references })
-    .use(rehypeSanitize, { ...defaultSchema, clobberPrefix: '' })
+    .use(rehypeSanitize, initialRenderSchema)
     .use(highlightRenderedCode)
     .use(rehypeKatex)
+    .use(rehypeSanitize, finalRenderSchema)
     .use(rehypeStringify)
-  return String(await renderer.process(source))
+  if (!ast) return String(await renderer.process(source))
+  const rendered = await renderer.run(
+    structuredClone(ast) as Parameters<typeof renderer.run>[0],
+  )
+  return renderer.stringify(rendered)
 }
 
 function withoutFootnoteSection(html: string): string {
@@ -295,9 +357,36 @@ function withoutFootnoteSection(html: string): string {
   )
 }
 
-export async function renderMarkdown(source: string): Promise<string> {
-  const context = parseDocument(source).renderContext
-  return processMarkdown(source, context.references)
+export function hasRenderableMath(
+  source: string,
+  model: MarkdownDocumentModel = parseDocument(source),
+): boolean {
+  let found = false
+  const visit = (node: PositionedNode) => {
+    if (found) return
+    if (node.type === 'math') {
+      found = true
+      return
+    }
+    if (node.type === 'inlineMath') {
+      const end = node.position?.end.offset
+      // remark-math interprets the dollar before a second price as a closing
+      // delimiter in prose such as "$5 and $10". A digit immediately after
+      // that delimiter identifies the common currency form.
+      if (end === undefined || !/^\d/u.test(source.slice(end))) found = true
+      return
+    }
+    node.children?.forEach(visit)
+  }
+  visit(model.ast)
+  return found
+}
+
+export async function renderMarkdown(
+  source: string,
+  model: MarkdownDocumentModel = parseDocument(source),
+): Promise<string> {
+  return processMarkdown(source, model.renderContext.references, model.ast)
 }
 
 export async function renderMarkdownBlock(
@@ -305,7 +394,7 @@ export async function renderMarkdownBlock(
   context: DocumentRenderContext,
 ): Promise<string> {
   const input = context.supportSource
-    ? `${block.source}\n\n${context.supportSource}`
+    ? `${block.source}${context.eol}${context.eol}${context.supportSource}`
     : block.source
   const references = context.references.filter(
     (reference) => reference.start >= block.start && reference.end <= block.end,
@@ -321,7 +410,7 @@ export async function renderDocumentFootnotes(
     .map(({ label }) => `[^${label}]`)
     .join(' ')
   const html = await processMarkdown(
-    `${syntheticReferences}\n\n${context.footnoteSource}`,
+    `${syntheticReferences}${context.eol}${context.eol}${context.footnoteSource}`,
     context.references,
   )
   return (
