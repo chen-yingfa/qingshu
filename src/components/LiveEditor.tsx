@@ -206,6 +206,34 @@ export function applyInlineFormat(
   }
 }
 
+export function textReplacement(before: string, after: string): {
+  start: number
+  end: number
+  replacement: string
+} {
+  let start = 0
+  while (
+    start < before.length &&
+    start < after.length &&
+    before[start] === after[start]
+  ) {
+    start += 1
+  }
+  let suffix = 0
+  while (
+    suffix < before.length - start &&
+    suffix < after.length - start &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+  return {
+    start,
+    end: before.length - suffix,
+    replacement: after.slice(start, after.length - suffix),
+  }
+}
+
 export function moveByCjkWord(
   value: string,
   position: number,
@@ -814,8 +842,41 @@ function DocumentSourceEditor({
       }
     } else {
       pendingTextsRef.current.push(canonical)
+      if (pendingTextsRef.current.length > 32) {
+        pendingTextsRef.current.splice(
+          0,
+          pendingTextsRef.current.length - 32,
+        )
+      }
     }
     onChange(canonical)
+  }
+
+  const applyNativeEdit = (
+    result: ReturnType<typeof formattedValue>,
+  ) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const change = textReplacement(draft, result.value)
+    textarea.focus()
+    textarea.setSelectionRange(change.start, change.end)
+    const nativeApplied =
+      typeof document.execCommand === 'function' &&
+      document.execCommand('insertText', false, change.replacement) &&
+      textarea.value === result.value
+    if (!nativeApplied) {
+      textarea.setRangeText(
+        change.replacement,
+        change.start,
+        change.end,
+        'preserve',
+      )
+      commit(textarea.value, result.selectionEnd)
+    }
+    afterPaint(() => {
+      textarea.focus()
+      textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
+    })
   }
 
   useEffect(() => {
@@ -834,23 +895,7 @@ function DocumentSourceEditor({
       textarea.selectionStart,
       textarea.selectionEnd,
     )
-    const suffixLength = draft.length - textarea.selectionEnd
-    const replacement = result.value.slice(
-      textarea.selectionStart,
-      result.value.length - suffixLength,
-    )
-    textarea.setRangeText(
-      replacement,
-      textarea.selectionStart,
-      textarea.selectionEnd,
-      'select',
-    )
-    textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
-    commit(textarea.value, result.selectionEnd)
-    afterPaint(() => {
-      textarea.focus()
-      textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
-    })
+    applyNativeEdit(result)
   }, [draft, formatRequest, onChange])
 
   return (
@@ -873,24 +918,14 @@ function DocumentSourceEditor({
           return
         }
         event.preventDefault()
-        event.currentTarget.setRangeText(
-          '  ',
+        const result = applyInlineFormat(
+          draft,
           event.currentTarget.selectionStart,
           event.currentTarget.selectionEnd,
-          'end',
+          '  ',
+          '',
         )
-        const selectionStart = event.currentTarget.selectionStart
-        const selectionEnd = event.currentTarget.selectionEnd
-        commit(
-          event.currentTarget.value,
-          selectionStart,
-        )
-        afterPaint(() =>
-          textareaRef.current?.setSelectionRange(
-            selectionStart,
-            selectionEnd,
-          ),
-        )
+        applyNativeEdit(result)
       }}
     />
   )

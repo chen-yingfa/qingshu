@@ -241,7 +241,8 @@ export function SettingsDialog({
                             : ''
                         }
                         aria-invalid={
-                          duplicates.has(shortcutSignature(shortcut, isMac))
+                          duplicates.has(shortcutSignature(shortcut, isMac)) ||
+                          shortcutConflict?.id === id
                         }
                         aria-describedby={
                           duplicates.has(shortcutSignature(shortcut, isMac)) ||

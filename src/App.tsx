@@ -354,17 +354,25 @@ export default function App() {
   const applySettings = useCallback(
     (next: AppSettings) => {
       setSettings(next)
-      setDark(resolvesDark(next.theme))
-      setA4(next.defaultA4)
-      if (next.defaultSourceMode !== sourceMode) setFormatRequest(undefined)
-      setSourceMode(next.defaultSourceMode)
-      if (next.autoSpacing && !autoSpacing) {
+      if (next.theme !== settings.theme) setDark(resolvesDark(next.theme))
+      if (next.defaultA4 !== settings.defaultA4) setA4(next.defaultA4)
+      if (next.defaultSourceMode !== settings.defaultSourceMode) {
+        setFormatRequest(undefined)
+        setSourceMode(next.defaultSourceMode)
+      }
+      if (
+        next.autoSpacing !== settings.autoSpacing &&
+        next.autoSpacing &&
+        !autoSpacing
+      ) {
         const spaced = spaceCjkLatin(state.content)
         if (spaced !== state.content) dispatch({ type: 'edit', content: spaced })
       }
-      setAutoSpacing(next.autoSpacing)
+      if (next.autoSpacing !== settings.autoSpacing) {
+        setAutoSpacing(next.autoSpacing)
+      }
     },
-    [autoSpacing, dispatch, sourceMode, state.content],
+    [autoSpacing, dispatch, settings, state.content],
   )
 
   const toggleOption = useCallback(

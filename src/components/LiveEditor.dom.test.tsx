@@ -1585,6 +1585,27 @@ describe('LiveEditor source mode', () => {
     )
   })
 
+  it('applies line-prefix formatting from a mid-line caret without duplication', async () => {
+    const result = renderEditor('abc', { sourceMode: true })
+    const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement
+    source.setSelectionRange(2, 2)
+    result.rerender(
+      <LiveEditor
+        content="abc"
+        activeBlock={0}
+        sourceMode
+        formatRequest={{ id: 1, command: 'heading' }}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(result.onChange).toHaveBeenLastCalledWith('# abc'),
+    )
+    expect(source.value).toBe('# abc')
+  })
+
   it('uses rendered full-document preview instead of source while printing', async () => {
     renderEditor('# Printed', { sourceMode: true, previewAll: true })
 
