@@ -96,6 +96,7 @@ export interface EditingBoundary {
   content: string
   start: number
   end: number
+  retainOnActivation?: boolean
 }
 
 const EMPTY_RENDER_CONTEXT: DocumentRenderContext = {
@@ -207,6 +208,55 @@ export function moveByCjkWord(
   }
   const previous = segments.filter((segment) => segment.index < position).at(-1)
   return previous?.index ?? 0
+}
+
+interface ListLine {
+  start: number
+  end: number
+  prefixEnd: number
+  indent: string
+  nextPrefix: string
+  content: string
+}
+
+function listLineAt(
+  value: string,
+  caret: number,
+  firstLineIndent = '',
+): ListLine | null {
+  const start = value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
+  const nextBreak = value.indexOf('\n', caret)
+  const end = nextBreak < 0 ? value.length : nextBreak
+  const line = value.slice(start, end)
+  const unordered = line.match(/^([ \t]*)([-+*])[ \t]+(.*)$/u)
+  if (unordered) {
+    const sourceIndent = start === 0 ? firstLineIndent : ''
+    const task = unordered[3].match(/^\[[ xX]\][ \t]+(.*)$/u)
+    const content = task?.[1] ?? unordered[3]
+    const prefixLength = line.length - content.length
+    return {
+      start,
+      end,
+      prefixEnd: start + prefixLength,
+      indent: unordered[1],
+      nextPrefix: task
+        ? `${sourceIndent}${unordered[1]}${unordered[2]} [ ] `
+        : `${sourceIndent}${unordered[1]}${unordered[2]} `,
+      content,
+    }
+  }
+  const ordered = line.match(/^([ \t]*)(\d+)([.)])[ \t]+(.*)$/u)
+  if (!ordered) return null
+  const sourceIndent = start === 0 ? firstLineIndent : ''
+  const prefixLength = line.length - ordered[4].length
+  return {
+    start,
+    end,
+    prefixEnd: start + prefixLength,
+    indent: ordered[1],
+    nextPrefix: `${sourceIndent}${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `,
+    content: ordered[4],
+  }
 }
 
 function editorBlocks(
@@ -920,14 +970,17 @@ export function LiveEditor({
     onEphemeralStateChange,
   ])
 
-  const rotateEditorSession = () => {
+  const rotateEditorSession = (preserveBoundary = false) => {
     composingRef.current = false
     codeTabEscapeRef.current = false
     invalidateMathInteraction()
     draftRevisionRef.current += 1
     editorSessionRef.current += 1
     setActiveInputFocused(document.activeElement === textareaRef.current)
-    setEditingBoundary(null)
+    if (!preserveBoundary) {
+      editingBoundaryRef.current = null
+      setEditingBoundary(null)
+    }
     setActiveSession((session) => session + 1)
   }
 
@@ -949,8 +1002,14 @@ export function LiveEditor({
     }
     const externalChange = parentChanged && !acknowledged
     if (sourceModeChanged || activeChanged || externalChange) {
+      const retainBoundary =
+        activeChanged &&
+        editingBoundary?.content === content &&
+        editingBoundary.retainOnActivation === true
       const semanticIndex =
-        activeChanged && editingBoundary?.content === content
+        activeChanged &&
+        editingBoundary?.content === content &&
+        !retainBoundary
           ? model.blocks.findIndex(
               (block) =>
                 block.start <= active.start && block.end >= active.end,
@@ -965,7 +1024,7 @@ export function LiveEditor({
               block.end === semanticActive.end,
           )
         : -1
-      rotateEditorSession()
+      rotateEditorSession(retainBoundary)
       setDraft(toEditorValue(semanticActive?.source ?? active.source))
       rangeRef.current = {
         start: semanticActive?.start ?? active.start,
@@ -1566,6 +1625,63 @@ export function LiveEditor({
     return true
   }
 
+  const exitListItem = (line: ListLine) => {
+    const before = draft.slice(0, line.start).replace(/\n$/u, '')
+    const afterStart = line.end + (draft[line.end] === '\n' ? 1 : 0)
+    const after = draft.slice(afterStart)
+    if (!after) {
+      if (!before) {
+        commitDraft('')
+        afterPaint(() => textareaRef.current?.setSelectionRange(0, 0))
+      } else {
+        commitDraft(before)
+        insertBlockAfter({ ...active, type: 'list', source: before })
+      }
+      return
+    }
+
+    const finalDraft = before
+      ? `${before}\n\n\n\n${after}`
+      : `\n\n${after}`
+    commitDraft(finalDraft)
+    const blockCanonical = contentRef.current.slice(
+      rangeRef.current.start,
+      rangeRef.current.end,
+    )
+    const eol = nearestEol(blockCanonical, before.length)
+    const emptyEditorOffset = before ? before.length + 2 : 0
+    const emptyOffset =
+      rangeRef.current.start +
+      sourceOffsetForEditorOffset(blockCanonical, emptyEditorOffset)
+    setInsertedBlocks((current) => ({
+      content: contentRef.current,
+      blocks: [
+        ...(current.content === contentRef.current ? current.blocks : []),
+        {
+          offset: emptyOffset,
+          length: 0,
+          leftPadding: before ? eol.length * 2 : 0,
+          rightPadding: before ? 0 : eol.length * 2,
+        },
+      ],
+    }))
+    if (!before) rotateEditorSession()
+    const boundary = {
+      content: contentRef.current,
+      start: emptyOffset,
+      end: emptyOffset,
+      retainOnActivation: true,
+    }
+    editingBoundaryRef.current = boundary
+    setEditingBoundary(boundary)
+    const targetIndex = safeActive + (before ? 1 : 0)
+    if (!before) {
+      setDraft('')
+      rangeRef.current = { start: emptyOffset, end: emptyOffset }
+    }
+    onActiveBlockChange(targetIndex)
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (readOnly) return
     if (
@@ -1628,6 +1744,101 @@ export function LiveEditor({
       } else {
         textarea.setSelectionRange(next, next)
       }
+      return
+    }
+
+    const absoluteLineStart =
+      contentRef.current.lastIndexOf('\n', rangeRef.current.start - 1) + 1
+    const sourcePrefix = contentRef.current.slice(
+      absoluteLineStart,
+      rangeRef.current.start,
+    )
+    const firstLineIndent = /^[ \t]*$/u.test(sourcePrefix)
+      ? sourcePrefix
+      : ''
+    const listLine = listLineAt(
+      draft,
+      textarea.selectionStart,
+      firstLineIndent,
+    )
+    if (
+      listLine &&
+      unmodifiedEnter &&
+      textarea.selectionStart >= listLine.prefixEnd &&
+      textarea.selectionEnd <= listLine.end
+    ) {
+      event.preventDefault()
+      if (!listLine.content.trim()) {
+        exitListItem(listLine)
+        return
+      }
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const suffix = draft
+        .slice(end)
+        .replace(/^ (?=[^\n])/u, '')
+      const nextDraft =
+        draft.slice(0, start) +
+        '\n' +
+        listLine.nextPrefix +
+        suffix
+      const caret = start + 1 + listLine.nextPrefix.length
+      commitDraft(nextDraft)
+      afterPaint(() => {
+        textareaRef.current?.setSelectionRange(caret, caret)
+      })
+      return
+    }
+
+    if (
+      listLine &&
+      event.key === 'Tab' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      event.preventDefault()
+      const removableIndent =
+        listLine.indent.startsWith('\t')
+          ? 1
+          : Math.min(2, listLine.indent.length)
+      const nextDraft = event.shiftKey
+        ? draft.slice(0, listLine.start) +
+          draft.slice(listLine.start + removableIndent)
+        : draft.slice(0, listLine.start) +
+          '  ' +
+          draft.slice(listLine.start)
+      const delta = event.shiftKey ? -removableIndent : 2
+      const nextStart = Math.max(
+        listLine.start,
+        textarea.selectionStart + delta,
+      )
+      const nextEnd = Math.max(nextStart, textarea.selectionEnd + delta)
+      commitDraft(nextDraft)
+      afterPaint(() => {
+        textareaRef.current?.setSelectionRange(nextStart, nextEnd)
+      })
+      return
+    }
+
+    if (
+      listLine &&
+      event.key === 'Backspace' &&
+      textarea.selectionStart === listLine.prefixEnd &&
+      textarea.selectionEnd === listLine.prefixEnd
+    ) {
+      event.preventDefault()
+      const nextDraft =
+        draft.slice(0, listLine.start) +
+        listLine.content +
+        draft.slice(listLine.end)
+      commitDraft(nextDraft)
+      afterPaint(() => {
+        textareaRef.current?.setSelectionRange(
+          listLine.start,
+          listLine.start,
+        )
+      })
       return
     }
 

@@ -576,6 +576,136 @@ describe('LiveEditor state synchronization', () => {
 })
 
 describe('LiveEditor keyboard and composition behavior', () => {
+  it('continues unordered lists and exits after an empty item', async () => {
+    const result = renderEditor('- first')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+    await waitFor(() => expect(editor.selectionStart).toBe('- first\n- '.length))
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(result.onChange).toHaveBeenLastCalledWith('- first\n\n')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+  })
+
+  it('increments ordered list markers including parenthesis style', async () => {
+    const result = renderEditor('3) first')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('3) first\n4) ')
+    await waitFor(() => expect(editor.selectionStart).toBe('3) first\n4) '.length))
+  })
+
+  it.each([
+    ['* item', '* item\n* '],
+    ['+ item', '+ item\n+ '],
+    ['9. item', '9. item\n10. '],
+    ['  1. nested', '  1. nested\n  2. '],
+    ['- [x] done', '- [x] done\n- [ ] '],
+  ])('continues list style for %s', (source, expected) => {
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(expected)
+  })
+
+  it('splits a list item at the caret without duplicating separator spaces', () => {
+    const result = renderEditor('- first second')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(7, 7)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- first\n- second',
+    )
+  })
+
+  it('turns a lone empty list marker back into a paragraph', () => {
+    const result = renderEditor('- ')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, 2)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('')
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+  })
+
+  it('splits a list around an empty middle item and focuses a paragraph', () => {
+    const result = renderEditor('- first\n- \n- third')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(10, 10)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- first\n\n\n\n- third',
+    )
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    result.rerender(
+      <LiveEditor
+        content={'- first\n\n\n\n- third'}
+        contentRevision={1}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('')
+  })
+
+  it('indents and outdents the current list item with Tab', async () => {
+    const result = renderEditor('- nested')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(2, 2)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith('  - nested')
+    await waitFor(() => expect(editor.selectionStart).toBe(4))
+
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith('- nested')
+  })
+
+  it('removes an empty list marker with Backspace', () => {
+    const result = renderEditor('1. ')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(3, 3)
+
+    fireEvent.keyDown(editor, { key: 'Backspace' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('')
+  })
+
   it('shows a rendered KaTeX preview while editing inline and display math', async () => {
     const result = renderEditor(
       'Let $x_t \\in \\mathbb R$ and $$y_t=\\left(\\frac{q_tK_t^\\top}{\\sqrt d}\\right)VW_o^\\top$$',
