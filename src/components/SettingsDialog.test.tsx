@@ -68,4 +68,34 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset defaults' }))
     expect(onChange.mock.calls.at(-1)?.[0]).toEqual(loadSettings(null))
   })
+
+  it('rejects conflicts and lets Tab and Escape control the dialog', () => {
+    const onChange = vi.fn()
+    const onDismiss = vi.fn()
+    render(
+      <SettingsDialog
+        settings={loadSettings(null)}
+        onChange={onChange}
+        onDismiss={onDismiss}
+      />,
+    )
+    const bold = screen.getByLabelText('Shortcut for Bold')
+
+    fireEvent.keyDown(bold, { key: 'i', ctrlKey: true })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Already assigned to Italic',
+    )
+
+    const tab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    })
+    bold.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(false)
+
+    fireEvent.keyDown(bold, { key: 'Escape' })
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
 })

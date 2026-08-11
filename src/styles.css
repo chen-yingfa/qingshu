@@ -68,6 +68,14 @@ button {
   --syntax-comment: #8f8981;
 }
 
+.app-shell.theme-light {
+  color-scheme: light;
+}
+
+.app-shell.theme-dark {
+  color-scheme: dark;
+}
+
 .title-bar {
   -webkit-app-region: drag;
   display: grid;
@@ -1078,7 +1086,6 @@ kbd {
 
   .editor {
     padding: 36px 24px 64px;
-    font-size: 16px;
   }
 
   .edit-block-button {

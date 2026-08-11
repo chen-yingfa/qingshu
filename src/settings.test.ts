@@ -42,7 +42,7 @@ describe('settings', () => {
         shiftKey: true,
         altKey: false,
       }),
-    ).toBe('Ctrl+Shift+B')
+    ).toBe('Cmd+Shift+B')
     expect(
       matchesShortcut(
         {
@@ -76,11 +76,54 @@ describe('settings', () => {
         altKey: false,
       }),
     ).toBeUndefined()
+    expect(
+      matchesShortcut(
+        {
+          key: 'b',
+          ctrlKey: false,
+          metaKey: true,
+          shiftKey: false,
+          altKey: false,
+        },
+        'Mod+B',
+        true,
+      ),
+    ).toBe(true)
+    expect(
+      matchesShortcut(
+        {
+          key: 'b',
+          ctrlKey: true,
+          metaKey: false,
+          shiftKey: false,
+          altKey: false,
+        },
+        'Mod+B',
+        false,
+      ),
+    ).toBe(true)
   })
 
   it('formats shortcuts for command-palette display', () => {
-    expect(shortcutLabel('Ctrl+Shift+S', true)).toBe('⌘⇧S')
+    expect(shortcutLabel('Mod+Shift+S', true)).toBe('⌘⇧S')
+    expect(shortcutLabel('Mod+Shift+S', false)).toBe('Ctrl+Shift+S')
     expect(shortcutLabel('Ctrl+`', false)).toBe('Ctrl+`')
     expect(shortcutLabel('', false)).toBe('')
+  })
+
+  it('drops duplicate or malformed persisted shortcuts', () => {
+    const settings = loadSettings(
+      JSON.stringify({
+        shortcuts: {
+          bold: 'Mod+I',
+          italic: 'Mod+I',
+          inlineMath: 'M',
+        },
+      }),
+    )
+
+    expect(settings.shortcuts.bold).toBe('Mod+I')
+    expect(settings.shortcuts.italic).toBe('')
+    expect(settings.shortcuts.inlineMath).toBe(DEFAULT_SETTINGS.shortcuts.inlineMath)
   })
 })

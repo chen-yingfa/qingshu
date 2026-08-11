@@ -77,11 +77,29 @@ function resolvesDark(theme: AppSettings['theme']): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 }
 
+function initialSettings(): AppSettings {
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+    const loaded = loadSettings(raw)
+    if (!raw) {
+      const legacyFont = window.localStorage.getItem('qingshu:document-font')
+      if (
+        legacyFont === 'sans' ||
+        legacyFont === 'serif' ||
+        legacyFont === 'mono'
+      ) {
+        loaded.font = legacyFont
+      }
+    }
+    return loaded
+  } catch {
+    return loadSettings(null)
+  }
+}
+
 export default function App() {
   const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
-  const [settings, setSettings] = useState(() =>
-    loadSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY)),
-  )
+  const [settings, setSettings] = useState(initialSettings)
   const [dark, setDark] = useState(() => resolvesDark(settings.theme))
   const [focus, setFocus] = useState(false)
   const [a4, setA4] = useState(settings.defaultA4)
@@ -146,9 +164,22 @@ export default function App() {
   )
 
   useEffect(() => {
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
-    window.localStorage.setItem('qingshu:document-font', settings.font)
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+      window.localStorage.setItem('qingshu:document-font', settings.font)
+    } catch {
+      // Settings remain active for this session when storage is unavailable.
+    }
   }, [settings])
+
+  useEffect(() => {
+    if (settings.theme !== 'system') return undefined
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) return undefined
+    const update = (event: MediaQueryListEvent) => setDark(event.matches)
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [settings.theme])
 
   const canDiscard = useCallback(
     () =>
@@ -524,7 +555,14 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (settingsOpen || event.repeat) return
+      if (
+        settingsOpen ||
+        event.repeat ||
+        event.isComposing ||
+        event.key === 'Process'
+      ) {
+        return
+      }
       if (event.key === 'Escape' && focus && !paletteOpen) {
         event.preventDefault()
         setFocus(false)
@@ -534,6 +572,15 @@ export default function App() {
         matchesShortcut(event, settings.shortcuts[id]),
       )?.id
       if (!action || (paletteOpen && action !== 'palette')) return
+      if (
+        ['bold', 'italic', 'inlineCode', 'inlineMath'].includes(action) &&
+        !(
+          event.target instanceof HTMLTextAreaElement &&
+          event.target.classList.contains('source-block')
+        )
+      ) {
+        return
+      }
       event.preventDefault()
       executeShortcutAction(action)
     }

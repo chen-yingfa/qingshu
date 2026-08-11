@@ -58,18 +58,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
   font: 'sans',
   fontSize: 17,
   shortcuts: {
-    palette: 'Ctrl+P',
-    settings: 'Ctrl+,',
-    new: 'Ctrl+N',
-    open: 'Ctrl+O',
-    save: 'Ctrl+S',
-    saveAs: 'Ctrl+Shift+S',
+    palette: 'Mod+P',
+    settings: 'Mod+,',
+    new: 'Mod+N',
+    open: 'Mod+O',
+    save: 'Mod+S',
+    saveAs: 'Mod+Shift+S',
     exportHtml: '',
     exportPdf: '',
-    bold: 'Ctrl+B',
-    italic: 'Ctrl+I',
-    inlineCode: 'Ctrl+`',
-    inlineMath: 'Ctrl+M',
+    bold: 'Mod+B',
+    italic: 'Mod+I',
+    inlineCode: 'Mod+`',
+    inlineMath: 'Mod+M',
     theme: '',
     focus: '',
     a4: '',
@@ -108,9 +108,16 @@ export function loadSettings(raw: string | null): AppSettings {
       settings.fontSize = value.fontSize
     }
     if (value.shortcuts && typeof value.shortcuts === 'object') {
+      const used = new Set<string>()
       for (const { id } of SHORTCUT_ACTIONS) {
         const shortcut = (value.shortcuts as Record<string, unknown>)[id]
-        if (typeof shortcut === 'string') settings.shortcuts[id] = shortcut
+        const candidate =
+          typeof shortcut === 'string' && isValidShortcut(shortcut)
+            ? shortcut
+            : settings.shortcuts[id]
+        settings.shortcuts[id] =
+          candidate && used.has(candidate) ? '' : candidate
+        if (settings.shortcuts[id]) used.add(settings.shortcuts[id])
       }
     }
   } catch {
@@ -135,16 +142,10 @@ function normalizedKey(key: string): string {
 
 export function eventToShortcut(event: ShortcutEvent): string | undefined {
   if (['Control', 'Meta', 'Shift', 'Alt'].includes(event.key)) return undefined
-  if (
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey &&
-    (event.key.length === 1 || event.key === ' ')
-  ) {
-    return undefined
-  }
+  if (!event.ctrlKey && !event.metaKey && !event.altKey) return undefined
   const parts: string[] = []
-  if (event.ctrlKey || event.metaKey) parts.push('Ctrl')
+  if (event.metaKey) parts.push('Cmd')
+  if (event.ctrlKey) parts.push('Ctrl')
   if (event.shiftKey) parts.push('Shift')
   if (event.altKey) parts.push('Alt')
   parts.push(normalizedKey(event.key))
@@ -154,15 +155,20 @@ export function eventToShortcut(event: ShortcutEvent): string | undefined {
 export function matchesShortcut(
   event: ShortcutEvent,
   shortcut: string,
+  isMac = typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/u.test(navigator.platform),
 ): boolean {
-  if (!shortcut) return false
+  if (!isValidShortcut(shortcut) || !shortcut) return false
   const parts = shortcut.split('+')
   const key = parts.at(-1) ?? ''
-  const ctrl = parts.includes('Ctrl')
+  const mod = parts.includes('Mod')
+  const ctrl = parts.includes('Ctrl') || (mod && !isMac)
+  const meta = parts.includes('Cmd') || (mod && isMac)
   const shift = parts.includes('Shift')
   const alt = parts.includes('Alt')
   return (
-    Boolean(event.ctrlKey || event.metaKey) === ctrl &&
+    event.ctrlKey === ctrl &&
+    event.metaKey === meta &&
     event.shiftKey === shift &&
     event.altKey === alt &&
     normalizedKey(event.key) === key
@@ -170,9 +176,43 @@ export function matchesShortcut(
 }
 
 export function shortcutLabel(shortcut: string, isMac: boolean): string {
-  if (!shortcut || !isMac) return shortcut
-  return shortcut
-    .replace(/^Ctrl\+/, '⌘')
-    .replace('Shift+', '⇧')
-    .replace('Alt+', '⌥')
+  if (!shortcut) return ''
+  const parts = shortcut.split('+')
+  const key = parts.pop() ?? ''
+  if (!isMac) {
+    return [
+      ...parts.map((part) => (part === 'Mod' ? 'Ctrl' : part === 'Cmd' ? 'Meta' : part)),
+      key,
+    ].join('+')
+  }
+  return (
+    parts
+      .map((part) => {
+        if (part === 'Mod' || part === 'Cmd') return '⌘'
+        if (part === 'Ctrl') return '⌃'
+        if (part === 'Shift') return '⇧'
+        if (part === 'Alt') return '⌥'
+        return part
+      })
+      .join('') + key
+  )
+}
+
+export function isValidShortcut(shortcut: string): boolean {
+  if (shortcut === '') return true
+  const parts = shortcut.split('+')
+  if (parts.length < 2 || parts.some((part) => !part)) return false
+  const key = parts.at(-1)!
+  const modifiers = parts.slice(0, -1)
+  const allowed = new Set(['Mod', 'Cmd', 'Ctrl', 'Shift', 'Alt'])
+  if (
+    modifiers.some((modifier) => !allowed.has(modifier)) ||
+    new Set(modifiers).size !== modifiers.length ||
+    !key
+  ) {
+    return false
+  }
+  return modifiers.some((modifier) =>
+    ['Mod', 'Cmd', 'Ctrl', 'Alt'].includes(modifier),
+  )
 }

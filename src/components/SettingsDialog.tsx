@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   SHORTCUT_ACTIONS,
@@ -22,19 +22,26 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const dialogRef = useRef<HTMLElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const [shortcutConflict, setShortcutConflict] = useState<{
+    id: ShortcutAction
+    message: string
+  } | null>(null)
   const isMac = /Mac|iPhone|iPad/u.test(navigator.platform)
   const duplicates = useMemo(() => {
     const owners = new Map<string, ShortcutAction[]>()
     for (const { id } of SHORTCUT_ACTIONS) {
       const shortcut = settings.shortcuts[id]
-      if (shortcut) owners.set(shortcut, [...(owners.get(shortcut) ?? []), id])
+      const effective = shortcutLabel(shortcut, isMac)
+      if (effective) {
+        owners.set(effective, [...(owners.get(effective) ?? []), id])
+      }
     }
     return new Set(
       [...owners.entries()]
         .filter(([, actions]) => actions.length > 1)
         .map(([shortcut]) => shortcut),
     )
-  }, [settings.shortcuts])
+  }, [isMac, settings.shortcuts])
 
   useEffect(() => {
     previousFocusRef.current =
@@ -49,11 +56,27 @@ export function SettingsDialog({
 
   const update = (patch: Partial<AppSettings>) =>
     onChange({ ...settings, ...patch })
-  const updateShortcut = (id: ShortcutAction, shortcut: string) =>
+  const updateShortcut = (id: ShortcutAction, shortcut: string) => {
+    const owner = SHORTCUT_ACTIONS.find(
+      (action) =>
+        action.id !== id &&
+        shortcut &&
+        shortcutLabel(settings.shortcuts[action.id], isMac) ===
+          shortcutLabel(shortcut, isMac),
+    )
+    if (owner) {
+      setShortcutConflict({
+        id,
+        message: `Already assigned to ${owner.label}`,
+      })
+      return
+    }
+    setShortcutConflict(null)
     onChange({
       ...settings,
       shortcuts: { ...settings.shortcuts, [id]: shortcut },
     })
+  }
 
   return (
     <div
@@ -199,10 +222,26 @@ export function SettingsDialog({
                         aria-label={`Shortcut for ${label}`}
                         value={shortcutLabel(shortcut, isMac)}
                         className={
-                          duplicates.has(shortcut) ? 'has-conflict' : ''
+                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                          shortcutConflict?.id === id
+                            ? 'has-conflict'
+                            : ''
+                        }
+                        aria-invalid={
+                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                          shortcutConflict?.id === id
+                        }
+                        aria-describedby={
+                          duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                          shortcutConflict?.id === id
+                            ? `shortcut-conflict-${id}`
+                            : undefined
                         }
                         placeholder="Unassigned"
                         onKeyDown={(event) => {
+                          if (event.key === 'Tab' || event.key === 'Escape') {
+                            return
+                          }
                           event.preventDefault()
                           event.stopPropagation()
                           if (
@@ -212,16 +251,17 @@ export function SettingsDialog({
                             updateShortcut(id, '')
                             return
                           }
-                          if (event.key === 'Escape') {
-                            event.currentTarget.blur()
-                            return
-                          }
                           const recorded = eventToShortcut(event)
                           if (recorded) updateShortcut(id, recorded)
                         }}
                       />
-                      {duplicates.has(shortcut) && (
-                        <small>Already assigned</small>
+                      {(duplicates.has(shortcutLabel(shortcut, isMac)) ||
+                        shortcutConflict?.id === id) && (
+                        <small id={`shortcut-conflict-${id}`} role="alert">
+                          {shortcutConflict?.id === id
+                            ? shortcutConflict.message
+                            : 'Already assigned'}
+                        </small>
                       )}
                     </span>
                   </label>

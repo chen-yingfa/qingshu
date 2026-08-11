@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App, { formatShortcut, showExportLabel } from './App'
@@ -84,6 +91,38 @@ describe('document replacement', () => {
 })
 
 describe('application safety controls', () => {
+  it('migrates the legacy document font preference', () => {
+    window.localStorage.setItem('qingshu:document-font', 'serif')
+    const { container } = render(<App />)
+
+    expect(container.querySelector('.app-shell')?.classList).toContain(
+      'font-serif',
+    )
+  })
+
+  it('follows live system theme changes while theme is set to System', () => {
+    let listener: ((event: { matches: boolean }) => void) | undefined
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: false,
+        addEventListener: (
+          _name: string,
+          next: (event: { matches: boolean }) => void,
+        ) => {
+          listener = next
+        },
+        removeEventListener: vi.fn(),
+      })),
+    })
+    const { container } = render(<App />)
+
+    act(() => listener?.({ matches: true }))
+    expect(container.querySelector('.app-shell')?.classList).toContain(
+      'theme-dark',
+    )
+  })
+
   it('uses sans-serif by default and persists document font choices', () => {
     const first = render(<App />)
     const selector = screen.getByRole('combobox', {
@@ -266,9 +305,9 @@ describe('commands and operation feedback', () => {
   })
 
   it('formats command shortcut labels for the active platform', () => {
-    expect(formatShortcut('Ctrl+Shift+S', false)).toBe('Ctrl+Shift+S')
-    expect(formatShortcut('Ctrl+Shift+S', true)).toBe('⌘⇧S')
-    expect(formatShortcut('Ctrl+O', true)).toBe('⌘O')
+    expect(formatShortcut('Mod+Shift+S', false)).toBe('Ctrl+Shift+S')
+    expect(formatShortcut('Mod+Shift+S', true)).toBe('⌘⇧S')
+    expect(formatShortcut('Mod+O', true)).toBe('⌘O')
   })
 
   it.each([
@@ -286,7 +325,7 @@ describe('commands and operation feedback', () => {
       fireEvent.change(editor, { target: { value: 'word' } })
       editor.setSelectionRange(0, 4)
 
-      fireEvent.keyDown(window, { key, ctrlKey: true, shiftKey })
+      fireEvent.keyDown(editor, { key, ctrlKey: true, shiftKey })
 
       await waitFor(() => expect(editor.value).toBe(expected))
     },
@@ -315,7 +354,7 @@ describe('commands and operation feedback', () => {
     ) as HTMLTextAreaElement
     fireEvent.change(editor, { target: { value: 'word' } })
     editor.setSelectionRange(0, 4)
-    fireEvent.keyDown(window, {
+    fireEvent.keyDown(editor, {
       key: 'k',
       ctrlKey: true,
       shiftKey: true,
