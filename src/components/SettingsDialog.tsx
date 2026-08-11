@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   SHORTCUT_ACTIONS,
+  canonicalizeShortcut,
   eventToShortcut,
   loadSettings,
   shortcutLabel,
@@ -17,8 +18,19 @@ interface SettingsDialogProps {
 }
 
 function shortcutEditorLabel(shortcut: string, isMac: boolean): string {
-  const label = shortcutLabel(shortcut, isMac)
-  return isMac ? Array.from(label).join('\u2009') : label
+  if (!isMac) return shortcutLabel(shortcut, false)
+  const canonical = canonicalizeShortcut(shortcut)
+  if (!canonical) return ''
+  const parts = canonical.split('+')
+  const key = parts.pop() ?? ''
+  const symbols = parts.map((part) => {
+    if (part === 'Mod' || part === 'Cmd') return '⌘'
+    if (part === 'Ctrl') return '⌃'
+    if (part === 'Shift') return '⇧'
+    if (part === 'Alt') return '⌥'
+    return part
+  })
+  return [...symbols, key].join('\u2009')
 }
 
 export function SettingsDialog({
@@ -112,7 +124,7 @@ export function SettingsDialog({
               dialogRef.current?.querySelectorAll<HTMLElement>(
                 'input:not([disabled]),select:not([disabled]),button:not([disabled])',
               ) ?? [],
-            )
+            ).filter((control) => !control.closest('[hidden]'))
             const first = controls[0]
             const last = controls.at(-1)
             if (event.shiftKey && document.activeElement === first) {
@@ -179,11 +191,11 @@ export function SettingsDialog({
 
         <div
           className="settings-scroll"
-          id={`settings-panel-${activePage}`}
+          id="settings-panel-editor"
           role="tabpanel"
-          aria-labelledby={`settings-tab-${activePage}`}
+          aria-labelledby="settings-tab-editor"
+          hidden={activePage !== 'editor'}
         >
-          {activePage === 'editor' ? (
           <fieldset className="settings-section">
             <legend>Editor defaults</legend>
             <label className="settings-field">
@@ -295,7 +307,15 @@ export function SettingsDialog({
               Convert Yen and middle-dot shortcuts
             </label>
           </fieldset>
-          ) : (
+        </div>
+
+        <div
+          className="settings-scroll"
+          id="settings-panel-hotkeys"
+          role="tabpanel"
+          aria-labelledby="settings-tab-hotkeys"
+          hidden={activePage !== 'hotkeys'}
+        >
           <fieldset className="settings-section">
             <legend>Keyboard shortcuts</legend>
             <p className="settings-help">
@@ -366,7 +386,6 @@ export function SettingsDialog({
               })}
             </div>
           </fieldset>
-          )}
         </div>
 
         <footer className="settings-footer">

@@ -26,11 +26,36 @@ describe('SettingsDialog', () => {
         'aria-selected',
       ),
     ).toBe('true')
-    expect(screen.queryByLabelText('Shortcut for Bold')).toBeNull()
+    expect(
+      document.getElementById(
+        screen.getByRole('tab', { name: 'Editor' }).getAttribute(
+          'aria-controls',
+        )!,
+      ),
+    ).not.toBeNull()
+    expect(
+      document.getElementById(
+        screen.getByRole('tab', { name: 'Hotkeys' }).getAttribute(
+          'aria-controls',
+        )!,
+      ),
+    ).not.toBeNull()
+    expect(
+      screen.queryByRole('textbox', { name: 'Shortcut for Bold' }),
+    ).toBeNull()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
-    expect(screen.getByLabelText('Shortcut for Bold')).not.toBeNull()
-    expect(screen.queryByLabelText('Document font size')).toBeNull()
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Editor' }), {
+      key: 'ArrowRight',
+    })
+    expect(document.activeElement).toBe(
+      screen.getByRole('tab', { name: 'Hotkeys' }),
+    )
+    expect(
+      screen.getByRole('textbox', { name: 'Shortcut for Bold' }),
+    ).not.toBeNull()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Document font size' }),
+    ).toBeNull()
   })
 
   it('uses spaced system-font Command and Shift symbols on macOS', () => {
