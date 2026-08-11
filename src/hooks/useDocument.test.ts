@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { documentReducer, initialDocumentState } from './useDocument'
+import {
+  documentReducer,
+  initialDocumentState,
+  initialTabsState,
+  tabsReducer,
+} from './useDocument'
 
 describe('documentReducer', () => {
   it('marks edited content dirty and clears stale errors', () => {
@@ -97,5 +102,83 @@ describe('documentReducer', () => {
       path: '/notes/note.md',
       latestSaveRequest: 2,
     })
+  })
+})
+
+describe('tabsReducer', () => {
+  it('keeps content, path, dirty state, active block, revision, errors, and save state independent', () => {
+    const firstId = initialTabsState.activeTabId
+    const withSecond = tabsReducer(initialTabsState, {
+      type: 'new-tab',
+      id: 'tab-2',
+    })
+    const editedSecond = tabsReducer(withSecond, {
+      type: 'document',
+      tabId: 'tab-2',
+      action: { type: 'edit', content: '# Second' },
+    })
+    const activatedSecond = tabsReducer(editedSecond, {
+      type: 'document',
+      tabId: 'tab-2',
+      action: { type: 'activate', index: 3 },
+    })
+    const erroredSecond = tabsReducer(activatedSecond, {
+      type: 'document',
+      tabId: 'tab-2',
+      action: { type: 'save-error', message: 'Disk full', requestId: 0 },
+    })
+
+    expect(erroredSecond.tabs.find((tab) => tab.id === firstId)).toMatchObject({
+      content: '',
+      dirty: false,
+      activeBlock: 0,
+      contentRevision: 0,
+      error: null,
+      latestSaveRequest: 0,
+    })
+    expect(erroredSecond.tabs.find((tab) => tab.id === 'tab-2')).toMatchObject({
+      content: '# Second',
+      dirty: true,
+      activeBlock: 3,
+      contentRevision: 1,
+      error: 'Disk full',
+      latestSaveRequest: 0,
+    })
+  })
+
+  it('activates an existing canonical path instead of adding a duplicate tab', () => {
+    const opened = tabsReducer(initialTabsState, {
+      type: 'open-tab',
+      id: 'opened',
+      content: '# Existing',
+      path: '/real/note.md',
+      requestId: 1,
+    })
+    const duplicate = tabsReducer(opened, {
+      type: 'open-tab',
+      id: 'duplicate',
+      content: '# Read again',
+      path: '/real/note.md',
+      requestId: 2,
+    })
+
+    expect(duplicate.tabs).toHaveLength(2)
+    expect(duplicate.activeTabId).toBe('opened')
+    expect(duplicate.tabs.at(-1)?.content).toBe('# Existing')
+  })
+
+  it('closes a tab, activates its neighbor, and always leaves one tab', () => {
+    const firstId = initialTabsState.activeTabId
+    const withSecond = tabsReducer(initialTabsState, {
+      type: 'new-tab',
+      id: 'tab-2',
+    })
+    const closed = tabsReducer(withSecond, { type: 'close-tab', tabId: 'tab-2' })
+    const closedLast = tabsReducer(closed, { type: 'close-tab', tabId: firstId })
+
+    expect(closed.tabs.map((tab) => tab.id)).toEqual([firstId])
+    expect(closed.activeTabId).toBe(firstId)
+    expect(closedLast.tabs).toHaveLength(1)
+    expect(closedLast.tabs[0]).toMatchObject({ content: '', dirty: false })
   })
 })

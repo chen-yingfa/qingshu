@@ -10,6 +10,15 @@ export interface DocumentState {
   contentRevision: number
 }
 
+export interface DocumentTab extends DocumentState {
+  id: string
+}
+
+export interface TabsState {
+  tabs: DocumentTab[]
+  activeTabId: string
+}
+
 export type DocumentAction =
   | { type: 'edit'; content: string }
   | { type: 'load'; content: string; path?: string; requestId: number }
@@ -33,6 +42,28 @@ export const initialDocumentState: DocumentState = {
   latestSaveRequest: 0,
   contentRevision: 0,
 }
+
+function createTab(id: string, state: Partial<DocumentState> = {}): DocumentTab {
+  return { ...initialDocumentState, ...state, id }
+}
+
+export const initialTabsState: TabsState = {
+  tabs: [createTab('tab-1')],
+  activeTabId: 'tab-1',
+}
+
+export type TabsAction =
+  | { type: 'new-tab'; id: string }
+  | {
+      type: 'open-tab'
+      id: string
+      content: string
+      path: string
+      requestId: number
+    }
+  | { type: 'activate-tab'; tabId: string }
+  | { type: 'close-tab'; tabId: string }
+  | { type: 'document'; tabId: string; action: DocumentAction }
 
 export function documentReducer(
   state: DocumentState,
@@ -76,6 +107,61 @@ export function documentReducer(
   }
 }
 
+export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
+  switch (action.type) {
+    case 'new-tab':
+      return {
+        tabs: [...state.tabs, createTab(action.id)],
+        activeTabId: action.id,
+      }
+    case 'open-tab': {
+      const existing = state.tabs.find((tab) => tab.path === action.path)
+      if (existing) return { ...state, activeTabId: existing.id }
+      return {
+        tabs: [
+          ...state.tabs,
+          createTab(action.id, {
+            content: action.content,
+            path: action.path,
+            latestSaveRequest: action.requestId,
+            contentRevision: 1,
+          }),
+        ],
+        activeTabId: action.id,
+      }
+    }
+    case 'activate-tab':
+      return state.tabs.some((tab) => tab.id === action.tabId)
+        ? { ...state, activeTabId: action.tabId }
+        : state
+    case 'close-tab': {
+      const index = state.tabs.findIndex((tab) => tab.id === action.tabId)
+      if (index < 0) return state
+      if (state.tabs.length === 1) {
+        return {
+          tabs: [createTab(state.tabs[0].id)],
+          activeTabId: state.tabs[0].id,
+        }
+      }
+      const tabs = state.tabs.filter((tab) => tab.id !== action.tabId)
+      const activeTabId =
+        state.activeTabId === action.tabId
+          ? tabs[Math.min(index, tabs.length - 1)].id
+          : state.activeTabId
+      return { tabs, activeTabId }
+    }
+    case 'document':
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId
+            ? { ...documentReducer(tab, action.action), id: tab.id }
+            : tab,
+        ),
+      }
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -88,26 +174,40 @@ export type DocumentOperationResult =
   | { status: 'error'; message: string }
 
 export function useDocument() {
-  const [state, baseDispatch] = useReducer(documentReducer, initialDocumentState)
+  const [tabsState, tabsDispatch] = useReducer(tabsReducer, initialTabsState)
   const requestId = useRef(0)
-  const contentRevision = useRef(0)
+  const tabId = useRef(1)
+  const contentRevisions = useRef(new Map<string, number>([['tab-1', 0]]))
+  const latestSaveRequests = useRef(new Map<string, number>())
+  const state =
+    tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId) ??
+    tabsState.tabs[0]
   const dispatch = useCallback((action: DocumentAction) => {
+    const activeTabId = tabsState.activeTabId
     if (action.type === 'edit' || action.type === 'load') {
-      contentRevision.current += 1
+      contentRevisions.current.set(
+        activeTabId,
+        (contentRevisions.current.get(activeTabId) ?? 0) + 1,
+      )
     }
-    baseDispatch(action)
-  }, [])
+    tabsDispatch({ type: 'document', tabId: activeTabId, action })
+  }, [tabsState.activeTabId])
 
   const newDocument = useCallback(() => {
-    dispatch({ type: 'load', content: '', requestId: ++requestId.current })
+    const id = `tab-${++tabId.current}`
+    contentRevisions.current.set(id, 0)
+    tabsDispatch({ type: 'new-tab', id })
   }, [])
 
   const openDocument = useCallback(async () => {
     try {
       const result = await window.qingshu.openFile()
       if (result.canceled) return { status: 'canceled' } as const
-      dispatch({
-        type: 'load',
+      const id = `tab-${++tabId.current}`
+      contentRevisions.current.set(id, 1)
+      tabsDispatch({
+        type: 'open-tab',
+        id,
         content: result.content ?? '',
         path: result.path,
         requestId: ++requestId.current,
@@ -115,23 +215,58 @@ export function useDocument() {
       return { status: 'success', path: result.path } as const
     } catch (error) {
       const message = errorMessage(error)
-      dispatch({ type: 'error', message })
+      tabsDispatch({
+        type: 'document',
+        tabId: tabsState.activeTabId,
+        action: { type: 'error', message },
+      })
       return { status: 'error', message } as const
     }
-  }, [])
+  }, [tabsState.activeTabId])
+
+  const openRecentDocument = useCallback(async (path: string) => {
+    try {
+      const result = await window.qingshu.openRecentFile(path)
+      const id = `tab-${++tabId.current}`
+      contentRevisions.current.set(id, 1)
+      tabsDispatch({
+        type: 'open-tab',
+        id,
+        content: result.content ?? '',
+        path: result.path,
+        requestId: ++requestId.current,
+      })
+      return { status: 'success', path: result.path } as const
+    } catch (error) {
+      const message = errorMessage(error)
+      tabsDispatch({
+        type: 'document',
+        tabId: tabsState.activeTabId,
+        action: { type: 'error', message },
+      })
+      return { status: 'error', message } as const
+    }
+  }, [tabsState.activeTabId])
 
   const saveDocument = useCallback(
     async (saveAs = false) => {
+      const activeTabId = tabsState.activeTabId
       const content = state.content
-      const savedContentRevision = contentRevision.current
+      const savedContentRevision =
+        contentRevisions.current.get(activeTabId) ?? state.contentRevision
       const currentRequest = ++requestId.current
-      dispatch({ type: 'save-started', requestId: currentRequest })
+      latestSaveRequests.current.set(activeTabId, currentRequest)
+      tabsDispatch({
+        type: 'document',
+        tabId: activeTabId,
+        action: { type: 'save-started', requestId: currentRequest },
+      })
       try {
         const result = await window.qingshu.saveFile({
           content,
           path: saveAs ? undefined : state.path,
         })
-        if (currentRequest !== requestId.current) {
+        if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           if (!result.canceled && result.warning) {
             return {
               status: 'superseded',
@@ -142,14 +277,21 @@ export function useDocument() {
           return { status: 'superseded' } as const
         }
         if (result.canceled) return { status: 'canceled' } as const
-        dispatch({
-          type: 'saved',
-          content,
-          path: result.path,
-          requestId: currentRequest,
-          contentRevision: savedContentRevision,
+        tabsDispatch({
+          type: 'document',
+          tabId: activeTabId,
+          action: {
+            type: 'saved',
+            content,
+            path: result.path,
+            requestId: currentRequest,
+            contentRevision: savedContentRevision,
+          },
         })
-        if (savedContentRevision !== contentRevision.current) {
+        if (
+          savedContentRevision !==
+          (contentRevisions.current.get(activeTabId) ?? 0)
+        ) {
           return {
             status: 'superseded',
             ...(result.warning
@@ -167,15 +309,40 @@ export function useDocument() {
         return { status: 'success', path: result.path } as const
       } catch (error) {
         const message = errorMessage(error)
-        if (currentRequest !== requestId.current) {
+        if (currentRequest !== latestSaveRequests.current.get(activeTabId)) {
           return { status: 'superseded' } as const
         }
-        dispatch({ type: 'save-error', message, requestId: currentRequest })
+        tabsDispatch({
+          type: 'document',
+          tabId: activeTabId,
+          action: { type: 'save-error', message, requestId: currentRequest },
+        })
         return { status: 'error', message } as const
       }
     },
-    [state.content, state.path],
+    [state.content, state.contentRevision, state.path, tabsState.activeTabId],
   )
 
-  return { state, dispatch, newDocument, openDocument, saveDocument }
+  const activateTab = useCallback((tabId: string) => {
+    tabsDispatch({ type: 'activate-tab', tabId })
+  }, [])
+
+  const closeTab = useCallback((tabId: string) => {
+    tabsDispatch({ type: 'close-tab', tabId })
+    contentRevisions.current.delete(tabId)
+    latestSaveRequests.current.delete(tabId)
+  }, [])
+
+  return {
+    state,
+    dispatch,
+    tabs: tabsState.tabs,
+    activeTabId: tabsState.activeTabId,
+    activateTab,
+    closeTab,
+    newDocument,
+    openDocument,
+    openRecentDocument,
+    saveDocument,
+  }
 }

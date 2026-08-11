@@ -23,6 +23,7 @@ export type ShortcutAction =
 
 export interface AppSettings {
   theme: ThemePreference
+  tabOrientation: 'horizontal' | 'vertical'
   defaultA4: boolean
   defaultSourceMode: boolean
   autoSpacing: boolean
@@ -56,6 +57,7 @@ export const SHORTCUT_ACTIONS: Array<{
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
+  tabOrientation: 'horizontal',
   defaultA4: false,
   defaultSourceMode: false,
   autoSpacing: false,
@@ -100,6 +102,9 @@ export function loadSettings(
     const value = JSON.parse(raw) as Record<string, unknown>
     if (value.theme === 'system' || value.theme === 'light' || value.theme === 'dark') {
       settings.theme = value.theme
+    }
+    if (value.tabOrientation === 'horizontal' || value.tabOrientation === 'vertical') {
+      settings.tabOrientation = value.tabOrientation
     }
     if (typeof value.defaultA4 === 'boolean') settings.defaultA4 = value.defaultA4
     if (typeof value.defaultSourceMode === 'boolean') {

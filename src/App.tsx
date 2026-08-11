@@ -15,6 +15,7 @@ import { LiveEditor, type FormatCommand } from './components/LiveEditor'
 import { Icon } from './components/Icons'
 import { StatusBar } from './components/StatusBar'
 import { SettingsDialog } from './components/SettingsDialog'
+import { TabStrip } from './components/TabStrip'
 import { TitleBar } from './components/TitleBar'
 import { ToastRegion, type ToastMessage } from './components/Toast'
 import { Toolbar } from './components/Toolbar'
@@ -113,7 +114,18 @@ function initialSettings(): AppSettings {
 }
 
 export default function App() {
-  const { state, dispatch, newDocument, openDocument, saveDocument } = useDocument()
+  const {
+    state,
+    dispatch,
+    tabs,
+    activeTabId,
+    activateTab,
+    closeTab,
+    newDocument,
+    openDocument,
+    openRecentDocument,
+    saveDocument,
+  } = useDocument()
   const [settings, setSettings] = useState(initialSettings)
   const [dark, setDark] = useState(() => resolvesDark(settings.theme))
   const [focus, setFocus] = useState(false)
@@ -123,6 +135,7 @@ export default function App() {
   const [printPreview, setPrintPreview] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [recentPaths, setRecentPaths] = useState<string[]>([])
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const toastId = useRef(0)
   const settingsStorageWarned = useRef(false)
@@ -157,6 +170,22 @@ export default function App() {
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
+
+  const refreshRecents = useCallback(async () => {
+    try {
+      const result = await window.qingshu.listRecentFiles()
+      setRecentPaths(result.paths)
+      for (const path of result.removed) {
+        addToast('warning', `Removed missing recent file: ${filename(path)}`)
+      }
+    } catch (error) {
+      addToast('error', errorMessage(error))
+    }
+  }, [addToast])
+
+  useEffect(() => {
+    void refreshRecents()
+  }, [refreshRecents])
 
   const revealExport = useCallback(
     async (path: string) => {
@@ -207,25 +236,52 @@ export default function App() {
 
   const canDiscard = useCallback(
     () =>
-      !state.dirty ||
-      window.confirm('Discard the unsaved changes in this document?'),
-    [state.dirty],
+      !tabs.some((tab) => tab.dirty) ||
+      window.confirm('Discard the unsaved changes in all open documents?'),
+    [tabs],
+  )
+
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((candidate) => candidate.id === tabId)
+      if (
+        tab?.dirty &&
+        !window.confirm(
+          `Discard the unsaved changes in ${tab.path ? filename(tab.path) : 'Untitled'}?`,
+        )
+      ) {
+        return
+      }
+      closeTab(tabId)
+    },
+    [closeTab, tabs],
+  )
+
+  const openRecent = useCallback(
+    async (path: string) => {
+      const result = await openRecentDocument(path)
+      if (result.status === 'success') {
+        addToast('success', `Opened ${filename(result.path)}`)
+      } else {
+        addToast('error', result.message)
+      }
+      await refreshRecents()
+    },
+    [addToast, openRecentDocument, refreshRecents],
   )
 
   const runCommand = useCallback(
     async (command: MenuCommand) => {
       switch (command) {
         case 'new':
-          if (canDiscard()) {
-            newDocument()
-            addToast('success', 'Created a new document')
-          }
+          newDocument()
+          addToast('success', 'Created a new document')
           break
         case 'open': {
-          if (!canDiscard()) break
           const result = await openDocument()
           if (result.status === 'success') {
             addToast('success', `Opened ${filename(result.path)}`)
+            await refreshRecents()
           } else if (result.status === 'error') {
             addToast('error', result.message)
           }
@@ -235,6 +291,7 @@ export default function App() {
           const result = await saveDocument()
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
+            await refreshRecents()
           } else if (result.status === 'warning') {
             addToast(
               'warning',
@@ -258,6 +315,7 @@ export default function App() {
           const result = await saveDocument(true)
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
+            await refreshRecents()
           } else if (result.status === 'warning') {
             addToast(
               'warning',
@@ -340,11 +398,11 @@ export default function App() {
     },
     [
       addToast,
-      canDiscard,
       dispatch,
       newDocument,
       openDocument,
       revealExport,
+      refreshRecents,
       saveDocument,
       state.content,
       state.path,
@@ -538,8 +596,14 @@ export default function App() {
         keywords: ['preferences', 'font', 'hotkeys', 'defaults'],
         run: () => setSettingsOpen(true),
       },
+      ...recentPaths.map((path) => ({
+        id: `recent:${path}`,
+        label: `Open ${filename(path)}`,
+        keywords: ['recent', 'file', path],
+        run: () => openRecent(path),
+      })),
     ],
-    [requestFormat, runCommand, settings.shortcuts, toggleOption],
+    [openRecent, recentPaths, requestFormat, runCommand, settings.shortcuts, toggleOption],
   )
 
   const executeShortcutAction = useCallback(
@@ -659,6 +723,7 @@ export default function App() {
         a4 ? 'a4-mode' : '',
         sourceMode ? 'source-mode' : '',
         `font-${settings.font}`,
+        `tabs-${settings.tabOrientation}`,
       ].join(' ')}
       style={
         {
@@ -678,12 +743,23 @@ export default function App() {
         autoSpacing={autoSpacing}
         sourceMode={sourceMode}
         documentFont={settings.font}
+        recentPaths={recentPaths}
         onFile={(command) => void runCommand(command)}
         onFormat={requestFormat}
         onFontChange={(font) => setSettings((current) => ({ ...current, font }))}
         onSettings={() => setSettingsOpen(true)}
+        onRecent={(path) => void openRecent(path)}
         onToggle={toggleOption}
       />
+      {settings.tabOrientation === 'horizontal' && (
+        <TabStrip
+          tabs={tabs}
+          activeTabId={activeTabId}
+          orientation="horizontal"
+          onActivate={activateTab}
+          onClose={handleCloseTab}
+        />
+      )}
       {focus && !printPreview && (
         <button
           type="button"
@@ -695,9 +771,20 @@ export default function App() {
           <Icon name="close" />
         </button>
       )}
-      <main className="workspace">
-        <div className="paper">
-          <LiveEditor
+      <div className="workspace-layout">
+        {settings.tabOrientation === 'vertical' && (
+          <TabStrip
+            tabs={tabs}
+            activeTabId={activeTabId}
+            orientation="vertical"
+            onActivate={activateTab}
+            onClose={handleCloseTab}
+          />
+        )}
+        <main className="workspace">
+          <div className="paper">
+            <LiveEditor
+            key={activeTabId}
             content={state.content}
             contentRevision={state.contentRevision}
             activeBlock={state.activeBlock}
@@ -708,9 +795,10 @@ export default function App() {
             onPreviewReady={handlePreviewReady}
             onChange={(content) => dispatch({ type: 'edit', content })}
             onActiveBlockChange={(index) => dispatch({ type: 'activate', index })}
-          />
-        </div>
-      </main>
+            />
+          </div>
+        </main>
+      </div>
       <StatusBar
         content={state.content}
         error={state.error}

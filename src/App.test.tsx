@@ -32,6 +32,8 @@ beforeEach(() => {
   })
   api = {
     openFile: vi.fn(),
+    listRecentFiles: vi.fn().mockResolvedValue({ paths: [], removed: [] }),
+    openRecentFile: vi.fn(),
     saveFile: vi.fn(),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
@@ -87,6 +89,130 @@ describe('document replacement', () => {
         (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
       ).toBe('# Opened'),
     )
+  })
+})
+
+describe('document tabs', () => {
+  it('keeps independently edited documents and activates duplicate canonical paths', async () => {
+    api.openFile
+      .mockResolvedValueOnce({
+        canceled: false,
+        path: '/notes/one.md',
+        content: '# One',
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        path: '/notes/two.md',
+        content: '# Two',
+      })
+      .mockResolvedValueOnce({
+        canceled: false,
+        path: '/notes/one.md',
+        content: '# One reread',
+      })
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await screen.findByRole('tab', { name: 'one.md' })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '# One edited' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await screen.findByRole('tab', { name: 'two.md' })
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '# Two edited' },
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 'one.md, unsaved' }))
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('# One edited')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'one.md, unsaved' }).getAttribute(
+        'aria-selected',
+      )).toBe('true'),
+    )
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+    ).toBe('# One edited')
+  })
+
+  it('confirms dirty tab closes, leaves a tab, and checks inactive dirty tabs on native close', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'Unsaved first' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'New document' }))
+
+    closeIntentListener?.()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(api.respondToClose).toHaveBeenCalledWith(false)
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Close Untitled' })[0],
+    )
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    confirm.mockReturnValue(true)
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Close Untitled' })[0],
+    )
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+  })
+
+  it('loads vertical tab placement and persists changes from Settings', () => {
+    window.localStorage.setItem(
+      'qingshu:settings:v1',
+      JSON.stringify({ tabOrientation: 'vertical' }),
+    )
+    render(<App />)
+
+    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
+      'vertical',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    fireEvent.change(screen.getByLabelText('Tab placement'), {
+      target: { value: 'horizontal' },
+    })
+    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
+      'horizontal',
+    )
+    expect(window.localStorage.getItem('qingshu:settings:v1')).toContain(
+      '"tabOrientation":"horizontal"',
+    )
+  })
+
+  it('shows dynamic recent commands and opens them from the compact toolbar menu', async () => {
+    api.listRecentFiles.mockResolvedValue({
+      paths: ['/notes/recent.md'],
+      removed: ['/notes/missing.md'],
+    })
+    api.openRecentFile.mockResolvedValue({
+      canceled: false,
+      path: '/notes/recent.md',
+      content: '# Recent',
+    })
+    render(<App />)
+
+    expect(await screen.findByText(/Removed missing recent file: missing.md/)).not.toBeNull()
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true })
+    expect(
+      screen.getByRole('option', { name: 'Open recent.md' }),
+    ).not.toBeNull()
+    fireEvent.keyDown(
+      screen.getByRole('dialog', { name: 'Command palette' }),
+      { key: 'Escape' },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recent files' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'recent.md' }))
+    await waitFor(() =>
+      expect(api.openRecentFile).toHaveBeenCalledWith('/notes/recent.md'),
+    )
+    expect(await screen.findByRole('tab', { name: 'recent.md' })).not.toBeNull()
   })
 })
 

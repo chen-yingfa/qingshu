@@ -19,6 +19,7 @@ describe('settings', () => {
         font: 'serif',
         fontSize: 22,
         defaultA4: true,
+        tabOrientation: 'vertical',
         autoSpacing: true,
         shortcuts: { bold: 'Ctrl+Shift+B', save: 42 },
       }),
@@ -29,6 +30,7 @@ describe('settings', () => {
       font: 'serif',
       fontSize: 22,
       defaultA4: true,
+      tabOrientation: 'vertical',
       autoSpacing: true,
     })
     expect(loaded.shortcuts.bold).toBe('Ctrl+Shift+B')

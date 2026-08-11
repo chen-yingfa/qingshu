@@ -165,6 +165,22 @@ export function SettingsDialog({
               </select>
             </label>
             <label className="settings-field">
+              <span>Tab placement</span>
+              <select
+                aria-label="Tab placement"
+                value={settings.tabOrientation}
+                onChange={(event) =>
+                  update({
+                    tabOrientation: event.target
+                      .value as AppSettings['tabOrientation'],
+                  })
+                }
+              >
+                <option value="horizontal">Top</option>
+                <option value="vertical">Left sidebar</option>
+              </select>
+            </label>
+            <label className="settings-field">
               <span>Font size</span>
               <span className="settings-number">
                 <input

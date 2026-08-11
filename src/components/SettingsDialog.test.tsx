@@ -42,6 +42,11 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByLabelText('Use source mode by default'))
     expect(onChange.mock.calls.at(-1)?.[0].defaultSourceMode).toBe(true)
 
+    fireEvent.change(screen.getByLabelText('Tab placement'), {
+      target: { value: 'vertical' },
+    })
+    expect(onChange.mock.calls.at(-1)?.[0].tabOrientation).toBe('vertical')
+
     fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
       key: 'k',
       ctrlKey: true,

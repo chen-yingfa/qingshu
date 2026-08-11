@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
 import { Icon, type IconName } from './Icons'
@@ -11,10 +13,12 @@ interface ToolbarProps {
   autoSpacing: boolean
   sourceMode: boolean
   documentFont: DocumentFont
+  recentPaths: string[]
   onFile(command: 'new' | 'open' | 'save' | 'save-as' | 'export-html' | 'export-pdf'): void
   onFormat(command: FormatCommand): void
   onFontChange(font: DocumentFont): void
   onSettings(): void
+  onRecent(path: string): void
   onToggle(option: 'dark' | 'focus' | 'a4' | 'spacing' | 'source'): void
 }
 
@@ -61,17 +65,54 @@ export function Toolbar({
   autoSpacing,
   sourceMode,
   documentFont,
+  recentPaths,
   onFile,
   onFormat,
   onFontChange,
   onSettings,
+  onRecent,
   onToggle,
 }: ToolbarProps) {
+  const [recentOpen, setRecentOpen] = useState(false)
   return (
     <nav className="toolbar" aria-label="Editor toolbar">
       <div className="tool-group file-tools">
         <ToolButton label="New document" icon="new" onClick={() => onFile('new')} />
         <ToolButton label="Open file" icon="open" onClick={() => onFile('open')} />
+        <div className="recent-files-control">
+          <button
+            type="button"
+            className="tool-button recent-files-button"
+            aria-label="Recent files"
+            aria-haspopup="menu"
+            aria-expanded={recentOpen}
+            onClick={() => setRecentOpen((open) => !open)}
+          >
+            <span aria-hidden="true">↶</span>
+          </button>
+          {recentOpen && (
+            <div className="recent-files-menu" role="menu" aria-label="Recent files">
+              {recentPaths.length === 0 ? (
+                <span className="recent-files-empty">No recent files</span>
+              ) : (
+                recentPaths.map((path) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={path}
+                    title={path}
+                    onClick={() => {
+                      setRecentOpen(false)
+                      onRecent(path)
+                    }}
+                  >
+                    {path.split(/[\\/]/).at(-1) || path}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <ToolButton label="Save" icon="save" onClick={() => onFile('save')} />
         <ToolButton
           label="Save as"
