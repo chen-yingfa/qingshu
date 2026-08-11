@@ -1654,6 +1654,53 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('Save path was not authorized by a file dialog')
   })
 
+  it('keeps save authorization across footnote hash navigation but clears it on reload', async () => {
+    await main.createWindow()
+    const window = mocks.browserWindows.at(-1)
+    window.webContents.mainFrame = senderFrame
+    const windowEvent = {
+      senderFrame,
+      sender: window.webContents,
+    }
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/footnotes.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(windowEvent)
+
+    mocks.webContentsListeners
+      .get('did-start-navigation')
+      ?.(
+        {},
+        'file:///workspace/dist/index.html#user-content-fn-note',
+        true,
+        true,
+      )
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(windowEvent, {
+        path: '/notes/footnotes.md',
+        content: '# Footnotes saved',
+        saveToken: 'tab-2:footnote',
+      }),
+    ).resolves.toMatchObject({
+      canceled: false,
+      path: '/notes/footnotes.md',
+    })
+
+    mocks.webContentsListeners
+      .get('did-start-navigation')
+      ?.({}, 'file:///workspace/dist/index.html', false, true)
+
+    await expect(
+      mocks.handlers.get('qingshu:save-file')?.(windowEvent, {
+        path: '/notes/footnotes.md',
+        content: '# stale authorization',
+        saveToken: 'tab-2:reload',
+      }),
+    ).rejects.toThrow('Save path was not authorized by a file dialog')
+  })
+
   it('rejects a second native dialog while one is already pending', async () => {
     let releaseDialog!: () => void
     mocks.showOpenDialog.mockImplementation(

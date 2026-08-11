@@ -1142,8 +1142,8 @@ ipcMain.handle(
 function installNavigationGuards(window: BrowserWindow): void {
   window.webContents.on(
     'did-start-navigation',
-    (_event, _url, _isInPlace, isMainFrame) => {
-      if (isMainFrame !== false) {
+    (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame !== false && !isInPlace) {
         exportedFiles.delete(window.webContents)
         authorizedDocuments.delete(window.webContents)
         for (const operation of saveOperations.get(window.webContents)?.values() ?? []) {
