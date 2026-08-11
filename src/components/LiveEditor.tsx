@@ -2,6 +2,7 @@ import {
   Fragment,
   memo,
   type KeyboardEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
