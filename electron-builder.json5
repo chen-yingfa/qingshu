@@ -14,7 +14,7 @@
     "dist"
   ],
   "mac": {
-    "icon": "build/icon.png",
+    "icon": "build/icon.icns",
     "category": "public.app-category.productivity",
     "artifactName": "${productName}_${version}.${ext}",
     "target": [

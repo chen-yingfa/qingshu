@@ -959,6 +959,9 @@ export function installCloseHandshake(window: BrowserWindow): void {
 
 export async function createWindow(): Promise<void> {
   win = new BrowserWindow({
+    icon: app.isPackaged
+      ? join(dirname(indexHtml), 'icon.png')
+      : join(__dirname, '../../public/icon.png'),
     width: 1000,
     height: 720,
     minWidth: 640,

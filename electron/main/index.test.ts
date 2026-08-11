@@ -1431,6 +1431,9 @@ describe('browser window security', () => {
       nodeIntegration: false,
       sandbox: true,
     })
+    expect(mocks.browserWindowOptions.at(-1).icon).toMatch(
+      /public[\\/]icon\.png$/u,
+    )
     expect(mocks.guardsInstalledAtLoad.at(-1)).toEqual([true, true])
 
     const preventDefault = vi.fn()

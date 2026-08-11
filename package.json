@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "icons": "node build/generate-icons.mjs",
     "build": "npm run typecheck && vite build && electron-builder",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --pretty false && tsc --project tsconfig.node.json --pretty false"
@@ -37,6 +38,7 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
+    "@fiahfy/icns": "^0.0.7",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
@@ -45,6 +47,7 @@
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
+    "png-to-ico": "^3.0.2",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vite-plugin-electron": "^1.1.1",
