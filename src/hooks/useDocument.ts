@@ -500,6 +500,8 @@ export function useDocument(defaultSourceMode = false) {
 
   const closeTab = useCallback((tabId: string) => {
     const closing = tabsRef.current.tabs.find((tab) => tab.id === tabId)
+    const resetsOnlyTab = tabsRef.current.tabs.length === 1 && Boolean(closing)
+    const nextLifetime = (tabLifetimes.current.get(tabId) ?? 0) + 1
     if (closing?.path && pathOwners.current.get(closing.path) === tabId) {
       pathOwners.current.delete(closing.path)
     }
@@ -510,7 +512,11 @@ export function useDocument(defaultSourceMode = false) {
     })
     contentRevisions.current.delete(tabId)
     latestSaveRequests.current.delete(tabId)
-    tabLifetimes.current.set(tabId, (tabLifetimes.current.get(tabId) ?? 0) + 1)
+    tabLifetimes.current.delete(tabId)
+    if (resetsOnlyTab) {
+      contentRevisions.current.set(tabId, 0)
+      tabLifetimes.current.set(tabId, nextLifetime)
+    }
   }, [defaultSourceMode, dispatchTabs])
 
   return {

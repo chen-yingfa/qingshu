@@ -65,6 +65,7 @@ let removedRecentFiles: string[] = []
 let recentFilesWrite = Promise.resolve()
 let recentFilesWarnings: string[] = []
 let tempSequence = 0
+const RECENT_WARNING_LIMIT = 10
 
 interface CloseState {
   intentPending: boolean
@@ -128,11 +129,19 @@ function recentFilesPath(): string {
   return join(app.getPath('userData'), 'recent-files.json')
 }
 
+export function enqueueRecentWarning(
+  warnings: string[],
+  warning: string,
+): string[] {
+  if (warnings.includes(warning)) return warnings
+  return [...warnings, warning].slice(-RECENT_WARNING_LIMIT)
+}
+
 function noteRecentWarning(error: unknown): void {
-  recentFilesWarnings = [
-    ...recentFilesWarnings,
+  recentFilesWarnings = enqueueRecentWarning(
+    recentFilesWarnings,
     `Recent files could not be updated: ${messageOf(error)}`,
-  ]
+  )
 }
 
 async function atomicWriteRecentFiles(content: string): Promise<void> {
@@ -388,6 +397,12 @@ function authorizeDocument(
   path: string,
   revision: FileRevision | null,
 ): AuthorizedDocument {
+  const existing = documents.get(path)
+  if (existing) {
+    existing.revision = revision
+    existing.initialized = true
+    return existing
+  }
   const authorized = {
     revision,
     initialized: true,
@@ -538,6 +553,19 @@ function enqueueSave<T>(
   return result
 }
 
+function openAuthorizedDocument(
+  documents: Map<string, AuthorizedDocument>,
+  path: string,
+): Promise<{ content: string; revision: FileRevision }> {
+  const document = installDocumentQueue(documents, path)
+  return enqueueSave(document, async () => {
+    const opened = await readStableDocument(path)
+    document.revision = opened.revision
+    document.initialized = true
+    return opened
+  })
+}
+
 async function selectSavePath(
   path: string | undefined,
   options: Electron.SaveDialogOptions,
@@ -567,8 +595,10 @@ ipcMain.handle('qingshu:open-file', async (event, ...args: unknown[]): Promise<F
   const path = result.filePaths[0]
   if (result.canceled || !path) return { canceled: true }
   const documentPath = await canonicalDocumentPath(path)
-  const { content, revision } = await readStableDocument(documentPath)
-  authorizeDocument(documentsFor(event.sender), documentPath, revision)
+  const { content } = await openAuthorizedDocument(
+    documentsFor(event.sender),
+    documentPath,
+  )
   await safelyRememberRecent(documentPath)
 
   return {
@@ -630,14 +660,13 @@ ipcMain.handle(
     }
     let opened: Awaited<ReturnType<typeof readStableDocument>>
     try {
-      opened = await readStableDocument(path)
+      opened = await openAuthorizedDocument(documentsFor(event.sender), path)
     } catch (error) {
       if (!isMissingFile(error)) throw error
       await removeRecent(path)
       throw new Error('Recent file no longer exists and was removed')
     }
-    const { content, revision } = opened
-    authorizeDocument(documentsFor(event.sender), path, revision)
+    const { content } = opened
     await safelyRememberRecent(path)
     return { canceled: false, path, content }
   },

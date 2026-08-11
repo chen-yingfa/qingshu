@@ -347,6 +347,29 @@ describe('desktop IPC', () => {
     })
   })
 
+  it('deduplicates and bounds repeated recent-unavailable warnings', async () => {
+    let warnings: string[] = []
+    for (let index = 0; index < 20; index += 1) {
+      warnings = main.enqueueRecentWarning(
+        warnings,
+        index < 12 ? `warning ${index}` : 'warning 11',
+      )
+    }
+
+    expect(warnings).toEqual([
+      'warning 2',
+      'warning 3',
+      'warning 4',
+      'warning 5',
+      'warning 6',
+      'warning 7',
+      'warning 8',
+      'warning 9',
+      'warning 10',
+      'warning 11',
+    ])
+  })
+
   it('keeps a transient recent read failure unknown instead of treating it as empty', async () => {
     const denied = Object.assign(new Error('permission denied'), {
       code: 'EACCES',
@@ -693,6 +716,99 @@ describe('desktop IPC', () => {
       { canceled: false, path: '/notes/ordered.md' },
     ])
     expect(writes).toEqual(['older', 'newest'])
+    expect(documentRenameCalls()).toHaveLength(2)
+  })
+
+  it('serializes duplicate Open between Save A and Save B on one authorization', async () => {
+    const initialRevision = {
+      dev: 1,
+      ino: 2,
+      mode: 0o100644,
+      mtimeMs: 100,
+      size: 7,
+    }
+    const savedRevision = {
+      dev: 1,
+      ino: 8,
+      mode: 0o100644,
+      mtimeMs: 300,
+      size: 6,
+    }
+    let diskContent = 'initial'
+    let pendingContent = ''
+    let releaseSaveA!: () => void
+    const saveABlocked = new Promise<void>((resolve) => {
+      releaseSaveA = resolve
+    })
+    const order: string[] = []
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/interleaved.md'],
+    })
+    mocks.sourceHandle.stat.mockResolvedValue(initialRevision)
+    mocks.sourceHandle.readFile.mockImplementation(async () => {
+      order.push(`read:${diskContent}`)
+      return diskContent
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+
+    mocks.stat
+      .mockResolvedValueOnce(initialRevision)
+      .mockResolvedValueOnce(initialRevision)
+      .mockResolvedValue(savedRevision)
+    mocks.sourceHandle.stat.mockResolvedValue(savedRevision)
+    mocks.tempHandle.stat.mockResolvedValue(savedRevision)
+    mocks.tempHandle.writeFile.mockImplementation(async (content: string) => {
+      pendingContent = content
+      order.push(`write:${content}`)
+      if (content === 'save-a') await saveABlocked
+    })
+    mocks.rename.mockImplementation(async (_source: string, target: string) => {
+      if (target === '/notes/interleaved.md') {
+        diskContent = pendingContent
+        order.push(`rename:${diskContent}`)
+      }
+    })
+
+    const saveA = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/interleaved.md',
+      content: 'save-a',
+    }) as Promise<unknown>
+    await vi.waitFor(() => expect(order).toContain('write:save-a'))
+
+    let duplicateSettled = false
+    const duplicateOpen = (mocks.handlers.get('qingshu:open-file')?.(event) as Promise<unknown>)
+      .finally(() => {
+        duplicateSettled = true
+      })
+    const saveB = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/interleaved.md',
+      content: 'save-b',
+    }) as Promise<unknown>
+
+    await Promise.resolve()
+    expect(duplicateSettled).toBe(false)
+    expect(order).toEqual(['read:initial', 'write:save-a'])
+
+    releaseSaveA()
+    await expect(Promise.all([saveA, duplicateOpen, saveB])).resolves.toEqual([
+      { canceled: false, path: '/notes/interleaved.md' },
+      {
+        canceled: false,
+        path: '/notes/interleaved.md',
+        content: 'save-a',
+      },
+      { canceled: false, path: '/notes/interleaved.md' },
+    ])
+    expect(order).toEqual([
+      'read:initial',
+      'write:save-a',
+      'rename:save-a',
+      'read:save-a',
+      'write:save-b',
+      'rename:save-b',
+    ])
+    expect(diskContent).toBe('save-b')
     expect(documentRenameCalls()).toHaveLength(2)
   })
 

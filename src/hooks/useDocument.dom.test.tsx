@@ -166,6 +166,68 @@ describe('useDocument save lifecycle', () => {
     ])
   })
 
+  it('keeps newer dirty content when duplicate Open overlaps a pending Save', async () => {
+    let finishSave!: (value: { canceled: false; path: string }) => void
+    let finishOpen!: (value: {
+      canceled: false
+      path: string
+      content: string
+    }) => void
+    window.qingshu = {
+      openFile: vi.fn()
+        .mockResolvedValueOnce({
+          canceled: false,
+          path: '/notes/overlap.md',
+          content: '# Initial',
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishOpen = resolve
+            }),
+        ),
+      saveFile: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve
+          }),
+      ),
+    } as unknown as QingshuApi
+    const { result } = renderHook(() => useDocument())
+    await act(async () => {
+      await result.current.openDocument()
+    })
+    act(() => result.current.dispatch({ type: 'edit', content: '# Save A' }))
+
+    let save!: ReturnType<typeof result.current.saveDocument>
+    act(() => {
+      save = result.current.saveDocument()
+    })
+    await waitFor(() => expect(window.qingshu.saveFile).toHaveBeenCalledOnce())
+    act(() => result.current.dispatch({ type: 'edit', content: '# Save B' }))
+
+    let duplicateOpen!: ReturnType<typeof result.current.openDocument>
+    act(() => {
+      duplicateOpen = result.current.openDocument()
+    })
+    finishSave({ canceled: false, path: '/notes/overlap.md' })
+    finishOpen({
+      canceled: false,
+      path: '/notes/overlap.md',
+      content: '# Save A',
+    })
+    await act(async () => {
+      await Promise.all([save, duplicateOpen])
+    })
+
+    expect(result.current.tabs).toHaveLength(2)
+    expect(result.current.state).toMatchObject({
+      path: '/notes/overlap.md',
+      content: '# Save B',
+      dirty: true,
+    })
+  })
+
   it('does not consume tab IDs or revision entries for duplicate opens', async () => {
     window.qingshu = {
       openFile: vi.fn().mockResolvedValue({
