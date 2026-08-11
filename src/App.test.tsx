@@ -233,14 +233,22 @@ describe('document tabs', () => {
     )
     render(<App />)
 
-    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
+    expect(
+      screen
+        .getByRole('tablist', { name: 'Open documents' })
+        .getAttribute('aria-orientation'),
+    ).toBe(
       'vertical',
     )
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
     fireEvent.change(screen.getByLabelText('Tab placement'), {
       target: { value: 'horizontal' },
     })
-    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
+    expect(
+      screen
+        .getByRole('tablist', { name: 'Open documents' })
+        .getAttribute('aria-orientation'),
+    ).toBe(
       'horizontal',
     )
     expect(window.localStorage.getItem('qingshu:settings:v1')).toContain(
@@ -786,6 +794,7 @@ describe('commands and operation feedback', () => {
     fireEvent.change(screen.getByLabelText('Document font size'), {
       target: { value: '20' },
     })
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
     fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
       key: 'k',
       ctrlKey: true,

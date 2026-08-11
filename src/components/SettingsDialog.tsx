@@ -16,6 +16,11 @@ interface SettingsDialogProps {
   onDismiss(): void
 }
 
+function shortcutEditorLabel(shortcut: string, isMac: boolean): string {
+  const label = shortcutLabel(shortcut, isMac)
+  return isMac ? Array.from(label).join('\u2009') : label
+}
+
 export function SettingsDialog({
   settings,
   onChange,
@@ -23,6 +28,9 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const dialogRef = useRef<HTMLElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const [activePage, setActivePage] = useState<'editor' | 'hotkeys'>(
+    'editor',
+  )
   const [shortcutConflict, setShortcutConflict] = useState<{
     id: ShortcutAction
     message: string
@@ -49,7 +57,7 @@ export function SettingsDialog({
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
-    dialogRef.current?.querySelector<HTMLElement>('select,input,button')?.focus()
+    document.getElementById('settings-tab-editor')?.focus()
     return () => {
       if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus()
     }
@@ -132,7 +140,50 @@ export function SettingsDialog({
           </button>
         </header>
 
-        <div className="settings-scroll">
+        <div
+          className="settings-tabs"
+          role="tablist"
+          aria-label="Settings sections"
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+              return
+            }
+            event.preventDefault()
+            const next = activePage === 'editor' ? 'hotkeys' : 'editor'
+            setActivePage(next)
+            setShortcutConflict(null)
+            document.getElementById(`settings-tab-${next}`)?.focus()
+          }}
+        >
+          {[
+            ['editor', 'Editor'],
+            ['hotkeys', 'Hotkeys'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              id={`settings-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={activePage === id}
+              aria-controls={`settings-panel-${id}`}
+              tabIndex={activePage === id ? 0 : -1}
+              onClick={() => {
+                setActivePage(id as 'editor' | 'hotkeys')
+                setShortcutConflict(null)
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="settings-scroll"
+          id={`settings-panel-${activePage}`}
+          role="tabpanel"
+          aria-labelledby={`settings-tab-${activePage}`}
+        >
+          {activePage === 'editor' ? (
           <fieldset className="settings-section">
             <legend>Editor defaults</legend>
             <label className="settings-field">
@@ -244,7 +295,7 @@ export function SettingsDialog({
               Convert Yen and middle-dot shortcuts
             </label>
           </fieldset>
-
+          ) : (
           <fieldset className="settings-section">
             <legend>Keyboard shortcuts</legend>
             <p className="settings-help">
@@ -260,7 +311,7 @@ export function SettingsDialog({
                       <input
                         readOnly
                         aria-label={`Shortcut for ${label}`}
-                        value={shortcutLabel(shortcut, isMac)}
+                        value={shortcutEditorLabel(shortcut, isMac)}
                         className={
                           duplicates.has(shortcutSignature(shortcut, isMac)) ||
                           shortcutConflict?.id === id
@@ -315,6 +366,7 @@ export function SettingsDialog({
               })}
             </div>
           </fieldset>
+          )}
         </div>
 
         <footer className="settings-footer">

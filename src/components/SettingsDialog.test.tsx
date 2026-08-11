@@ -6,9 +6,50 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadSettings } from '../settings'
 import { SettingsDialog } from './SettingsDialog'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe('SettingsDialog', () => {
+  it('separates editor defaults and hotkeys into accessible tabs', () => {
+    render(
+      <SettingsDialog
+        settings={loadSettings(null)}
+        onChange={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    )
+
+    expect(
+      screen.getByRole('tab', { name: 'Editor' }).getAttribute(
+        'aria-selected',
+      ),
+    ).toBe('true')
+    expect(screen.queryByLabelText('Shortcut for Bold')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
+    expect(screen.getByLabelText('Shortcut for Bold')).not.toBeNull()
+    expect(screen.queryByLabelText('Document font size')).toBeNull()
+  })
+
+  it('uses spaced system-font Command and Shift symbols on macOS', () => {
+    vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    render(
+      <SettingsDialog
+        settings={loadSettings(null, true)}
+        onChange={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
+
+    expect(
+      (screen.getByLabelText('Shortcut for Inline code') as HTMLInputElement)
+        .value,
+    ).toBe('⌘ ⇧ C')
+  })
+
   it('edits defaults, font size, and records shortcuts', () => {
     let settings = loadSettings(null)
     const onChange = vi.fn((next) => {
@@ -52,6 +93,7 @@ describe('SettingsDialog', () => {
     })
     expect(onChange.mock.calls.at(-1)?.[0].tabOrientation).toBe('vertical')
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
     fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
       key: 'k',
       ctrlKey: true,
@@ -73,6 +115,7 @@ describe('SettingsDialog', () => {
       />,
     )
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
     fireEvent.keyDown(screen.getByLabelText('Shortcut for Bold'), {
       key: 'Delete',
     })
@@ -92,6 +135,7 @@ describe('SettingsDialog', () => {
         onDismiss={onDismiss}
       />,
     )
+    fireEvent.click(screen.getByRole('tab', { name: 'Hotkeys' }))
     const bold = screen.getByLabelText('Shortcut for Bold')
 
     fireEvent.keyDown(bold, { key: 'i', ctrlKey: true })

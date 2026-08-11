@@ -825,13 +825,54 @@ button {
   display: grid;
   width: min(760px, 100%);
   max-height: min(820px, calc(100vh - 56px));
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 15px;
   color: var(--text);
   background: var(--paper);
   box-shadow: 0 24px 70px rgba(20, 17, 14, 0.28);
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.settings-tabs button {
+  position: relative;
+  min-width: 92px;
+  padding: 9px 14px 10px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-tabs button[aria-selected="true"] {
+  color: var(--accent);
+  background: var(--paper);
+}
+
+.settings-tabs button[aria-selected="true"]::after {
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.settings-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .settings-header,
@@ -941,7 +982,12 @@ button {
 }
 
 .shortcut-row input {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Symbol",
+    "Apple Symbols", sans-serif;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
   text-align: center;
 }
 
