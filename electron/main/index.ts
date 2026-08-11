@@ -959,9 +959,7 @@ export function installCloseHandshake(window: BrowserWindow): void {
 
 export async function createWindow(): Promise<void> {
   win = new BrowserWindow({
-    icon: app.isPackaged
-      ? join(dirname(indexHtml), 'icon.png')
-      : join(__dirname, '../../public/icon.png'),
+    icon: windowIconPath(),
     width: 1000,
     height: 720,
     minWidth: 640,
@@ -985,6 +983,12 @@ export async function createWindow(): Promise<void> {
     await win.loadFile(indexHtml)
   }
 
+}
+
+export function windowIconPath(isPackaged = app.isPackaged): string {
+  return isPackaged
+    ? join(dirname(indexHtml), 'icon.png')
+    : join(__dirname, '../../public/icon.png')
 }
 
 export function disableApplicationMenu(): void {

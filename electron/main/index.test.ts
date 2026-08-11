@@ -1434,6 +1434,8 @@ describe('browser window security', () => {
     expect(mocks.browserWindowOptions.at(-1).icon).toMatch(
       /public[\\/]icon\.png$/u,
     )
+    expect(main.windowIconPath(false)).toMatch(/public[\\/]icon\.png$/u)
+    expect(main.windowIconPath(true)).toMatch(/dist[\\/]icon\.png$/u)
     expect(mocks.guardsInstalledAtLoad.at(-1)).toEqual([true, true])
 
     const preventDefault = vi.fn()

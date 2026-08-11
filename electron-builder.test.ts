@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
@@ -21,17 +22,29 @@ describe('desktop package metadata', () => {
     })
     const packageMetadata = JSON.parse(await readFile('package.json', 'utf8'))
     expect(packageMetadata.desktopName).toBe('Qingshu')
+    expect(packageMetadata.scripts.prebuild).toBe('npm run icons')
+    expect(await readFile('index.html', 'utf8')).toContain(
+      'rel="icon" type="image/png" href="/icon.png"',
+    )
   })
 
   it('includes generated PNG, Windows ICO, and macOS ICNS assets', async () => {
-    const [source, png, publicPng, ico, icns, generator] = await Promise.all([
+    const generatedPaths = [
+      'build/icon.png',
+      'public/icon.png',
+      'build/icon.ico',
+      'build/icon.icns',
+    ]
+    const before = await Promise.all(generatedPaths.map((path) => readFile(path)))
+    execFileSync(process.execPath, ['build/generate-icons.mjs'])
+    const after = await Promise.all(generatedPaths.map((path) => readFile(path)))
+    expect(after).toEqual(before)
+
+    const [source, generator] = await Promise.all([
       readFile('build/icon-source.png'),
-      readFile('build/icon.png'),
-      readFile('public/icon.png'),
-      readFile('build/icon.ico'),
-      readFile('build/icon.icns'),
       readFile('build/generate-icons.mjs', 'utf8'),
     ])
+    const [png, publicPng, ico, icns] = after
 
     expect(png.subarray(0, 8)).toEqual(
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -59,5 +72,5 @@ describe('desktop package metadata', () => {
       expect(icns.includes(Buffer.from(type))).toBe(true)
     }
     expect(generator).toContain("['ic10', 1024]")
-  })
+  }, 15_000)
 })
