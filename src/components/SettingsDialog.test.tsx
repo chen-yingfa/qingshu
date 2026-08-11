@@ -73,6 +73,10 @@ describe('SettingsDialog', () => {
       (screen.getByLabelText('Shortcut for Inline code') as HTMLInputElement)
         .value,
     ).toBe('⌘ ⇧ C')
+    expect(
+      (screen.getByLabelText('Shortcut for Next tab') as HTMLInputElement)
+        .value,
+    ).toBe('⌃ Tab')
   })
 
   it('edits defaults, font size, and records shortcuts', () => {
