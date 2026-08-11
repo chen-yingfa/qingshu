@@ -897,14 +897,53 @@ describe('desktop IPC', () => {
     }) as Promise<unknown>
     await vi.waitFor(() => expect(mocks.tempHandle.writeFile).toHaveBeenCalled())
 
-    await expect(
-      Promise.resolve(
-        mocks.handlers.get('qingshu:cancel-save')?.(event, 'tab-2:7'),
-      ),
-    ).resolves.toBeUndefined()
+    const cancellation = Promise.resolve(
+      mocks.handlers.get('qingshu:cancel-save')?.(event, 'tab-2:7'),
+    )
     releaseWrite()
+    await expect(cancellation).resolves.toBeUndefined()
     await expect(save).rejects.toThrow('Save was canceled')
     expect(documentRenameCalls()).toHaveLength(0)
+  })
+
+  it('waits for an already-started rename before acknowledging discard', async () => {
+    mocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/notes/committing.md'],
+    })
+    await mocks.handlers.get('qingshu:open-file')?.(event)
+    let releaseRename!: () => void
+    mocks.rename.mockImplementation(
+      () =>
+        new Promise<void>(resolve => {
+          releaseRename = resolve
+        }),
+    )
+
+    const save = mocks.handlers.get('qingshu:save-file')?.(event, {
+      path: '/notes/committing.md',
+      content: 'commit in progress',
+      saveToken: 'tab-2:committing',
+    }) as Promise<unknown>
+    await vi.waitFor(() => expect(documentRenameCalls()).toHaveLength(1))
+    let cancellationSettled = false
+    const cancellation = Promise.resolve(
+      mocks.handlers
+        .get('qingshu:cancel-save')
+        ?.(event, 'tab-2:committing'),
+    ).finally(() => {
+      cancellationSettled = true
+    })
+    await Promise.resolve()
+    expect(cancellationSettled).toBe(false)
+
+    releaseRename()
+    await expect(save).resolves.toEqual({
+      canceled: false,
+      path: '/notes/committing.md',
+    })
+    await expect(cancellation).resolves.toBeUndefined()
+    expect(documentRenameCalls()).toHaveLength(1)
   })
 
   it('serializes duplicate Open between Save A and Save B on one authorization', async () => {
