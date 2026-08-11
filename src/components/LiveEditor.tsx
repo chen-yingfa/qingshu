@@ -1,5 +1,7 @@
 import {
+  Fragment,
   memo,
+  type DragEvent,
   type KeyboardEvent,
   useCallback,
   useEffect,
@@ -19,6 +21,7 @@ import {
   type DocumentRenderContext,
   type MarkdownBlock,
 } from '../markdown/markdown'
+import { reorderMarkdownBlocks } from '../markdown/reorder'
 
 export type FormatCommand =
   | 'heading'
@@ -527,6 +530,83 @@ function formattedValue(
   }
 }
 
+function BlockDragHandle({
+  index,
+  onDragStart,
+  onDragEnd,
+  onMove,
+}: {
+  index: number
+  onDragStart(event: DragEvent<HTMLButtonElement>): void
+  onDragEnd(): void
+  onMove(direction: -1 | 1): void
+}) {
+  return (
+    <button
+      type="button"
+      className="block-drag-handle"
+      draggable
+      aria-label={`Move block ${index + 1}`}
+      title="Drag to move block · Alt+Arrow to move"
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onKeyDown={(event) => {
+        if (
+          event.altKey &&
+          (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+        ) {
+          event.preventDefault()
+          onMove(event.key === 'ArrowUp' ? -1 : 1)
+        }
+      }}
+    >
+      <svg viewBox="0 0 12 18" aria-hidden="true">
+        {[3, 9].flatMap((x) =>
+          [3, 9, 15].map((y) => (
+            <circle key={`${x}-${y}`} cx={x} cy={y} r="1.25" />
+          )),
+        )}
+      </svg>
+    </button>
+  )
+}
+
+function BlockDropZone({
+  boundary,
+  dragging,
+  active,
+  onTarget,
+  onDrop,
+}: {
+  boundary: number
+  dragging: boolean
+  active: boolean
+  onTarget(boundary: number): void
+  onDrop(boundary: number): void
+}) {
+  return (
+    <div
+      className={[
+        'block-drop-zone',
+        dragging ? 'is-dragging' : '',
+        active ? 'is-drop-target' : '',
+      ].join(' ')}
+      data-drop-boundary={boundary}
+      aria-hidden="true"
+      onDragEnter={() => onTarget(boundary)}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        onTarget(boundary)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        onDrop(boundary)
+      }}
+    />
+  )
+}
+
 export function LiveEditor({
   content,
   activeBlock,
@@ -541,6 +621,8 @@ export function LiveEditor({
     content: string
     blocks: InsertedBlock[]
   }>({ content, blocks: [] })
+  const [draggedBlock, setDraggedBlock] = useState<number | null>(null)
+  const [dropBoundary, setDropBoundary] = useState<number | null>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(() => parseDocument(content), [content])
@@ -549,6 +631,10 @@ export function LiveEditor({
     [content, currentInsertedBlocks, model.blocks],
   )
   const renderContext = model.renderContext
+  const realBlockIndexes = useMemo(
+    () => new Map(model.blocks.map((block, index) => [block.id, index])),
+    [model.blocks],
+  )
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(toEditorValue(active.source))
@@ -1035,68 +1121,165 @@ export function LiveEditor({
     }
   }
 
+  const clearDragState = () => {
+    setDraggedBlock(null)
+    setDropBoundary(null)
+  }
+
+  const moveBlock = (fromIndex: number, boundary: number) => {
+    const reordered = reorderMarkdownBlocks(
+      contentRef.current,
+      model.blocks,
+      fromIndex,
+      boundary,
+    )
+    clearDragState()
+    if (reordered.content === contentRef.current) return
+
+    const nextModel = parseDocument(reordered.content)
+    const moved = nextModel.blocks[reordered.index]
+    setInsertedBlocks({ content: reordered.content, blocks: [] })
+    setDraft(toEditorValue(moved?.source ?? ''))
+    rangeRef.current = {
+      start: moved?.start ?? 0,
+      end: moved?.end ?? 0,
+    }
+    contentRef.current = reordered.content
+    pendingAcknowledgementRef.current = reordered.content
+    onChange(reordered.content)
+    onActiveBlockChange(reordered.index)
+    afterPaint(() => textareaRef.current?.focus())
+  }
+
   return (
     <section className="editor" aria-label="Markdown document">
       {previewAll ? (
         <FullDocumentPreview content={content} onReady={onPreviewReady} />
       ) : (
-        blocks.map((block, index) =>
-          index === safeActive ? (
-            <div className="active-block" key={`active-${safeActive}`}>
-              <textarea
-                ref={textareaRef}
-                className={
-                  fencedCode ? 'source-block source-block-code' : 'source-block'
-                }
-                aria-label={fencedCode ? 'Active code block' : 'Active Markdown block'}
-                autoFocus
-                spellCheck={!fencedCode}
-                value={draft}
-                onChange={(event) => {
-                  const textarea = event.currentTarget
-                  commitDraft(textarea.value)
-                  if (!composingRef.current && autoSpacing) {
-                    normalize(
-                      textarea.value,
-                      textarea.selectionStart,
-                      textarea.selectionEnd,
-                    )
+        <>
+          {blocks.map((block, index) => {
+            const realIndex = realBlockIndexes.get(block.id)
+            return (
+              <Fragment key={block.id}>
+                {realIndex !== undefined && (
+                  <BlockDropZone
+                    boundary={realIndex}
+                    dragging={draggedBlock !== null}
+                    active={dropBoundary === realIndex}
+                    onTarget={setDropBoundary}
+                    onDrop={(boundary) => {
+                      if (draggedBlock !== null) {
+                        moveBlock(draggedBlock, boundary)
+                      }
+                    }}
+                  />
+                )}
+                <div
+                  className={
+                    index === safeActive
+                      ? 'editor-block-row is-active'
+                      : 'editor-block-row'
                   }
-                }}
-                onBlur={(event) => {
-                  codeTabEscapeRef.current = false
-                  normalize(
-                    event.currentTarget.value,
-                    event.currentTarget.selectionStart,
-                    event.currentTarget.selectionEnd,
-                  )
-                }}
-                onCompositionStart={() => {
-                  composingRef.current = true
-                }}
-                onCompositionEnd={(event) => {
-                  composingRef.current = false
-                  normalize(
-                    event.currentTarget.value,
-                    event.currentTarget.selectionStart,
-                    event.currentTarget.selectionEnd,
-                  )
-                }}
-                onKeyDown={handleKeyDown}
-              />
-              <ActiveBlockPreview source={draft} />
-            </div>
-          ) : (
-            <RenderedBlock
-              key={block.id}
-              block={block}
-              context={renderContext}
-              editable
-              index={index}
-              onActivate={activateBlock}
+                >
+                  {realIndex !== undefined && (
+                    <BlockDragHandle
+                      index={realIndex}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', block.id)
+                        setDraggedBlock(realIndex)
+                        setDropBoundary(realIndex)
+                      }}
+                      onDragEnd={clearDragState}
+                      onMove={(direction) => {
+                        if (direction < 0 && realIndex > 0) {
+                          moveBlock(realIndex, realIndex - 1)
+                        }
+                        if (
+                          direction > 0 &&
+                          realIndex < model.blocks.length - 1
+                        ) {
+                          moveBlock(realIndex, realIndex + 2)
+                        }
+                      }}
+                    />
+                  )}
+                  {index === safeActive ? (
+                    <div className="active-block">
+                      <textarea
+                        ref={textareaRef}
+                        className={
+                          fencedCode
+                            ? 'source-block source-block-code'
+                            : 'source-block'
+                        }
+                        aria-label={
+                          fencedCode
+                            ? 'Active code block'
+                            : 'Active Markdown block'
+                        }
+                        autoFocus
+                        spellCheck={!fencedCode}
+                        value={draft}
+                        onChange={(event) => {
+                          const textarea = event.currentTarget
+                          commitDraft(textarea.value)
+                          if (!composingRef.current && autoSpacing) {
+                            normalize(
+                              textarea.value,
+                              textarea.selectionStart,
+                              textarea.selectionEnd,
+                            )
+                          }
+                        }}
+                        onBlur={(event) => {
+                          codeTabEscapeRef.current = false
+                          normalize(
+                            event.currentTarget.value,
+                            event.currentTarget.selectionStart,
+                            event.currentTarget.selectionEnd,
+                          )
+                        }}
+                        onCompositionStart={() => {
+                          composingRef.current = true
+                        }}
+                        onCompositionEnd={(event) => {
+                          composingRef.current = false
+                          normalize(
+                            event.currentTarget.value,
+                            event.currentTarget.selectionStart,
+                            event.currentTarget.selectionEnd,
+                          )
+                        }}
+                        onKeyDown={handleKeyDown}
+                      />
+                      <ActiveBlockPreview source={draft} />
+                    </div>
+                  ) : (
+                    <RenderedBlock
+                      block={block}
+                      context={renderContext}
+                      editable
+                      index={index}
+                      onActivate={activateBlock}
+                    />
+                  )}
+                </div>
+              </Fragment>
+            )
+          })}
+          {model.blocks.length > 0 && (
+            <BlockDropZone
+              boundary={model.blocks.length}
+              dragging={draggedBlock !== null}
+              active={dropBoundary === model.blocks.length}
+              onTarget={setDropBoundary}
+              onDrop={(boundary) => {
+                if (draggedBlock !== null) moveBlock(draggedBlock, boundary)
+              }}
             />
-          ),
-        )
+          )}
+        </>
       )}
       {!previewAll && <DocumentFootnotes context={renderContext} />}
     </section>

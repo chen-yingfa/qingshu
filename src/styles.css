@@ -273,6 +273,82 @@ button {
   position: relative;
 }
 
+.editor-block-row {
+  position: relative;
+  min-width: 0;
+  margin-top: 1.15em;
+}
+
+.editor > .block-drop-zone:first-child + .editor-block-row {
+  margin-top: 0;
+}
+
+.block-drag-handle {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  left: -34px;
+  display: grid;
+  width: 24px;
+  height: 28px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: grab;
+  opacity: 0.42;
+  place-items: center;
+}
+
+.block-drag-handle:hover,
+.block-drag-handle:focus-visible,
+.editor-block-row:hover .block-drag-handle {
+  color: var(--accent);
+  background: var(--accent-soft);
+  opacity: 1;
+}
+
+.block-drag-handle:active {
+  cursor: grabbing;
+}
+
+.block-drag-handle svg {
+  width: 12px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.block-drop-zone {
+  position: relative;
+  z-index: 2;
+  height: 0;
+  pointer-events: none;
+}
+
+.block-drop-zone.is-dragging {
+  height: 12px;
+  margin: -6px 0;
+  pointer-events: auto;
+}
+
+.block-drop-zone::after {
+  position: absolute;
+  inset: 3px 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  content: "";
+  transition:
+    background-color 90ms ease,
+    border-color 90ms ease;
+}
+
+.block-drop-zone.is-drop-target::after {
+  border-color: rgba(55, 132, 255, 0.62);
+  background: rgba(55, 132, 255, 0.2);
+  box-shadow: 0 0 0 2px rgba(55, 132, 255, 0.08);
+}
+
 .rendered-block {
   min-height: 1.85em;
   margin: 0;
@@ -833,6 +909,10 @@ kbd {
 
   .edit-block-button {
     right: 2px;
+  }
+
+  .block-drag-handle {
+    left: -22px;
   }
 
   .document-stats span:nth-child(2) {

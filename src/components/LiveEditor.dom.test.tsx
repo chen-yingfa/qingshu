@@ -950,3 +950,42 @@ describe('LiveEditor keyboard and composition behavior', () => {
     ).toContain('"中文A"')
   })
 })
+
+describe('LiveEditor block reordering', () => {
+  it('shows a blue drop boundary and moves a dragged block there', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+    const dataTransfer = {
+      dropEffect: 'none',
+      effectAllowed: 'none',
+      setData: vi.fn(),
+    }
+    const handle = screen.getByRole('button', { name: 'Move block 2' })
+    const target = result.container.querySelector(
+      '[data-drop-boundary="0"]',
+    ) as HTMLElement
+
+    fireEvent.dragStart(handle, { dataTransfer })
+    fireEvent.dragOver(target, { dataTransfer })
+    expect(target.classList.contains('is-drop-target')).toBe(true)
+    fireEvent.drop(target, { dataTransfer })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Second\n\nFirst\n\nThird',
+    )
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+  })
+
+  it('moves blocks with Alt+Arrow from the drag handle', () => {
+    const result = renderEditor('First\n\nSecond\n\nThird')
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 1' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      'Second\n\nFirst\n\nThird',
+    )
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+  })
+})
