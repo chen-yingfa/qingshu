@@ -1348,7 +1348,13 @@ export function LiveEditor({
           {blocks.map((block, index) => {
             const realIndex = realBlockIndexes.get(block.id)
             return (
-              <Fragment key={block.id}>
+              <Fragment
+                key={
+                  index === safeActive
+                    ? `active-block-row-${safeActive}`
+                    : block.id
+                }
+              >
                 {realIndex !== undefined && (
                   <BlockDropZone
                     boundary={realIndex}

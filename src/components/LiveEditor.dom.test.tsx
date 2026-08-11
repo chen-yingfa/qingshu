@@ -31,6 +31,37 @@ function renderEditor(
 }
 
 describe('LiveEditor state synchronization', () => {
+  it('preserves the active textarea and caret after each parent content update', () => {
+    const result = renderEditor('Hello')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(3, 3)
+
+    fireEvent.change(editor, {
+      target: {
+        value: 'HelXlo',
+        selectionStart: 4,
+        selectionEnd: 4,
+      },
+    })
+    result.rerender(
+      <LiveEditor
+        content="HelXlo"
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    const synchronized = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(synchronized).toBe(editor)
+    expect(synchronized.selectionStart).toBe(4)
+    expect(synchronized.selectionEnd).toBe(4)
+  })
+
   it('synchronizes the active draft after a same-index document replacement', () => {
     const result = renderEditor('Old document')
 
