@@ -1048,7 +1048,7 @@ export function LiveEditor({
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
   const [draft, setDraft] = useState(toEditorValue(active.source))
-  const [activeInputFocused, setActiveInputFocused] = useState(true)
+  const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1058,6 +1058,7 @@ export function LiveEditor({
   const codeTabEscapeRef = useRef(false)
   const previousActiveRef = useRef(safeActive)
   const previousSourceModeRef = useRef(sourceMode)
+  const previousDisplayModeRef = useRef({ sourceMode, previewAll })
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
@@ -1071,6 +1072,7 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
+    setActiveInputFocused(false)
     setEditingBoundary(null)
     setActiveSession((session) => session + 1)
   }
@@ -1135,6 +1137,17 @@ export function LiveEditor({
     safeActive,
     sourceMode,
   ])
+
+  useLayoutEffect(() => {
+    const previous = previousDisplayModeRef.current
+    if (
+      previous.sourceMode !== sourceMode ||
+      previous.previewAll !== previewAll
+    ) {
+      setActiveInputFocused(false)
+      previousDisplayModeRef.current = { sourceMode, previewAll }
+    }
+  }, [previewAll, sourceMode])
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current)
@@ -1851,6 +1864,7 @@ export function LiveEditor({
                         }}
                         onBlur={(event) => {
                           setActiveInputFocused(false)
+                          composingRef.current = false
                           codeTabEscapeRef.current = false
                           normalize(
                             event.currentTarget.value,

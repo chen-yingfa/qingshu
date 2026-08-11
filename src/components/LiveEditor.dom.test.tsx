@@ -526,6 +526,21 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
   })
 
+  it('hides a code preview on real focus transfer', async () => {
+    const result = renderEditor('```ts\nconst value = 1\n```')
+    const editor = screen.getByLabelText('Active code block')
+    await waitFor(() =>
+      expect(result.container.querySelector('.active-code-preview')).not.toBeNull(),
+    )
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    outside.focus()
+    fireEvent.blur(editor, { relatedTarget: outside })
+
+    expect(result.container.querySelector('.active-code-preview')).toBeNull()
+    outside.remove()
+  })
+
   it('shows a live preview for standard multiline display math', async () => {
     const result = renderEditor('$$\n\\left(\\frac{x_i}{\\mathbb R}\\right)\n$$')
 
@@ -1152,6 +1167,16 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() =>
       expect((textarea as HTMLTextAreaElement).selectionStart).toBe(7),
     )
+  })
+
+  it('ends composition and normalizes safely when the block blurs', () => {
+    const result = renderEditor('中文', { autoSpacing: true })
+    const textarea = screen.getByLabelText('Active Markdown block')
+    fireEvent.compositionStart(textarea)
+    fireEvent.change(textarea, { target: { value: '中文text' } })
+
+    fireEvent.blur(textarea)
+    expect(result.onChange).toHaveBeenLastCalledWith('中文 text')
   })
 
   it('extends selection for Ctrl+Shift+Arrow CJK movement', () => {
