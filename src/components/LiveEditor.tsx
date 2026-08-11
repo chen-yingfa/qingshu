@@ -549,6 +549,9 @@ const RenderedBlock = memo(function RenderedBlock({
   const [html, setHtml] = useState('')
   const [error, setError] = useState<Error | null>(null)
   const isFrontmatter = block.type === 'yaml' || block.type === 'toml'
+  const editLabel = isFrontmatter
+    ? `Edit ${block.type.toUpperCase()} front matter`
+    : 'Edit Markdown block'
 
   useEffect(() => {
     if (isFrontmatter) {
@@ -618,8 +621,8 @@ const RenderedBlock = memo(function RenderedBlock({
         <button
           type="button"
           className="edit-block-button"
-          aria-label="Edit Markdown block"
-          title="Edit Markdown block"
+          aria-label={editLabel}
+          title={editLabel}
           onClick={() => onActivate(index)}
         >
           Edit

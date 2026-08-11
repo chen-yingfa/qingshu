@@ -28,5 +28,15 @@ const markdownParser = unified()
   .use(remarkMath)
 
 export function parseMarkdownAst(source: string): MarkdownAstRoot {
-  return markdownParser.parse(source) as MarkdownAstRoot
+  const tree = markdownParser.parse(source) as MarkdownAstRoot
+  if (!source.startsWith('\uFEFF')) return tree
+  const restoreBomOffsets = (node: MarkdownAstNode) => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (start !== undefined) node.position!.start.offset = start === 0 ? 0 : start + 1
+    if (end !== undefined) node.position!.end.offset = end + 1
+    node.children?.forEach(restoreBomOffsets)
+  }
+  restoreBomOffsets(tree)
+  return tree
 }

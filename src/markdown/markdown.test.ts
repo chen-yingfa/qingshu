@@ -38,6 +38,30 @@ describe('parseBlocks', () => {
     })
   })
 
+  it('preserves BOM and CRLF offsets across frontmatter and content blocks', () => {
+    const source =
+      '\uFEFF---\r\ntitle: Qingshu  \r\n---\r\n\r\n# Heading\r\n\r\nBody'
+    const blocks = parseBlocks(source)
+
+    expect(blocks.map((block) => block.source)).toEqual([
+      '\uFEFF---\r\ntitle: Qingshu  \r\n---',
+      '# Heading',
+      'Body',
+    ])
+    for (const block of blocks) {
+      expect(source.slice(block.start, block.end)).toBe(block.source)
+    }
+  })
+
+  it('leaves unclosed frontmatter delimiters as ordinary Markdown', () => {
+    const blocks = parseBlocks('---\ntitle: Not closed\n\n# Heading')
+
+    expect(blocks[0].type).not.toBe('yaml')
+    expect(blocks.map((block) => block.source).join('\n')).toContain(
+      'title: Not closed',
+    )
+  })
+
   it('retains blank-line-separated items as one semantic loose list', () => {
     const blocks = parseBlocks('- Previous item\n\n-')
 
@@ -94,6 +118,15 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('Secret metadata')
     expect(html).not.toContain('<hr')
     expect(html).toContain('<h1>Visible title</h1>')
+  })
+
+  it('omits TOML frontmatter from rendered output', async () => {
+    const html = await renderMarkdown(
+      '+++\ntitle = "Private"\n+++\n\nVisible body',
+    )
+
+    expect(html).not.toContain('Private')
+    expect(html).toContain('<p>Visible body</p>')
   })
 
   it('distinguishes currency prose from semantic inline and display math', () => {

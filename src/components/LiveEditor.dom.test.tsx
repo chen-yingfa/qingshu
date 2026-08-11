@@ -50,12 +50,35 @@ describe('LiveEditor state synchronization', () => {
     expect(result.container.querySelectorAll('.frontmatter-preview')).toHaveLength(
       1,
     )
+    expect(
+      screen.getByRole('button', { name: 'Edit YAML front matter' }),
+    ).not.toBeNull()
   })
 
   it('labels the active YAML frontmatter editor distinctly', () => {
     renderEditor('---\ntitle: Test\n---\n\nBody')
 
     expect(screen.getByLabelText('Active YAML front matter block')).not.toBeNull()
+  })
+
+  it('preserves BOM and CRLF while editing frontmatter', () => {
+    const source = '\uFEFF---\r\ntitle: Old\r\n---\r\n\r\nBody'
+    const result = renderEditor(source)
+    const editor = screen.getByLabelText(
+      'Active YAML front matter block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: {
+        value: '\uFEFF---\ntitle: New\n---',
+        selectionStart: 20,
+        selectionEnd: 20,
+      },
+    })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '\uFEFF---\r\ntitle: New\r\n---\r\n\r\nBody',
+    )
   })
 
   it('preserves the active textarea and caret after each parent content update', () => {
