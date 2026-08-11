@@ -13,6 +13,7 @@ import { LiveEditor } from './LiveEditor'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function renderEditor(
@@ -702,8 +703,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(execCommand).toHaveBeenLastCalledWith('insertText', false, '\n')
     await waitFor(() => expect(editor.selectionStart).toBe(5))
     fireEvent.keyDown(editor, { key: 'Enter' })
-    expect(execCommand).toHaveBeenLastCalledWith('insertText', false, '')
-    expect(execCommand).toHaveBeenCalledTimes(3)
+    expect(execCommand).toHaveBeenCalledTimes(2)
     expect(result.onChange).toHaveBeenLastCalledWith('Before\n\n$$\nx\n$$\n\n')
 
     result.rerender(
@@ -741,13 +741,180 @@ describe('LiveEditor keyboard and composition behavior', () => {
     await waitFor(() => expect(editor.selectionStart).toBe(4))
     fireEvent.keyDown(editor, { key: 'Enter' })
 
-    expect(execCommand).toHaveBeenCalledTimes(3)
+    expect(execCommand).toHaveBeenCalledTimes(2)
     expect(result.onChange.mock.calls.map(([value]) => value)).toEqual([
       '$$\n\n$$',
       '$$\n\n\n$$',
-      '$$\n\n$$',
       '$$\n\n$$\n\n',
     ])
+  })
+
+  it.each(['blur', 'pointerdown'])(
+    'does not refocus or move the caret after an immediate %s before math RAF',
+    (interruption) => {
+      const frames: FrameRequestCallback[] = []
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.push(callback)
+        return frames.length
+      })
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: vi.fn(() => false),
+      })
+      renderEditor('')
+      const editor = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      editor.focus()
+      fireEvent.change(editor, {
+        target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+      })
+      const math = screen.getByLabelText(
+        'Active math block',
+      ) as HTMLTextAreaElement
+      const outside = document.createElement('button')
+      document.body.append(outside)
+      if (interruption === 'pointerdown') {
+        fireEvent.pointerDown(math, { pointerId: 7 })
+      }
+      outside.focus()
+      fireEvent.blur(math, { relatedTarget: outside })
+
+      frames.splice(0).forEach((callback) => callback(0))
+
+      expect(document.activeElement).toBe(outside)
+      expect(math.selectionStart).toBe(2)
+      outside.remove()
+    },
+  )
+
+  it('undoes fallback math auto-close as one editor transaction', async () => {
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => false),
+    })
+    const result = renderEditor('')
+    const markdownEditor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    markdownEditor.focus()
+    fireEvent.change(markdownEditor, {
+      target: { value: '$$', selectionStart: 2, selectionEnd: 2 },
+    })
+    const math = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(math, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(result.onChange).toHaveBeenLastCalledWith('$$')
+    const restored = (await screen.findByLabelText(
+      'Active Markdown block',
+    )) as HTMLTextAreaElement
+    expect(restored.value).toBe('$$')
+    expect(restored.selectionStart).toBe(2)
+    expect(restored.selectionEnd).toBe(2)
+  })
+
+  it('undoes fallback first Enter with its exact CRLF content and selection', async () => {
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => false),
+    })
+    const source = '$$\r\nx\r\n$$'
+    const result = renderEditor(source)
+    const math = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    math.focus()
+    math.setSelectionRange(4, 4, 'backward')
+    fireEvent.keyDown(math, { key: 'Enter' })
+    await waitFor(() => expect(math.selectionStart).toBe(5))
+
+    fireEvent.keyDown(math, { key: 'z', metaKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    expect(math.value).toBe('$$\nx\n$$')
+    expect(math.selectionStart).toBe(4)
+    expect(math.selectionEnd).toBe(4)
+    expect(math.selectionDirection).toBe('backward')
+    result.onActiveBlockChange.mockClear()
+    fireEvent.keyDown(math, { key: 'Enter' })
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
+  })
+
+  it('undoes a middle-block math exit after the parent activates the new block', async () => {
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => false),
+    })
+    const ephemeral = vi.fn()
+    const source = 'Before\r\n\r\n$$\r\nx\r\n$$\r\n\r\nAfter'
+    const result = renderEditor(source, {
+      activeBlock: 1,
+      onEphemeralStateChange: ephemeral,
+    })
+    const math = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    math.focus()
+    math.setSelectionRange(4, 4)
+    fireEvent.keyDown(math, { key: 'Enter' })
+    await waitFor(() => expect(math.selectionStart).toBe(5))
+    const beforeExit = result.onChange.mock.calls.at(-1)?.[0] as string
+    await waitFor(() => expect(ephemeral).toHaveBeenCalled())
+    const beforeMetadata = ephemeral.mock.calls.at(-1)?.[0]
+
+    fireEvent.keyDown(math, { key: 'Enter' })
+    const afterExit = result.onChange.mock.calls.at(-1)?.[0] as string
+    result.rerender(
+      <LiveEditor
+        content={afterExit}
+        activeBlock={2}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+        onEphemeralStateChange={ephemeral}
+      />,
+    )
+    const next = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    next.focus()
+    fireEvent.keyDown(next, { key: 'z', ctrlKey: true })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(beforeExit)
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    result.rerender(
+      <LiveEditor
+        content={beforeExit}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+        onEphemeralStateChange={ephemeral}
+      />,
+    )
+    const restored = screen.getByLabelText(
+      'Active math block',
+    ) as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(document.activeElement).toBe(restored)
+      expect(restored.selectionStart).toBe(5)
+    })
+    expect(restored.value).toBe('$$\nx\n\n$$')
+    expect(restored.selectionEnd).toBe(5)
+    await waitFor(() =>
+      expect(ephemeral).toHaveBeenLastCalledWith(beforeMetadata),
+    )
+
+    fireEvent.keyDown(restored, { key: 'Enter' })
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2)
   })
 
   it.each([
@@ -1002,6 +1169,26 @@ describe('LiveEditor keyboard and composition behavior', () => {
         (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
           .value,
       ).toBe(opener)
+    },
+  )
+
+  it.each(['¥¥', '￥￥'])(
+    'enters display math for %s when composition ends',
+    (opener) => {
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: vi.fn(() => false),
+      })
+      const result = renderEditor('', { cjkShortcuts: true })
+      const editor = screen.getByLabelText('Active Markdown block')
+      fireEvent.compositionStart(editor)
+      fireEvent.change(editor, {
+        target: { value: opener, selectionStart: 2, selectionEnd: 2 },
+      })
+      fireEvent.compositionEnd(editor, { data: opener })
+
+      expect(screen.getByLabelText('Active math block')).not.toBeNull()
+      expect(result.onChange).toHaveBeenLastCalledWith('$$\n\n$$')
     },
   )
 
@@ -2248,6 +2435,30 @@ describe('LiveEditor block reordering', () => {
 })
 
 describe('LiveEditor source mode', () => {
+  it.each([
+    [true, '$$'],
+    [false, '￥￥'],
+  ])(
+    'normalizes yen shortcuts on blur when CJK shortcuts are %s',
+    (cjkShortcuts, expected) => {
+      const result = renderEditor('', {
+        sourceMode: true,
+        contentRevision: 0,
+        cjkShortcuts,
+      })
+      const source = screen.getByLabelText(
+        'Markdown source',
+      ) as HTMLTextAreaElement
+      fireEvent.change(source, {
+        target: { value: '￥￥', selectionStart: 2, selectionEnd: 2 },
+      })
+      fireEvent.blur(source)
+
+      expect(result.onChange).toHaveBeenLastCalledWith(expected)
+      expect(source.value).toBe(expected)
+    },
+  )
+
   it('commits one canonical edit when native insertText dispatches input', async () => {
     const execCommand = vi.fn((_command: string, _ui: boolean, replacement: string) => {
       const source = screen.getByLabelText('Markdown source') as HTMLTextAreaElement

@@ -63,6 +63,27 @@ interface MathEnterToken {
   session: number
 }
 
+interface EditorUndoSnapshot {
+  content: string
+  draft: string
+  range: SourceRange
+  selection: {
+    start: number
+    end: number
+    direction: SelectionDirection
+  }
+  activeBlock: number
+  mathToken: MathEnterToken | null
+  insertedBlocks: {
+    content: string
+    blocks: InsertedBlock[]
+  }
+  editingBoundary: EditingBoundary | null
+  expectedContent: string
+  expectedActiveBlock: number
+  expectedDraft: string
+}
+
 export interface InsertedBlock {
   offset: number
   length: number
@@ -803,6 +824,19 @@ export function LiveEditor({
     expectedValue: string
     observed: boolean
   } | null>(null)
+  const interactionGenerationRef = useRef(0)
+  const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
+  const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
+  const insertedBlocksRef = useRef(insertedBlocks)
+  const editingBoundaryRef = useRef(editingBoundary)
+  const selectionRef = useRef({
+    start: 0,
+    end: 0,
+    direction: 'none' as SelectionDirection,
+  })
+  const deferredSelectionRef = useRef<{ start: number; end: number } | null>(
+    null,
+  )
   const previousActiveRef = useRef(safeActive)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
@@ -814,7 +848,47 @@ export function LiveEditor({
   const activateBlock = useCallback((index: number) => {
     activationRef.current(index)
   }, [])
-  contentRef.current = content
+  insertedBlocksRef.current = insertedBlocks
+  editingBoundaryRef.current = editingBoundary
+
+  const invalidateMathInteraction = () => {
+    interactionGenerationRef.current += 1
+    mathEnterTokenRef.current = null
+    deferredSelectionRef.current = null
+  }
+
+  const setEditorSelection = (
+    textarea: HTMLTextAreaElement,
+    start: number,
+    end = start,
+    direction: SelectionDirection = 'none',
+  ) => {
+    selectionRef.current = { start, end, direction }
+    textarea.setSelectionRange(start, end, direction)
+    if (
+      deferredSelectionRef.current?.start === start &&
+      deferredSelectionRef.current.end === end
+    ) {
+      deferredSelectionRef.current = null
+    }
+  }
+
+  const afterInteractionPaint = (
+    textarea: HTMLTextAreaElement,
+    callback: () => void,
+  ) => {
+    const generation = interactionGenerationRef.current
+    afterPaint(() => {
+      if (
+        interactionGenerationRef.current !== generation ||
+        textareaRef.current !== textarea ||
+        document.activeElement !== textarea
+      ) {
+        return
+      }
+      callback()
+    })
+  }
 
   useEffect(() => {
     onEphemeralStateChange?.({ insertedBlocks, editingBoundary })
@@ -827,7 +901,7 @@ export function LiveEditor({
   const rotateEditorSession = () => {
     composingRef.current = false
     codeTabEscapeRef.current = false
-    mathEnterTokenRef.current = null
+    invalidateMathInteraction()
     draftRevisionRef.current += 1
     editorSessionRef.current += 1
     setActiveInputFocused(document.activeElement === textareaRef.current)
@@ -843,6 +917,7 @@ export function LiveEditor({
       parentChanged && pendingAcknowledgementRef.current === content
     if (parentChanged) {
       parentContentRef.current = content
+      contentRef.current = content
       pendingAcknowledgementRef.current = undefined
     }
     if (sourceMode) {
@@ -897,11 +972,73 @@ export function LiveEditor({
   ])
 
   useLayoutEffect(() => {
+    const snapshot = pendingUndoRestoreRef.current
+    if (!snapshot || safeActive !== snapshot.activeBlock) return
+    const textarea = textareaRef.current
+    if (!textarea) return
+    contentRef.current = snapshot.content
+    rangeRef.current = { ...snapshot.range }
+    insertedBlocksRef.current = snapshot.insertedBlocks
+    editingBoundaryRef.current = snapshot.editingBoundary
+    setInsertedBlocks(snapshot.insertedBlocks)
+    setEditingBoundary(snapshot.editingBoundary)
+    setDraft(snapshot.draft)
+    mathEnterTokenRef.current = snapshot.mathToken
+      ? {
+          ...snapshot.mathToken,
+          revision: draftRevisionRef.current,
+          session: editorSessionRef.current,
+        }
+      : null
+    setEditorSelection(
+      textarea,
+      snapshot.selection.start,
+      snapshot.selection.end,
+      snapshot.selection.direction,
+    )
+    textarea.focus()
+    afterPaint(() => {
+      if (pendingUndoRestoreRef.current !== snapshot) return
+      const current = textareaRef.current
+      if (!current) return
+      const deferred = {
+        start: snapshot.selection.start,
+        end: snapshot.selection.end,
+      }
+      deferredSelectionRef.current = deferred
+      selectionRef.current = {
+        ...deferred,
+        direction: snapshot.selection.direction,
+      }
+      current.setSelectionRange(
+        deferred.start,
+        deferred.end,
+        snapshot.selection.direction,
+      )
+      current.focus()
+      mathEnterTokenRef.current = snapshot.mathToken
+        ? {
+            ...snapshot.mathToken,
+            revision: draftRevisionRef.current,
+            session: editorSessionRef.current,
+          }
+        : null
+      pendingUndoRestoreRef.current = null
+      setTimeout(() => {
+        if (deferredSelectionRef.current === deferred) {
+          deferredSelectionRef.current = null
+        }
+      }, 0)
+    })
+  }, [content, draft, safeActive])
+
+  useLayoutEffect(() => {
     const previous = previousDisplayModeRef.current
     if (
       previous.sourceMode !== sourceMode ||
       previous.previewAll !== previewAll
     ) {
+      invalidateMathInteraction()
       setActiveInputFocused(document.activeElement === textareaRef.current)
       previousDisplayModeRef.current = { sourceMode, previewAll }
     }
@@ -914,14 +1051,24 @@ export function LiveEditor({
   useLayoutEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || sourceMode || !selection) return
-    textarea.setSelectionRange(
-      Math.min(selection.start, textarea.value.length),
-      Math.min(selection.end, textarea.value.length),
-      selection.direction,
-    )
+    const start = Math.min(selection.start, textarea.value.length)
+    const end = Math.min(selection.end, textarea.value.length)
+    if (
+      textarea.selectionStart !== start ||
+      textarea.selectionEnd !== end ||
+      textarea.selectionDirection !== selection.direction
+    ) {
+      invalidateMathInteraction()
+      setEditorSelection(textarea, start, end, selection.direction)
+    }
   }, [activeSession, selection, sourceMode])
 
   const reportSelection = (textarea: HTMLTextAreaElement) => {
+    selectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      direction: textarea.selectionDirection ?? 'none',
+    }
     onSelectionChange?.({
       start: textarea.selectionStart,
       end: textarea.selectionEnd,
@@ -983,6 +1130,146 @@ export function LiveEditor({
     onChange(nextContent)
   }
 
+  const snapshotForDraft = (
+    value: string,
+    selection: EditorUndoSnapshot['selection'],
+  ): EditorUndoSnapshot => {
+    const previousContent = contentRef.current
+    const previous = { ...rangeRef.current }
+    const previousSource = previousContent.slice(previous.start, previous.end)
+    const sourceValue = restoreSourceEols(
+      value,
+      previousSource,
+      nearestEol(previousContent, previous.start),
+    )
+    const nextContent = replaceBlockSource(
+      previousContent,
+      previous,
+      sourceValue,
+    )
+    const delta = sourceValue.length - (previous.end - previous.start)
+    const existing =
+      insertedBlocksRef.current.content === previousContent
+        ? insertedBlocksRef.current.blocks
+        : []
+    const tracked =
+      previous.start === previous.end &&
+      !existing.some((block) => block.offset === previous.start)
+        ? [
+            ...existing,
+            {
+              offset: previous.start,
+              length: 0,
+              leftPadding: 0,
+              rightPadding: 0,
+            },
+          ]
+        : existing
+    const nextInserted = {
+      content: nextContent,
+      blocks: tracked.map((block) =>
+        block.offset === previous.start
+          ? { ...block, length: sourceValue.length }
+          : block.offset > previous.end
+            ? { ...block, offset: block.offset + delta }
+            : { ...block },
+      ),
+    }
+    return {
+      content: nextContent,
+      draft: value,
+      range: {
+        start: previous.start,
+        end: previous.start + sourceValue.length,
+      },
+      selection,
+      activeBlock: safeActive,
+      mathToken: mathEnterTokenRef.current
+        ? { ...mathEnterTokenRef.current }
+        : null,
+      insertedBlocks: nextInserted,
+      editingBoundary: {
+        content: nextContent,
+        start: previous.start,
+        end: previous.start + sourceValue.length,
+      },
+      expectedContent: '',
+      expectedActiveBlock: safeActive,
+      expectedDraft: '',
+    }
+  }
+
+  const currentUndoSnapshot = (): EditorUndoSnapshot => {
+    const textarea = textareaRef.current
+    return {
+      content: contentRef.current,
+      draft,
+      range: { ...rangeRef.current },
+      selection: textarea
+        ? {
+            start: textarea.selectionStart,
+            end: textarea.selectionEnd,
+            direction: textarea.selectionDirection ?? 'none',
+          }
+        : { ...selectionRef.current },
+      activeBlock: safeActive,
+      mathToken: mathEnterTokenRef.current
+        ? { ...mathEnterTokenRef.current }
+        : null,
+      insertedBlocks: {
+        content: insertedBlocksRef.current.content,
+        blocks: insertedBlocksRef.current.blocks.map((block) => ({ ...block })),
+      },
+      editingBoundary: editingBoundaryRef.current
+        ? { ...editingBoundaryRef.current }
+        : null,
+      expectedContent: '',
+      expectedActiveBlock: safeActive,
+      expectedDraft: '',
+    }
+  }
+
+  const pushEditorUndo = (
+    snapshot: EditorUndoSnapshot,
+    expectedContent: string,
+    expectedActiveBlock = safeActive,
+    expectedDraft = draft,
+  ) => {
+    editorUndoRef.current = [
+      ...editorUndoRef.current,
+      { ...snapshot, expectedContent, expectedActiveBlock, expectedDraft },
+    ].slice(-32)
+  }
+
+  const restoreEditorUndo = (): boolean => {
+    const snapshot = editorUndoRef.current.at(-1)
+    if (
+      !snapshot ||
+      snapshot.expectedActiveBlock !== safeActive ||
+      (snapshot.expectedContent !== contentRef.current &&
+        !(
+          snapshot.expectedActiveBlock === snapshot.activeBlock &&
+          snapshot.expectedDraft === draft
+        ))
+    ) {
+      return false
+    }
+    editorUndoRef.current = editorUndoRef.current.slice(0, -1)
+    invalidateMathInteraction()
+    pendingUndoRestoreRef.current = snapshot
+    insertedBlocksRef.current = snapshot.insertedBlocks
+    editingBoundaryRef.current = snapshot.editingBoundary
+    setInsertedBlocks(snapshot.insertedBlocks)
+    setEditingBoundary(snapshot.editingBoundary)
+    setDraft(snapshot.draft)
+    rangeRef.current = { ...snapshot.range }
+    contentRef.current = snapshot.content
+    pendingAcknowledgementRef.current = snapshot.content
+    onChange(snapshot.content)
+    onActiveBlockChange(snapshot.activeBlock)
+    return true
+  }
+
   const applyNativeTextareaEdit = (
     before: string,
     value: string,
@@ -990,12 +1277,12 @@ export function LiveEditor({
     selectionEnd = selectionStart,
     afterCommit?: () => void,
     afterSelection = false,
+    fallbackUndo?: EditorUndoSnapshot,
   ) => {
     const textarea = textareaRef.current
     if (!textarea) return
     const change = textReplacement(before, value)
-    textarea.focus()
-    textarea.setSelectionRange(change.start, change.end)
+    setEditorSelection(textarea, change.start, change.end)
     const tracked = { expectedValue: value, observed: false }
     nativeInputRef.current = tracked
     const nativeApplied =
@@ -1010,15 +1297,21 @@ export function LiveEditor({
         'preserve',
       )
       commitDraft(textarea.value)
+      if (fallbackUndo) {
+        pushEditorUndo(fallbackUndo, contentRef.current, safeActive, value)
+      }
     } else if (!tracked.observed) {
       commitDraft(value)
     }
     nativeInputRef.current = null
     const deferCommitCallback = afterSelection && nativeApplied
     if (!deferCommitCallback) afterCommit?.()
-    afterPaint(() => {
-      textarea.focus()
-      textarea.setSelectionRange(selectionStart, selectionEnd)
+    deferredSelectionRef.current = {
+      start: selectionStart,
+      end: selectionEnd,
+    }
+    afterInteractionPaint(textarea, () => {
+      setEditorSelection(textarea, selectionStart, selectionEnd)
       if (deferCommitCallback) afterCommit?.()
     })
   }
@@ -1027,7 +1320,7 @@ export function LiveEditor({
     const textarea = textareaRef.current
     if (!textarea || !formatRequest || formatRequest.id === handledFormatRef.current) return
     if (readOnly) return
-    mathEnterTokenRef.current = null
+    invalidateMathInteraction()
     handledFormatRef.current = formatRequest.id
     const result = formattedValue(
       formatRequest.command,
@@ -1036,9 +1329,8 @@ export function LiveEditor({
       textarea.selectionEnd,
     )
     commitDraft(result.value)
-    afterPaint(() => {
-      textarea.focus()
-      textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
+    afterInteractionPaint(textarea, () => {
+      setEditorSelection(textarea, result.selectionStart, result.selectionEnd)
     })
   }, [content, draft, formatRequest, onChange])
 
@@ -1115,9 +1407,13 @@ export function LiveEditor({
         ),
       ).length
       commitDraft(normalized)
-      afterPaint(() => {
-        textareaRef.current?.setSelectionRange(nextStart, nextEnd)
-      })
+      const textarea = textareaRef.current
+      if (textarea) {
+        deferredSelectionRef.current = { start: nextStart, end: nextEnd }
+        afterInteractionPaint(textarea, () => {
+          setEditorSelection(textarea, nextStart, nextEnd)
+        })
+      }
     }
   }
 
@@ -1161,14 +1457,103 @@ export function LiveEditor({
     onActiveBlockChange(safeActive + 1)
   }
 
+  const exitMathBlock = (
+    cleaned: string,
+    snapshot: EditorUndoSnapshot,
+  ) => {
+    const previousContent = contentRef.current
+    const previousRange = { ...rangeRef.current }
+    const previousSource = previousContent.slice(
+      previousRange.start,
+      previousRange.end,
+    )
+    const cleanedSource = restoreSourceEols(
+      cleaned,
+      previousSource,
+      nearestEol(previousContent, previousRange.start),
+    )
+    const replaced = replaceBlockSource(
+      previousContent,
+      previousRange,
+      cleanedSource,
+    )
+    const cleanedEnd = previousRange.start + cleanedSource.length
+    const eol = nearestEol(replaced, cleanedEnd)
+    const insertion = replaced.startsWith(`${eol}${eol}`, cleanedEnd)
+      ? eol
+      : `${eol}${eol}`
+    const nextContent =
+      replaced.slice(0, cleanedEnd) + insertion + replaced.slice(cleanedEnd)
+    const cleanupDelta =
+      cleanedSource.length - (previousRange.end - previousRange.start)
+    const existing =
+      insertedBlocksRef.current.content === previousContent
+        ? insertedBlocksRef.current.blocks
+        : []
+    const cleanedBlocks = existing.map((block) =>
+      block.offset === previousRange.start
+        ? { ...block, length: cleanedSource.length }
+        : block.offset > previousRange.end
+          ? { ...block, offset: block.offset + cleanupDelta }
+          : { ...block },
+    )
+    const leftSeparators = separatesParagraphWithOneEol({
+      ...active,
+      type: 'math',
+      source: cleanedSource,
+      end: cleanedEnd,
+    })
+      ? 1
+      : 2
+    const emptyOffset = cleanedEnd + leftSeparators * eol.length
+    const nextInserted = {
+      content: nextContent,
+      blocks: [
+        ...cleanedBlocks.map((block) =>
+          block.offset > cleanedEnd
+            ? { ...block, offset: block.offset + insertion.length }
+            : block,
+        ),
+        {
+          offset: emptyOffset,
+          length: 0,
+          leftPadding: emptyOffset - cleanedEnd,
+          rightPadding: 0,
+        },
+      ].filter(
+        (block, index, blocks) =>
+          blocks.findIndex((candidate) => candidate.offset === block.offset) ===
+          index,
+      ),
+    }
+    invalidateMathInteraction()
+    draftRevisionRef.current += 1
+    setDraft(cleaned)
+    rangeRef.current = { start: previousRange.start, end: cleanedEnd }
+    insertedBlocksRef.current = nextInserted
+    editingBoundaryRef.current = null
+    setInsertedBlocks(nextInserted)
+    setEditingBoundary(null)
+    contentRef.current = nextContent
+    pendingAcknowledgementRef.current = nextContent
+    pushEditorUndo(snapshot, nextContent, safeActive + 1, '')
+    onChange(nextContent)
+    onActiveBlockChange(safeActive + 1)
+  }
+
   const enterDisplayMathMode = (value: string): boolean => {
     const isDollar = value === '$$'
     const isYen =
       cjkShortcuts && (value === '¥¥' || value === '￥￥')
     if (!isDollar && !isYen) return false
     const mathSource = '$$\n\n$$'
-    mathEnterTokenRef.current = null
-    applyNativeTextareaEdit(value, mathSource, 3)
+    invalidateMathInteraction()
+    const fallbackUndo = snapshotForDraft(value, {
+      start: value.length,
+      end: value.length,
+      direction: 'none',
+    })
+    applyNativeTextareaEdit(value, mathSource, 3, 3, undefined, false, fallbackUndo)
     return true
   }
 
@@ -1180,13 +1565,39 @@ export function LiveEditor({
       composingRef.current
     ) return
     const textarea = event.currentTarget
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === 'z'
+    ) {
+      invalidateMathInteraction()
+      if (restoreEditorUndo()) {
+        event.preventDefault()
+      }
+      return
+    }
     const unmodifiedEnter =
       event.key === 'Enter' &&
       !event.shiftKey &&
       !event.ctrlKey &&
       !event.altKey &&
       !event.metaKey
-    if (!unmodifiedEnter) mathEnterTokenRef.current = null
+    if (
+      [
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        'PageUp',
+        'PageDown',
+      ].includes(event.key)
+    ) {
+      invalidateMathInteraction()
+    }
+    if (!unmodifiedEnter) invalidateMathInteraction()
 
     if (
       event.ctrlKey &&
@@ -1334,21 +1745,15 @@ export function LiveEditor({
         draft[start - 1] === '\n'
       if (canExit) {
         const cleaned = draft.slice(0, start - 1) + draft.slice(start)
-        mathEnterTokenRef.current = null
-        applyNativeTextareaEdit(draft, cleaned, start - 1, start - 1, () => {
-          insertBlockAfter({
-            ...active,
-            type: 'math',
-            source: cleaned,
-            end: rangeRef.current.start + cleaned.length,
-          })
-        })
+        const snapshot = currentUndoSnapshot()
+        exitMathBlock(cleaned, snapshot)
         return
       }
 
       const nextDraft = draft.slice(0, start) + '\n' + draft.slice(end)
       const caret = start + 1
-      mathEnterTokenRef.current = null
+      invalidateMathInteraction()
+      const fallbackUndo = currentUndoSnapshot()
       applyNativeTextareaEdit(
         draft,
         nextDraft,
@@ -1363,6 +1768,7 @@ export function LiveEditor({
           }
         },
         true,
+        fallbackUndo,
       )
       return
     }
@@ -1780,7 +2186,10 @@ export function LiveEditor({
                         spellCheck={!fencedCode && !displayMath}
                         readOnly={readOnly}
                         value={draft}
-                        onFocus={() => setActiveInputFocused(true)}
+                        onFocus={(event) => {
+                          reportSelection(event.currentTarget)
+                          setActiveInputFocused(true)
+                        }}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
@@ -1806,7 +2215,7 @@ export function LiveEditor({
                           ) {
                             return
                           }
-                          mathEnterTokenRef.current = null
+                          invalidateMathInteraction()
                           commitDraft(textarea.value)
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
@@ -1819,21 +2228,36 @@ export function LiveEditor({
                         }}
                         onSelect={(event) => {
                           const textarea = event.currentTarget
+                          const deferred = deferredSelectionRef.current
                           const token = mathEnterTokenRef.current
+                          if (deferred) {
+                            if (
+                              token &&
+                              (textarea.selectionStart !== token.caret ||
+                                textarea.selectionEnd !== token.caret)
+                            ) {
+                              deferredSelectionRef.current = null
+                              invalidateMathInteraction()
+                              reportSelection(textarea)
+                            }
+                            return
+                          }
+                          deferredSelectionRef.current = null
                           if (
-                            token &&
-                            (textarea.selectionStart !== token.caret ||
-                              textarea.selectionEnd !== token.caret)
+                            textarea.selectionStart !== selectionRef.current.start ||
+                            textarea.selectionEnd !== selectionRef.current.end ||
+                            textarea.selectionDirection !==
+                              selectionRef.current.direction
                           ) {
-                            mathEnterTokenRef.current = null
+                            invalidateMathInteraction()
                           }
                           reportSelection(textarea)
                         }}
                         onPointerDown={() => {
-                          mathEnterTokenRef.current = null
+                          invalidateMathInteraction()
                         }}
                         onBlur={(event) => {
-                          mathEnterTokenRef.current = null
+                          invalidateMathInteraction()
                           setActiveInputFocused(false)
                           composingRef.current = false
                           codeTabEscapeRef.current = false
@@ -1844,11 +2268,12 @@ export function LiveEditor({
                           )
                         }}
                         onCompositionStart={() => {
-                          mathEnterTokenRef.current = null
+                          invalidateMathInteraction()
                           composingRef.current = true
                         }}
                         onCompositionEnd={(event) => {
                           composingRef.current = false
+                          invalidateMathInteraction()
                           if (enterDisplayMathMode(event.currentTarget.value)) {
                             return
                           }
