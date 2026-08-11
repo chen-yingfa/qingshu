@@ -4,6 +4,10 @@ export interface ToastMessage {
   id: number
   tone: 'success' | 'warning' | 'error'
   message: string
+  action?: {
+    label: string
+    onClick(): void
+  }
 }
 
 interface ToastProps {
@@ -14,9 +18,10 @@ interface ToastProps {
 
 function Toast({ toast, duration, onDismiss }: ToastProps) {
   useEffect(() => {
-    const timer = window.setTimeout(() => onDismiss(toast.id), duration)
+    const visibleFor = toast.action ? Math.max(duration, 8000) : duration
+    const timer = window.setTimeout(() => onDismiss(toast.id), visibleFor)
     return () => window.clearTimeout(timer)
-  }, [duration, onDismiss, toast.id])
+  }, [duration, onDismiss, toast.action, toast.id])
 
   return (
     <div
@@ -26,7 +31,21 @@ function Toast({ toast, duration, onDismiss }: ToastProps) {
       <span className="toast-mark" aria-hidden="true">
         {toast.tone === 'success' ? '✓' : '!'}
       </span>
-      <span className="toast-message">{toast.message}</span>
+      <span className="toast-content">
+        <span className="toast-message">{toast.message}</span>
+        {toast.action && (
+          <button
+            type="button"
+            className="toast-action"
+            onClick={() => {
+              toast.action?.onClick()
+              onDismiss(toast.id)
+            }}
+          >
+            {toast.action.label}
+          </button>
+        )}
+      </span>
       <button
         type="button"
         aria-label={`Dismiss notification: ${toast.message}`}

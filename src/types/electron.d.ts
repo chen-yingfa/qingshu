@@ -21,6 +21,7 @@ export interface QingshuApi {
   saveFile(request: { path?: string; content: string }): Promise<FileResult>
   exportHtml(request: ExportHtmlRequest): Promise<FileResult>
   exportPdf(): Promise<FileResult>
+  showItemInFolder(path: string): Promise<void>
   windowAction(action: WindowAction): Promise<void>
   respondToClose(confirmed: boolean): Promise<void>
   onCloseIntent(listener: () => void): () => void

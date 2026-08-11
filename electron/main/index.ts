@@ -48,6 +48,7 @@ const authorizedDocuments = new WeakMap<
   Electron.WebContents,
   Map<string, AuthorizedDocument>
 >()
+const exportedFiles = new WeakMap<Electron.WebContents, Set<string>>()
 let tempSequence = 0
 
 interface CloseState {
@@ -106,6 +107,12 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean
 
 function assertNoPayload(channel: string, args: unknown[]): void {
   if (args.length !== 0) invalidPayload(channel)
+}
+
+function rememberExport(sender: Electron.WebContents, path: string): void {
+  const files = exportedFiles.get(sender) ?? new Set<string>()
+  files.add(resolve(path))
+  exportedFiles.set(sender, files)
 }
 
 function parseSaveRequest(value: unknown, extra: unknown[]): {
@@ -458,6 +465,7 @@ ipcMain.handle(
     if (target.canceled) return target
 
     await writeFile(target.path, request.html, 'utf8')
+    rememberExport(event.sender, target.path)
     return target
   },
 )
@@ -479,7 +487,27 @@ ipcMain.handle(
       printBackground: true,
     })
     await writeFile(target.path, pdf)
+    rememberExport(event.sender, target.path)
     return target
+  },
+)
+
+ipcMain.handle(
+  'qingshu:show-item-in-folder',
+  (
+    event: IpcMainInvokeEvent,
+    rawPath: unknown,
+    ...extra: unknown[]
+  ): void => {
+    assertTrustedIpcSender(event)
+    if (extra.length !== 0 || typeof rawPath !== 'string') {
+      invalidPayload('qingshu:show-item-in-folder')
+    }
+    const path = resolve(rawPath as string)
+    if (!exportedFiles.get(event.sender)?.has(path)) {
+      throw new Error('File was not exported by Qingshu')
+    }
+    shell.showItemInFolder(path)
   },
 )
 

@@ -12,6 +12,8 @@ const api: QingshuApi = {
   exportHtml: (request: ExportHtmlRequest) =>
     ipcRenderer.invoke('qingshu:export-html', request),
   exportPdf: () => ipcRenderer.invoke('qingshu:export-pdf'),
+  showItemInFolder: path =>
+    ipcRenderer.invoke('qingshu:show-item-in-folder', path),
   windowAction: (action: WindowAction) =>
     ipcRenderer.invoke('qingshu:window-action', action),
   respondToClose: confirmed =>

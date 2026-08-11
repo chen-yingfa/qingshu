@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   showMessageBox: vi.fn(),
+  showItemInFolder: vi.fn(),
   fromWebContents: vi.fn(),
   browserWindows: [] as any[],
   browserWindowOptions: [] as any[],
@@ -102,7 +103,10 @@ vi.mock('electron', () => ({
       mocks.handlers.set(channel, handler)
     },
   },
-  shell: { openExternal: vi.fn() },
+  shell: {
+    openExternal: vi.fn(),
+    showItemInFolder: mocks.showItemInFolder,
+  },
 }))
 
 const main = await import('./index')
@@ -168,6 +172,7 @@ describe('desktop IPC', () => {
       'qingshu:export-pdf',
       'qingshu:open-file',
       'qingshu:save-file',
+      'qingshu:show-item-in-folder',
       'qingshu:window-action',
     ])
   })
@@ -754,6 +759,29 @@ describe('desktop IPC', () => {
       '<h1>Hello</h1>',
       'utf8',
     )
+  })
+
+  it('reveals only files exported by the requesting renderer', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/reveal.html',
+    })
+    await mocks.handlers
+      .get('qingshu:export-html')
+      ?.(event, { html: '<h1>Reveal</h1>' })
+
+    expect(() =>
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(event, '/exports/reveal.html'),
+    ).not.toThrow()
+    expect(mocks.showItemInFolder).toHaveBeenCalledWith('/exports/reveal.html')
+
+    expect(() =>
+      mocks.handlers
+        .get('qingshu:show-item-in-folder')
+        ?.(event, '/private/unexported.txt'),
+    ).toThrow('File was not exported by Qingshu')
   })
 
   it('rejects renderer-supplied export paths instead of bypassing native dialogs', async () => {

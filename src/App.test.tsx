@@ -28,6 +28,7 @@ beforeEach(() => {
     saveFile: vi.fn(),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
+    showItemInFolder: vi.fn(),
     windowAction: vi.fn(),
     respondToClose: vi.fn(),
     onCloseIntent: vi.fn((listener: () => void) => {
@@ -474,5 +475,7 @@ describe('commands and operation feedback', () => {
     expect(request.html).toContain('class="katex"')
     expect(request.html).toContain('<meta charset="utf-8">')
     expect(request.html).toContain('<style>')
+    fireEvent.click(await screen.findByRole('button', { name: /Show in/ }))
+    expect(api.showItemInFolder).toHaveBeenCalledWith('/exports/note.html')
   })
 })

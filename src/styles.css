@@ -714,6 +714,14 @@ kbd {
   text-overflow: ellipsis;
 }
 
+.toast-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .toast button {
   width: 24px;
   height: 24px;
@@ -724,6 +732,17 @@ kbd {
   background: transparent;
   font-size: 18px;
   line-height: 1;
+}
+
+.toast .toast-action {
+  width: auto;
+  height: auto;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .toast button:hover,

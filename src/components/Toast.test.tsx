@@ -48,4 +48,26 @@ describe('ToastRegion', () => {
     vi.advanceTimersByTime(3000)
     expect(onDismiss).toHaveBeenCalledWith(7)
   })
+
+  it('runs an export action and dismisses its notification', () => {
+    const onDismiss = vi.fn()
+    const onAction = vi.fn()
+    render(
+      <ToastRegion
+        toasts={[
+          {
+            id: 9,
+            tone: 'success',
+            message: 'Exported note.pdf',
+            action: { label: 'Show in folder', onClick: onAction },
+          },
+        ]}
+        onDismiss={onDismiss}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show in folder' }))
+    expect(onAction).toHaveBeenCalledOnce()
+    expect(onDismiss).toHaveBeenCalledWith(9)
+  })
 })

@@ -24,6 +24,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function showExportLabel(): string {
+  if (/Mac|iPhone|iPad/u.test(navigator.platform)) return 'Show in Finder'
+  if (/Win/u.test(navigator.platform)) return 'Show in File Explorer'
+  return 'Show in folder'
+}
+
 export function formatShortcut(
   shortcut: string,
   isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform),
@@ -71,14 +77,35 @@ export default function App() {
     { id: number; command: FormatCommand } | undefined
   >()
 
-  const addToast = useCallback((tone: ToastMessage['tone'], message: string) => {
-    const id = ++toastId.current
-    setToasts((current) => [...current.slice(-2), { id, tone, message }])
-  }, [])
+  const addToast = useCallback(
+    (
+      tone: ToastMessage['tone'],
+      message: string,
+      action?: ToastMessage['action'],
+    ) => {
+      const id = ++toastId.current
+      setToasts((current) => [
+        ...current.slice(-2),
+        { id, tone, message, ...(action ? { action } : {}) },
+      ])
+    },
+    [],
+  )
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
+
+  const revealExport = useCallback(
+    async (path: string) => {
+      try {
+        await window.qingshu.showItemInFolder(path)
+      } catch (error) {
+        addToast('error', errorMessage(error))
+      }
+    },
+    [addToast],
+  )
 
   const handlePreviewReady = useCallback((error?: Error) => {
     if (error) activePdfExport.current?.reject(error)
@@ -175,7 +202,10 @@ export default function App() {
             })
             if (!result.canceled) {
               dispatch({ type: 'error', message: null })
-              addToast('success', `Exported ${filename(result.path)}`)
+              addToast('success', `Exported ${filename(result.path)}`, {
+                label: showExportLabel(),
+                onClick: () => void revealExport(result.path),
+              })
             }
           } catch (error) {
             const message = errorMessage(error)
@@ -205,7 +235,10 @@ export default function App() {
             const result = await window.qingshu.exportPdf()
             if (!result.canceled) {
               dispatch({ type: 'error', message: null })
-              addToast('success', `Exported ${filename(result.path)}`)
+              addToast('success', `Exported ${filename(result.path)}`, {
+                label: showExportLabel(),
+                onClick: () => void revealExport(result.path),
+              })
             }
           } catch (error) {
             const message = errorMessage(error)
@@ -229,6 +262,7 @@ export default function App() {
       dispatch,
       newDocument,
       openDocument,
+      revealExport,
       saveDocument,
       state.content,
       state.path,
