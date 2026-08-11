@@ -100,6 +100,16 @@ describe('application safety controls', () => {
     )
   })
 
+  it('migrates the legacy font when stored settings have a malformed shape', () => {
+    window.localStorage.setItem('qingshu:document-font', 'mono')
+    window.localStorage.setItem('qingshu:settings:v1', 'null')
+    const { container } = render(<App />)
+
+    expect(container.querySelector('.app-shell')?.classList).toContain(
+      'font-mono',
+    )
+  })
+
   it('follows live system theme changes while theme is set to System', () => {
     let listener: ((event: { matches: boolean }) => void) | undefined
     Object.defineProperty(window, 'matchMedia', {

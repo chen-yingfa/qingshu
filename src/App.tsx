@@ -84,7 +84,14 @@ function initialSettings(): AppSettings {
     let migrateLegacy = !raw
     if (raw) {
       try {
-        JSON.parse(raw)
+        const parsed = JSON.parse(raw)
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed)
+        ) {
+          migrateLegacy = true
+        }
       } catch {
         migrateLegacy = true
       }
