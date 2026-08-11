@@ -15,7 +15,11 @@ export function TitleBar({ path, dirty, onClose }: TitleBarProps) {
   }
 
   return (
-    <header className="title-bar">
+    <header
+      className={
+        usesNativeControls ? 'title-bar title-bar-native-mac' : 'title-bar'
+      }
+    >
       <div className="brand-mark" aria-hidden="true">
         Q
       </div>
