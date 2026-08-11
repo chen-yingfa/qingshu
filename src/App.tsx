@@ -289,9 +289,15 @@ export default function App() {
         }
         case 'save': {
           const result = await saveDocument()
+          if (
+            result.status !== 'canceled' &&
+            result.status !== 'error' &&
+            result.path
+          ) {
+            await refreshRecents()
+          }
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
-            await refreshRecents()
           } else if (result.status === 'warning') {
             addToast(
               'warning',
@@ -313,9 +319,15 @@ export default function App() {
         }
         case 'save-as': {
           const result = await saveDocument(true)
+          if (
+            result.status !== 'canceled' &&
+            result.status !== 'error' &&
+            result.path
+          ) {
+            await refreshRecents()
+          }
           if (result.status === 'success') {
             addToast('success', `Saved ${filename(result.path)}`)
-            await refreshRecents()
           } else if (result.status === 'warning') {
             addToast(
               'warning',

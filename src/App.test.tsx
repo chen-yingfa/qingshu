@@ -820,6 +820,12 @@ describe('commands and operation feedback', () => {
   })
 
   it('reports a committed save with a durability warning accurately', async () => {
+    api.listRecentFiles
+      .mockResolvedValueOnce({ paths: [], removed: [] })
+      .mockResolvedValue({
+        paths: ['/notes/warning.md'],
+        removed: [],
+      })
     api.saveFile.mockResolvedValue({
       canceled: false,
       path: '/notes/warning.md',
@@ -838,6 +844,9 @@ describe('commands and operation feedback', () => {
       ),
     ).not.toBeNull()
     expect(screen.getByText('Saved')).not.toBeNull()
+    await waitFor(() => expect(api.listRecentFiles).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Recent files' }))
+    expect(screen.getByRole('menuitem', { name: 'warning.md' })).not.toBeNull()
   })
 
   it('sends a rendered standalone HTML document through the existing bridge', async () => {
