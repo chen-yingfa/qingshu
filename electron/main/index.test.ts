@@ -851,6 +851,37 @@ describe('desktop IPC', () => {
     ).rejects.toThrow('File was not exported by Qingshu')
   })
 
+  it('atomically consumes a reveal grant before asynchronous validation', async () => {
+    mocks.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/exports/concurrent.html',
+    })
+    await mocks.handlers
+      .get('qingshu:export-html')
+      ?.(event, { html: '<h1>Concurrent</h1>' })
+
+    let releaseRealpath!: () => void
+    mocks.realpath.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseRealpath = () => resolve('/exports/concurrent.html')
+        }),
+    )
+    const firstReveal = mocks.handlers
+      .get('qingshu:show-item-in-folder')
+      ?.(event, '/exports/concurrent.html')
+    const secondReveal = mocks.handlers
+      .get('qingshu:show-item-in-folder')
+      ?.(event, '/exports/concurrent.html')
+
+    await expect(secondReveal).rejects.toThrow(
+      'File was not exported by Qingshu',
+    )
+    releaseRealpath()
+    await expect(firstReveal).resolves.toBeUndefined()
+    expect(mocks.showItemInFolder).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects renderer-supplied export paths instead of bypassing native dialogs', async () => {
     await expect(
       mocks.handlers.get('qingshu:export-html')?.(event, {

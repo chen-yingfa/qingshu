@@ -486,4 +486,20 @@ describe('commands and operation feedback', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Show in/ }))
     expect(api.showItemInFolder).toHaveBeenCalledWith('/exports/note.html')
   })
+
+  it('shows an error when the exported file can no longer be revealed', async () => {
+    api.exportHtml.mockResolvedValue({
+      canceled: false,
+      path: '/exports/missing.html',
+    })
+    api.showItemInFolder.mockRejectedValue(new Error('Exported file is missing'))
+    render(<App />)
+
+    menuListener?.('export-html')
+    fireEvent.click(await screen.findByRole('button', { name: /Show in/ }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Exported file is missing',
+    )
+  })
 })

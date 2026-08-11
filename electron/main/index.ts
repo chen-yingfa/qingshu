@@ -523,6 +523,9 @@ ipcMain.handle(
     if (path !== resolve(path) || !exported) {
       throw new Error('File was not exported by Qingshu')
     }
+    // Consume before asynchronous validation so concurrent reveal calls cannot
+    // reuse the same one-time grant.
+    files?.delete(path)
     let realPath: string
     let revision: FileRevision | null
     try {
@@ -539,7 +542,6 @@ ipcMain.handle(
       throw new Error('Exported file has changed or no longer exists')
     }
     shell.showItemInFolder(realPath)
-    files?.delete(path)
   },
 )
 
