@@ -171,7 +171,14 @@ export function createMarkerProjection(
       mode === 'quote' && change.beforeEnd > change.start
         ? markerAtVisibleStart(change.beforeEnd)
         : undefined
-    const canonicalEnd = endMarker?.start ?? toCanonicalOffset(change.beforeEnd)
+    const visibleBeforeSuffix =
+      visible.slice(0, change.start) + change.replacement
+    const suffixRemainsAtLineStart =
+      visibleBeforeSuffix.length === 0 || /\r?\n$/u.test(visibleBeforeSuffix)
+    const canonicalEnd =
+      endMarker && suffixRemainsAtLineStart
+        ? endMarker.start
+        : toCanonicalOffset(change.beforeEnd)
     let replacement = change.replacement
     if (mode === 'quote' && replacement) {
       const currentMarker =

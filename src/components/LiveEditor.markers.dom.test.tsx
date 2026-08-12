@@ -202,6 +202,57 @@ describe('LiveEditor marker projection', () => {
     expect(onChange).toHaveBeenLastCalledWith('> a\n>> a')
   })
 
+  it('accepts unmatched native history undo and redo values in a projected list', async () => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial="- item" onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+
+    fireEvent.input(editor, {
+      target: { value: 'before', selectionStart: 6, selectionEnd: 6 },
+      inputType: 'historyUndo',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('- before')
+    await waitFor(() => expect(editor.value).toBe('before'))
+
+    fireEvent.input(editor, {
+      target: { value: 'after', selectionStart: 5, selectionEnd: 5 },
+      inputType: 'historyRedo',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('- after')
+  })
+
+  it('reconstructs a projected quote join through native undo and redo', async () => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial={'> a\n>> a'} onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(2, 2)
+    fireEvent.select(editor)
+    editor.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'deleteContentBackward',
+    }))
+    fireEvent.input(editor, {
+      target: { value: 'aa', selectionStart: 1, selectionEnd: 1 },
+      inputType: 'deleteContentBackward',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('> aa')
+    await waitFor(() => expect(editor.value).toBe('aa'))
+
+    fireEvent.input(editor, {
+      target: { value: 'a\na', selectionStart: 2, selectionEnd: 2 },
+      inputType: 'historyUndo',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('> a\n>> a')
+    await waitFor(() => expect(editor.value).toBe('a\na'))
+
+    fireEvent.input(editor, {
+      target: { value: 'aa', selectionStart: 1, selectionEnd: 1 },
+      inputType: 'historyRedo',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('> aa')
+  })
+
   it('keeps canonical markers visible in source mode', () => {
     render(<ControlledEditor initial={'- item\r\n> quote'} sourceMode />)
 
@@ -370,5 +421,70 @@ describe('LiveEditor marker projection', () => {
 
     fireEvent.compositionEnd(editor, { data: 'text' })
     expect(onChange).toHaveBeenLastCalledWith('- 中文 text')
+  })
+
+  it.each([
+    ['plain text', '', ''],
+    ['projected list text', '- ', '- '],
+  ])('groups $name IME preedit updates into one custom undo entry', (
+    _name,
+    initial,
+    expected,
+  ) => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial={initial} onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+
+    fireEvent.compositionStart(editor)
+    fireEvent.input(editor, {
+      target: { value: 'n', selectionStart: 1, selectionEnd: 1 },
+      inputType: 'insertCompositionText',
+    })
+    fireEvent.input(editor, {
+      target: { value: 'ni', selectionStart: 2, selectionEnd: 2 },
+      inputType: 'insertCompositionText',
+    })
+    fireEvent.input(editor, {
+      target: { value: '你', selectionStart: 1, selectionEnd: 1 },
+      inputType: 'insertFromComposition',
+    })
+    fireEvent.compositionEnd(editor, { data: '你' })
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenLastCalledWith(expected)
+    expect(onChange).not.toHaveBeenLastCalledWith(
+      initial.startsWith('-') ? '- ni' : 'ni',
+    )
+  })
+
+  it('finalizes one projected IME undo entry when composition blurs', () => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial="- 中文" onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    fireEvent.compositionStart(editor)
+    fireEvent.input(editor, {
+      target: { value: '中文text', selectionStart: 6, selectionEnd: 6 },
+      inputType: 'insertCompositionText',
+    })
+    fireEvent.blur(editor)
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenLastCalledWith('- 中文')
   })
 })

@@ -101,6 +101,36 @@ describe('toolbar tooltips', () => {
     expect(tooltip?.getAttribute('data-visible')).toBe('false')
   })
 
+  it('keeps a focused tooltip visible after the pointer leaves', () => {
+    renderToolbar()
+    const button = screen.getByRole('button', { name: 'Recent files' })
+    const tooltip = button.querySelector('[role="tooltip"]')
+
+    fireEvent.mouseEnter(button)
+    fireEvent.focus(button)
+    fireEvent.mouseLeave(button)
+
+    expect(tooltip?.getAttribute('data-visible')).toBe('true')
+    expect(button.getAttribute('aria-describedby')).not.toBeNull()
+    fireEvent.blur(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('false')
+  })
+
+  it('keeps a hovered tooltip visible after the button blurs', () => {
+    renderToolbar()
+    const button = screen.getByRole('button', { name: 'Recent files' })
+    const tooltip = button.querySelector('[role="tooltip"]')
+
+    fireEvent.focus(button)
+    fireEvent.mouseEnter(button)
+    fireEvent.blur(button)
+
+    expect(tooltip?.getAttribute('data-visible')).toBe('true')
+    expect(button.getAttribute('aria-describedby')).not.toBeNull()
+    fireEvent.mouseLeave(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('false')
+  })
+
   it('measures a wrapped tooltip and flips it inside a narrow viewport', () => {
     vi.stubGlobal('innerWidth', 100)
     vi.stubGlobal('innerHeight', 100)

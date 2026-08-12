@@ -47,7 +47,9 @@ const formats: Array<[FormatCommand, IconName, string]> = [
 
 function useToolbarTooltip(label: string) {
   const id = `toolbar-tooltip-${useId().replace(/:/gu, '')}`
-  const [visible, setVisible] = useState(false)
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const visible = hovered || focused
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const anchorRef = useRef<HTMLButtonElement | null>(null)
   const tooltipRef = useRef<HTMLSpanElement>(null)
@@ -73,7 +75,6 @@ function useToolbarTooltip(label: string) {
   }, [])
   const show = (button: HTMLButtonElement) => {
     anchorRef.current = button
-    setVisible(true)
   }
   useLayoutEffect(() => {
     if (visible) measure()
@@ -109,12 +110,16 @@ function useToolbarTooltip(label: string) {
     visible,
     tooltip,
     events: {
-      onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) =>
-        show(event.currentTarget),
-      onMouseLeave: () => setVisible(false),
-      onFocus: (event: FocusEvent<HTMLButtonElement>) =>
-        show(event.currentTarget),
-      onBlur: () => setVisible(false),
+      onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) => {
+        show(event.currentTarget)
+        setHovered(true)
+      },
+      onMouseLeave: () => setHovered(false),
+      onFocus: (event: FocusEvent<HTMLButtonElement>) => {
+        show(event.currentTarget)
+        setFocused(true)
+      },
+      onBlur: () => setFocused(false),
     },
   }
 }

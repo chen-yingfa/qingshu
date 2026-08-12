@@ -68,6 +68,83 @@ describe('marker projection', () => {
     ).toBe('>> a')
   })
 
+  it.each([
+    ['Backspace', 'deleteContentBackward', 2],
+    ['forward Delete', 'deleteContentForward', 1],
+  ])('removes the joined-away quote marker on %s', (
+    _name,
+    inputType,
+    caret,
+  ) => {
+    const projection = createMarkerProjection('> a\n>> a', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('aa', {
+        selectionStart: caret,
+        selectionEnd: caret,
+        inputType,
+      }),
+    ).toBe('> aa')
+  })
+
+  it.each([
+    {
+      name: 'nested list',
+      canonical: '>> - parent\n> >   - child',
+      visible: '- parent\n  - child',
+      joined: '- parent  - child',
+      expected: '>> - parent  - child',
+    },
+    {
+      name: 'task list with CRLF',
+      canonical: '> - [x] done\r\n>>> - [ ] next',
+      visible: '- [x] done\r\n- [ ] next',
+      joined: '- [x] done- [ ] next',
+      expected: '> - [x] done- [ ] next',
+    },
+  ])('removes nested quote syntax when joining a multiline $name', ({
+    canonical,
+    visible,
+    joined,
+    expected,
+  }) => {
+    const projection = createMarkerProjection(canonical, 'quote')
+    const boundary = visible.indexOf('\n') + 1
+
+    expect(projection.visible).toBe(visible)
+    expect(
+      projection.applyVisibleEdit(joined, {
+        selectionStart: boundary,
+        selectionEnd: boundary,
+        inputType: 'deleteContentBackward',
+      }),
+    ).toBe(expected)
+  })
+
+  it('removes the joined-away marker when a selection spans a quote boundary', () => {
+    const projection = createMarkerProjection('>> ab\n> > cd', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('ad', {
+        selectionStart: 1,
+        selectionEnd: 4,
+        inputType: 'deleteContentBackward',
+      }),
+    ).toBe('>> ad')
+  })
+
+  it('removes the suffix marker when a replacement joins from a line start', () => {
+    const projection = createMarkerProjection('> a\n>> b', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('xb', {
+        selectionStart: 0,
+        selectionEnd: 2,
+        inputType: 'insertText',
+      }),
+    ).toBe('> xb')
+  })
+
   it('preserves line-specific quote markers for multiline replacement with CRLF', () => {
     const projection = createMarkerProjection(
       '> same\r\n>> same\r\n> > tail',

@@ -1339,6 +1339,7 @@ export function LiveEditor({
   const activeBlockIdentityRef = useRef<object>({})
   const interactionGenerationRef = useRef(0)
   const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
+  const compositionUndoRef = useRef<EditorUndoSnapshot | null>(null)
   const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
   const syntheticListSeparatorsRef = useRef<SyntheticListSeparator[]>([])
   const insertedBlocksRef = useRef(insertedBlocks)
@@ -1469,6 +1470,7 @@ export function LiveEditor({
     preservePendingUndo = false,
   ) => {
     composingRef.current = false
+    compositionUndoRef.current = null
     codeTabEscapeRef.current = false
     invalidateMathInteraction()
     if (!preservePendingUndo) pendingUndoRestoreRef.current = null
@@ -1903,6 +1905,21 @@ export function LiveEditor({
     ].slice(-32)
   }
 
+  const finishCompositionTransaction = () => {
+    const snapshot = compositionUndoRef.current
+    compositionUndoRef.current = null
+    if (!snapshot || snapshot.content === contentRef.current) return
+    const expectedDraft = toEditorValue(
+      contentRef.current.slice(rangeRef.current.start, rangeRef.current.end),
+    )
+    pushEditorUndo(
+      snapshot,
+      contentRef.current,
+      safeActive,
+      expectedDraft,
+    )
+  }
+
   const restoreEditorUndo = (): boolean => {
     const snapshot = editorUndoRef.current.at(-1)
     if (
@@ -2331,18 +2348,23 @@ export function LiveEditor({
     onActiveBlockChange(safeActive + 1)
   }
 
-  const enterDisplayMathMode = (value: string): boolean => {
+  const enterDisplayMathMode = (
+    value: string,
+    transactionSnapshot?: EditorUndoSnapshot,
+  ): boolean => {
     const isDollar = value === '$$'
     const isYen =
       cjkShortcuts && (value === '¥¥' || value === '￥￥')
     if (!isDollar && !isYen) return false
     const mathSource = '$$\n\n$$'
     invalidateMathInteraction()
-    const undoSnapshot = snapshotForDraft(value, {
-      start: value.length,
-      end: value.length,
-      direction: 'none',
-    })
+    const undoSnapshot =
+      transactionSnapshot ??
+      snapshotForDraft(value, {
+        start: value.length,
+        end: value.length,
+        direction: 'none',
+      })
     applyControlledTextareaEdit(value, mathSource, 3, 3, undefined, undoSnapshot)
     return true
   }
@@ -3612,14 +3634,27 @@ export function LiveEditor({
                             inputType === 'historyUndo' &&
                             markerProjection.mode !== 'plain'
                           ) {
+                            const nativeValue = textarea.value
+                            const nativeSelectionStart = textarea.selectionStart
+                            const nativeSelectionEnd = textarea.selectionEnd
+                            const nativeSelectionDirection =
+                              textarea.selectionDirection ?? 'none'
                             textarea.value = draft
                             if (restoreEditorUndo()) {
                               restoreProjectedTextarea(textarea)
                               return
                             }
+                            textarea.value = nativeValue
+                            textarea.setSelectionRange(
+                              nativeSelectionStart,
+                              nativeSelectionEnd,
+                              nativeSelectionDirection,
+                            )
                           }
                           const undoSnapshot =
-                            markerProjection.mode === 'plain' || historyInput
+                            markerProjection.mode === 'plain' ||
+                            historyInput ||
+                            composingRef.current
                               ? null
                               : {
                                   ...currentUndoSnapshot(),
@@ -3735,17 +3770,40 @@ export function LiveEditor({
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          finishCompositionTransaction()
                           restoreProjectedTextarea(event.currentTarget)
                         }}
-                        onCompositionStart={() => {
+                        onCompositionStart={(event) => {
                           invalidateMathInteraction()
+                          const textarea = event.currentTarget
+                          compositionUndoRef.current = {
+                            ...currentUndoSnapshot(),
+                            selection: {
+                              start: markerProjection.toCanonicalOffset(
+                                textarea.selectionStart,
+                              ),
+                              end: markerProjection.toCanonicalOffset(
+                                textarea.selectionEnd,
+                              ),
+                              direction:
+                                textarea.selectionDirection ?? 'none',
+                            },
+                          }
                           composingRef.current = true
                         }}
                         onCompositionEnd={(event) => {
+                          const transactionSnapshot =
+                            compositionUndoRef.current ?? undefined
                           composingRef.current = false
                           invalidateMathInteraction()
                           canonicalizeProjectedTextarea(event.currentTarget)
-                          if (enterDisplayMathMode(event.currentTarget.value)) {
+                          if (
+                            enterDisplayMathMode(
+                              event.currentTarget.value,
+                              transactionSnapshot,
+                            )
+                          ) {
+                            compositionUndoRef.current = null
                             restoreProjectedTextarea(event.currentTarget)
                             return
                           }
@@ -3754,6 +3812,7 @@ export function LiveEditor({
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          finishCompositionTransaction()
                           restoreProjectedTextarea(event.currentTarget)
                         }}
                         onKeyDown={(event) => {

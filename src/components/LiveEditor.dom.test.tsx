@@ -622,6 +622,18 @@ describe('LiveEditor state synchronization', () => {
       target: { value: '新文text', selectionStart: 6, selectionEnd: 6 },
     })
     expect(result.onChange).toHaveBeenLastCalledWith('新文 text')
+
+    const replacement = screen.getByLabelText('Active Markdown block')
+    fireEvent.blur(replacement)
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(replacement, undo)
+    expect(undo.defaultPrevented).toBe(false)
+    expect(result.onChange).not.toHaveBeenLastCalledWith('中文')
   })
 
   it('resets code Tab escape state when a new block session replaces it', () => {
