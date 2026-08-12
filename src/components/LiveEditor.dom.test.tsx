@@ -216,6 +216,86 @@ describe('LiveEditor state synchronization', () => {
     expect(synchronized.selectionEnd).toBe(4)
   })
 
+  it('preserves active list DOM identity, caret, and composition across acknowledgements', () => {
+    const source = '- first\n- 中文'
+    const result = renderEditor(source, { activeBlock: 1 })
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    const group = result.container.querySelector('ul.semantic-list-group')
+    editor.focus()
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.compositionStart(editor)
+    fireEvent.change(editor, {
+      target: {
+        value: '- 中文字',
+        selectionStart: 5,
+        selectionEnd: 5,
+      },
+    })
+
+    result.rerender(
+      <LiveEditor
+        content={'- first\n- 中文字'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    const acknowledged = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(acknowledged).toBe(editor)
+    expect(result.container.querySelector('ul.semantic-list-group')).toBe(group)
+    expect(document.activeElement).toBe(editor)
+    expect(editor.selectionStart).toBe(5)
+    result.onChange.mockClear()
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(editor)
+  })
+
+  it('rotates active list DOM identity for an external semantic replacement', () => {
+    const result = renderEditor('- first\n- second', { activeBlock: 1 })
+    const editor = screen.getByLabelText('Active Markdown block')
+    const group = result.container.querySelector('ul.semantic-list-group')
+
+    result.rerender(
+      <LiveEditor
+        content={'1. replacement\n2. second'}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    expect(screen.getByLabelText('Active Markdown block')).not.toBe(editor)
+    expect(result.container.querySelector('ol.semantic-list-group')).not.toBe(group)
+  })
+
+  it('gives parent and nested task checkboxes their own accessible names', async () => {
+    const result = renderEditor('- [ ] parent\n  - [x] child\n\nAfter', {
+      activeBlock: 1,
+    })
+
+    expect(await screen.findByRole('checkbox', { name: 'parent' })).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'child' })).not.toBeNull()
+    expect(
+      result.container.querySelectorAll('input[type="checkbox"]'),
+    ).toHaveLength(2)
+  })
+
+  it('keeps task-list container semantics when its only item is active', () => {
+    const result = renderEditor('- [ ] active task')
+
+    expect(
+      result.container
+        .querySelector('ul.semantic-list-group')
+        ?.classList.contains('contains-task-list'),
+    ).toBe(true)
+  })
+
   it('keeps focus when a block after a list becomes an empty list item', () => {
     const result = renderEditor('- Previous item\n\nCurrent', {
       activeBlock: 1,
@@ -676,8 +756,8 @@ describe('LiveEditor state synchronization', () => {
     expect(renderBlock).toHaveBeenCalledTimes(159)
   })
 
-  it('renders a 100-item list with bounded group pipeline work', async () => {
-    const renderBlock = vi.spyOn(markdown, 'renderMarkdownBlock')
+  it('renders only changed item content in a 100-item semantic list', async () => {
+    const renderItem = vi.spyOn(markdown, 'renderMarkdownListItem')
     const source = Array.from(
       { length: 100 },
       (_, index) => `1. item ${index + 1}`,
@@ -691,7 +771,30 @@ describe('LiveEditor state synchronization', () => {
     expect(result.container.querySelectorAll('ol.semantic-list-group > li')).toHaveLength(
       100,
     )
-    expect(renderBlock.mock.calls.length).toBeLessThanOrEqual(1)
+    await waitFor(() => expect(renderItem).toHaveBeenCalledTimes(99))
+    renderItem.mockClear()
+
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.change(editor, {
+      target: { value: '1. changed item 100' },
+    })
+    result.rerender(
+      <LiveEditor
+        content={`${source.slice(0, source.lastIndexOf('\n') + 1)}1. changed item 100`}
+        activeBlock={99}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await new Promise((resolve) => window.setTimeout(resolve, 20))
+    expect(renderItem.mock.calls.length).toBeLessThanOrEqual(1)
+    expect(result.container.querySelectorAll('ol.semantic-list-group')).toHaveLength(1)
+    expect(result.container.querySelectorAll('ol.semantic-list-group > li')).toHaveLength(
+      100,
+    )
   })
 })
 
@@ -831,6 +934,62 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
     expect(result.onChange).toHaveBeenLastCalledWith('- parent\n- nested')
+  })
+
+  it('remaps an acknowledged top-level indent to its semantic parent', async () => {
+    const source = '- parent\n- child'
+    const nested = '- parent\n  - child'
+    const result = renderEditor(source, { activeBlock: 1 })
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.focus()
+    editor.setSelectionRange(2, 2)
+
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(result.onChange).toHaveBeenLastCalledWith(nested)
+    result.rerender(
+      <LiveEditor
+        content={nested}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => {
+      const remapped = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      expect(remapped.value).toBe(nested)
+      expect(document.activeElement).toBe(remapped)
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
+    })
+    expect(result.container.querySelectorAll('.editor-block-row')).toHaveLength(1)
+    expect(result.container.querySelectorAll('ul.semantic-list-group')).toHaveLength(1)
+    expect(result.container.textContent?.match(/child/gu)).toHaveLength(1)
+    expect(result.container.querySelector('.rendered-block')).toBeNull()
+
+    const remapped = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.keyDown(remapped, { key: 'z', ctrlKey: true })
+    expect(result.onChange).toHaveBeenLastCalledWith(source)
+    result.rerender(
+      <LiveEditor
+        content={source}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() => {
+      const restored = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      expect(restored.value).toBe('- child')
+      expect(document.activeElement).toBe(restored)
+    })
   })
 
   it('does not indent the first list item into indented code', () => {
@@ -3884,6 +4043,48 @@ describe('LiveEditor keyboard and composition behavior', () => {
 })
 
 describe('LiveEditor block reordering', () => {
+  it('places first-list drag controls inside aligned item rows across groups', () => {
+    const result = renderEditor(
+      '- first\n- second\n\nDivider\n\n1. third\n2. fourth',
+      { activeBlock: 2 },
+    )
+    const editor = result.container.querySelector('.editor')!
+    const groups = editor.querySelectorAll('.semantic-list-group')
+    const firstItem = groups[0].querySelector(':scope > li')!
+    const thirdItem = groups[1].querySelector(':scope > li')!
+
+    expect(editor.firstElementChild).toBe(groups[0])
+    expect(
+      firstItem.querySelector(':scope > [data-drop-boundary="0"]'),
+    ).not.toBeNull()
+    expect(
+      firstItem.querySelector(':scope > .block-drag-handle'),
+    ).not.toBeNull()
+    expect(
+      thirdItem.querySelector(':scope > [data-drop-boundary="3"]'),
+    ).not.toBeNull()
+    expect(
+      thirdItem.querySelector(':scope > .block-drag-handle'),
+    ).not.toBeNull()
+  })
+
+  it('moves a list item across semantic groups using its item drop zone', () => {
+    const source = '- first\n- second\n\nDivider\n\n1. third\n2. fourth'
+    const result = renderEditor(source, { activeBlock: 2 })
+    const handle = screen.getByRole('button', { name: 'Move block 1' })
+    const target = result.container.querySelector(
+      '[data-drop-boundary="3"]',
+    ) as HTMLElement
+
+    fireEvent.pointerDown(handle, { pointerId: 12, button: 0, isPrimary: true })
+    fireEvent.pointerEnter(target, { pointerId: 12 })
+    fireEvent.pointerUp(window, { pointerId: 12 })
+
+    expect(result.onChange).toHaveBeenLastCalledWith(
+      '- second\n\nDivider\n\n- first\n\n1. third\n2. fourth',
+    )
+  })
+
   it('reuses the current document model when beginning a block move', () => {
     const parse = vi.spyOn(markdown, 'parseDocument')
     renderEditor('First\n\nSecond\n\nThird')

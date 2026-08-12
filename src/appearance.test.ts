@@ -49,4 +49,10 @@ describe('writing surface appearance', () => {
       /\.block-drag-handle:focus-visible[\s\S]*opacity:\s*1;/su,
     )
   })
+
+  it('removes top spacing from an actual first-child semantic list', () => {
+    expect(styles).toMatch(
+      /\.editor\s*>\s*\.semantic-list-group:first-child\s*\{[^}]*margin-top:\s*0;/su,
+    )
+  })
 })

@@ -432,7 +432,7 @@ button {
   padding-left: 2em;
 }
 
-.editor > .block-drop-zone:first-child + .semantic-list-group {
+.editor > .semantic-list-group:first-child {
   margin-top: 0;
 }
 

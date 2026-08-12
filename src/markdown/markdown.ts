@@ -71,6 +71,7 @@ interface HastNode {
 export interface RenderedListItem {
   html: string
   className?: string
+  listClassName?: string
 }
 
 export interface RenderedListGroup {
@@ -393,20 +394,136 @@ function stringifyHastChildren(children: HastNode[] = []): string {
   } as Parameters<typeof serializer.stringify>[0])
 }
 
-function hastText(node: HastNode): string {
+function hastTextWithoutNestedLists(node: HastNode): string {
+  if (node.tagName === 'ul' || node.tagName === 'ol') return ''
   if (node.type === 'text') return node.value ?? ''
-  return (node.children ?? []).map(hastText).join('')
+  return (node.children ?? []).map(hastTextWithoutNestedLists).join('')
 }
 
-function labelTaskCheckbox(node: HastNode, label: string): void {
+function labelOwnTaskCheckbox(node: HastNode, label: string): void {
+  if (node.tagName === 'ul' || node.tagName === 'ol') return
   if (node.tagName === 'input' && node.properties?.type === 'checkbox') {
     node.properties.ariaLabel = label
     return
   }
-  node.children?.forEach((child) => labelTaskCheckbox(child, label))
+  node.children?.forEach((child) => labelOwnTaskCheckbox(child, label))
 }
 
-const listRenderCache = new Map<string, Promise<RenderedListGroup>>()
+function labelTaskCheckboxes(node: HastNode): void {
+  if (node.tagName === 'li') {
+    const label = hastTextWithoutNestedLists(node).trim()
+    if (label) labelOwnTaskCheckbox(node, label)
+  }
+  node.children?.forEach((child) => {
+    if (child.tagName === 'ul' || child.tagName === 'ol') {
+      child.children?.forEach(labelTaskCheckboxes)
+    } else if (node.tagName !== 'li') {
+      labelTaskCheckboxes(child)
+    }
+  })
+}
+
+const listItemRenderCache = new Map<string, Promise<RenderedListItem>>()
+
+export function markdownListItemRenderKey(
+  block: MarkdownBlock,
+  context: DocumentRenderContext,
+): string {
+  if (!block.list) throw new Error('A semantic list item requires list metadata')
+  const references = context.references
+    .filter(
+      (reference) => reference.start >= block.start && reference.end <= block.end,
+    )
+    .map(
+      ({ identifier, label, ordinal }) =>
+        `${identifier}\u0001${label}\u0001${ordinal}`,
+    )
+    .join('\u0002')
+  const metadata = block.list
+  return [
+    block.source,
+    metadata.ordered ? 'ordered' : 'unordered',
+    metadata.start,
+    metadata.index,
+    metadata.value,
+    metadata.marker,
+    metadata.delimiter ?? '',
+    metadata.loose ? 'loose' : 'tight',
+    metadata.task ? 'task' : 'plain',
+    context.signature,
+    references,
+  ].join('\u0000')
+}
+
+export async function renderMarkdownListItem(
+  block: MarkdownBlock,
+  context: DocumentRenderContext,
+): Promise<RenderedListItem> {
+  if (!block.list) throw new Error('A semantic list item requires list metadata')
+  const cacheKey = markdownListItemRenderKey(block, context)
+  const cached = listItemRenderCache.get(cacheKey)
+  if (cached) return cached
+
+  const rendered = (async () => {
+    const input = context.supportSource
+      ? `${block.source}${context.eol}${context.eol}${context.supportSource}`
+      : block.source
+    const references = context.references.filter(
+      (reference) => reference.start >= block.start && reference.end <= block.end,
+    )
+    let renderAst: MarkdownRoot | undefined
+    if (block.list!.loose) {
+      renderAst = parseMarkdownAst(input)
+      const list = renderAst.children.find((node) => node.type === 'list')
+      if (list) {
+        list.spread = true
+        const item = list.children?.find((child) => child.type === 'listItem')
+        if (item) item.spread = true
+      }
+    }
+    const html = withoutFootnoteSection(
+      await processMarkdown(input, references, renderAst),
+    )
+    const fragment = fromHtmlIsomorphic(html, { fragment: true }) as HastNode
+    const list = fragment.children?.find(
+      (node) => node.tagName === (block.list!.ordered ? 'ol' : 'ul'),
+    )
+    const item = list?.children?.find((node) => node.tagName === 'li')
+    if (!list || !item) throw new Error('Rendered list item has no list container')
+    labelTaskCheckboxes(item)
+    const listClasses = list.properties?.className
+    const itemClasses = item.properties?.className
+    return {
+      html: stringifyHastChildren(item.children),
+      ...(itemClasses
+        ? {
+            className: (Array.isArray(itemClasses)
+              ? itemClasses
+              : [itemClasses]
+            ).map(String).join(' '),
+          }
+        : {}),
+      ...(listClasses
+        ? {
+            listClassName: (Array.isArray(listClasses)
+              ? listClasses
+              : [listClasses]
+            ).map(String).join(' '),
+          }
+        : {}),
+    }
+  })()
+  listItemRenderCache.set(cacheKey, rendered)
+  if (listItemRenderCache.size > 512) {
+    listItemRenderCache.delete(listItemRenderCache.keys().next().value!)
+  }
+  try {
+    return await rendered
+  } catch (error) {
+    listItemRenderCache.delete(cacheKey)
+    throw error
+  }
+}
 
 export async function renderMarkdownListGroup(
   blocks: MarkdownBlock[],
@@ -417,65 +534,17 @@ export async function renderMarkdownListGroup(
   if (!first?.list || !last?.list) {
     throw new Error('A semantic list group requires list-item blocks')
   }
-  const groupSource = context.source.slice(first.start, last.end)
-  const cacheKey = `${first.list.groupId}\u0000${groupSource}\u0000${context.signature}`
-  const cached = listRenderCache.get(cacheKey)
-  if (cached) return cached
-
-  const rendered = (async () => {
-    const input = context.supportSource
-      ? `${groupSource}${context.eol}${context.eol}${context.supportSource}`
-      : groupSource
-    const references = context.references.filter(
-      (reference) => reference.start >= first.start && reference.end <= last.end,
-    )
-    const html = withoutFootnoteSection(await processMarkdown(input, references))
-    const fragment = fromHtmlIsomorphic(html, { fragment: true }) as HastNode
-    const list = fragment.children?.find(
-      (node) => node.tagName === (first.list!.ordered ? 'ol' : 'ul'),
-    )
-    if (!list) throw new Error('Rendered list group has no list container')
-    const classNames = list.properties?.className
-    return {
-      ordered: first.list!.ordered,
-      start: first.list!.start,
-      ...(classNames
-        ? {
-            className: (Array.isArray(classNames)
-              ? classNames
-              : [classNames]
-            ).map(String).join(' '),
-          }
-        : {}),
-      items: (list.children ?? [])
-        .filter((node) => node.tagName === 'li')
-        .map((item) => {
-          const itemClasses = item.properties?.className
-          const label = hastText(item).trim()
-          if (label) labelTaskCheckbox(item, label)
-          return {
-            html: stringifyHastChildren(item.children),
-            ...(itemClasses
-              ? {
-                  className: (Array.isArray(itemClasses)
-                    ? itemClasses
-                    : [itemClasses]
-                  ).map(String).join(' '),
-                }
-              : {}),
-          }
-        }),
-    }
-  })()
-  listRenderCache.set(cacheKey, rendered)
-  if (listRenderCache.size > 64) {
-    listRenderCache.delete(listRenderCache.keys().next().value!)
-  }
-  try {
-    return await rendered
-  } catch (error) {
-    listRenderCache.delete(cacheKey)
-    throw error
+  const items = await Promise.all(
+    blocks.map((block) => renderMarkdownListItem(block, context)),
+  )
+  const className = Array.from(
+    new Set(items.flatMap((item) => item.listClassName?.split(' ') ?? [])),
+  ).join(' ')
+  return {
+    ordered: first.list.ordered,
+    start: first.list.start,
+    ...(className ? { className } : {}),
+    items,
   }
 }
 

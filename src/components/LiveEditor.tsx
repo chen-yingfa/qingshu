@@ -26,7 +26,8 @@ import {
   renderDocumentFootnotes,
   renderMarkdown,
   renderMarkdownBlock,
-  renderMarkdownListGroup,
+  markdownListItemRenderKey,
+  renderMarkdownListItem,
   type DocumentRenderContext,
   type MarkdownBlock,
   type MarkdownDocumentModel,
@@ -608,6 +609,9 @@ function preserveEditingBoundary(
   )
   if (containingIndex < 0) return blocks
   const containing = blocks[containingIndex]
+  if (containing.list && boundary.start > containing.start) {
+    return blocks
+  }
   const beforeRaw = content.slice(containing.start, boundary.start)
   const beforeSource = beforeRaw.replace(
     /(?:\r?\n[ \t]*){2,}$/u,
@@ -859,42 +863,77 @@ function deferWork(callback: () => void): () => void {
 function SemanticListGroup({
   blocks,
   context,
+  activeItem,
   children,
 }: {
   blocks: MarkdownBlock[]
   context: DocumentRenderContext
+  activeItem: number
   children(block: MarkdownBlock, item: RenderedListGroup['items'][number] | undefined): ReactNode
 }) {
-  const [rendered, setRendered] = useState<RenderedListGroup | null>(null)
+  const [rendered, setRendered] = useState<
+    Array<{
+      key: string
+      item?: RenderedListGroup['items'][number]
+    }>
+  >([])
   const [error, setError] = useState<Error | null>(null)
   const first = blocks[0]
 
   useEffect(() => {
     let current = true
-    setRendered(null)
     setError(null)
+    const keys = blocks.map((block, index) =>
+      index === activeItem ? '' : markdownListItemRenderKey(block, context),
+    )
+    setRendered((previous) =>
+      keys.map((key, index) =>
+        previous[index]?.key === key ? previous[index] : { key },
+      ),
+    )
     const cancel = deferWork(() => {
-      void renderMarkdownListGroup(blocks, context).then(
-        (value) => {
-          if (current) setRendered(value)
-        },
-        (reason: unknown) => {
-          if (current) {
-            setError(reason instanceof Error ? reason : new Error(String(reason)))
-          }
-        },
-      )
+      blocks.forEach((block, index) => {
+        const key = keys[index]
+        if (!key || rendered[index]?.key === key && rendered[index]?.item) return
+        void renderMarkdownListItem(block, context).then(
+          (item) => {
+            if (!current) return
+            setRendered((latest) =>
+              latest[index]?.key === key
+                ? latest.map((entry, itemIndex) =>
+                    itemIndex === index ? { key, item } : entry,
+                  )
+                : latest,
+            )
+          },
+          (reason: unknown) => {
+            if (current) {
+              setError(reason instanceof Error ? reason : new Error(String(reason)))
+            }
+          },
+        )
+      })
     })
     return () => {
       current = false
       cancel()
     }
-  }, [blocks, context])
+  }, [activeItem, blocks, context])
 
-  const className = ['semantic-list-group', rendered?.className]
+  const listClassName = Array.from(
+    new Set([
+      ...(blocks.some((block) => block.list?.task)
+        ? ['contains-task-list']
+        : []),
+      ...rendered.flatMap(
+        ({ item }) => item?.listClassName?.split(' ') ?? [],
+      ),
+    ]),
+  ).join(' ')
+  const className = ['semantic-list-group', listClassName]
     .filter(Boolean)
     .join(' ')
-  const items = blocks.map((block, index) => children(block, rendered?.items[index]))
+  const items = blocks.map((block, index) => children(block, rendered[index]?.item))
   const list = first.list?.ordered ? (
     <ol className={className} start={first.list.start}>
       {items}
@@ -1438,10 +1477,15 @@ export function LiveEditor({
       return
     }
     const externalChange = parentChanged && !acknowledged
-    const transactionActivation =
+    const acknowledgedTransaction =
       activeChanged &&
-      editorUndoRef.current.at(-1)?.expectedActiveBlock === safeActive &&
+      acknowledged &&
       editorUndoRef.current.at(-1)?.expectedContent === content
+    const transactionActivation =
+      acknowledgedTransaction ||
+      (activeChanged &&
+        editorUndoRef.current.at(-1)?.expectedActiveBlock === safeActive &&
+        editorUndoRef.current.at(-1)?.expectedContent === content)
     if ((activeChanged && !transactionActivation) || externalChange) {
       undoSessionRef.current += 1
     }
@@ -1471,6 +1515,19 @@ export function LiveEditor({
               block.end === semanticActive.end,
           )
         : -1
+      const remappedUndo = editorUndoRef.current.at(-1)
+      if (
+        acknowledged &&
+        semanticActive &&
+        semanticEditorIndex >= 0 &&
+        remappedUndo?.expectedContent === content &&
+        remappedUndo.expectedActiveBlock !== semanticEditorIndex
+      ) {
+        remappedUndo.expectedActiveBlock = semanticEditorIndex
+        remappedUndo.expectedDraft = toEditorValue(semanticActive.source)
+        remappedUndo.expectedBlockId = semanticActive.id
+        activeIndexRef.current = semanticEditorIndex
+      }
       const preservePendingUndo =
         activeChanged &&
         !externalChange &&
@@ -1483,7 +1540,7 @@ export function LiveEditor({
       }
       if (
         semanticEditorIndex >= 0 &&
-        semanticEditorIndex !== safeActive
+        (semanticEditorIndex !== safeActive || activeBlock !== safeActive)
       ) {
         activationRef.current(semanticEditorIndex)
       }
@@ -1495,6 +1552,7 @@ export function LiveEditor({
     active.end,
     active.source,
     active.start,
+    activeBlock,
     content,
     editingBoundary,
     model.blocks,
@@ -3525,9 +3583,20 @@ export function LiveEditor({
               if (!first.list) return renderRow(first, unit.start)
               return (
                 <SemanticListGroup
-                  key={first.list.groupId}
+                  key={
+                    safeActive >= unit.start &&
+                    safeActive < unit.start + unit.blocks.length
+                      ? `active-list-group-${activeSession}`
+                      : first.list.groupId
+                  }
                   blocks={unit.blocks}
                   context={renderContext}
+                  activeItem={
+                    safeActive >= unit.start &&
+                    safeActive < unit.start + unit.blocks.length
+                      ? safeActive - unit.start
+                      : -1
+                  }
                 >
                   {(block, item) =>
                     renderRow(
