@@ -1,0 +1,107 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { LiveEditor } from './LiveEditor'
+
+afterEach(cleanup)
+
+function ControlledEditor({
+  initial,
+  sourceMode = false,
+}: {
+  initial: string
+  sourceMode?: boolean
+}) {
+  const [content, setContent] = useState(initial)
+  const [activeBlock, setActiveBlock] = useState(0)
+  return (
+    <LiveEditor
+      content={content}
+      contentRevision={0}
+      activeBlock={activeBlock}
+      sourceMode={sourceMode}
+      onChange={setContent}
+      onActiveBlockChange={setActiveBlock}
+    />
+  )
+}
+
+describe('LiveEditor marker projection', () => {
+  it.each([
+    ['- item', 'item'],
+    ['* item', 'item'],
+    ['+ item', 'item'],
+    ['007. item', 'item'],
+    ['09) item', 'item'],
+    ['- [x] done', 'done'],
+  ])('hides the active top-level marker for %s', (source, visible) => {
+    const result = render(<ControlledEditor initial={source} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+
+    expect(editor.value).toBe(visible)
+    expect(result.container.querySelectorAll('li.semantic-list-item-row')).toHaveLength(1)
+  })
+
+  it('edits prose and nested source while preserving exact marker syntax', () => {
+    const onChange = vi.fn()
+    render(
+      <LiveEditor
+        content={'007) parent\r\n     * child'}
+        activeBlock={0}
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    expect(editor.value).toBe('parent\n     * child')
+
+    fireEvent.change(editor, {
+      target: {
+        value: 'changed\n     * child',
+        selectionStart: 7,
+        selectionEnd: 7,
+      },
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith('007) changed\r\n     * child')
+  })
+
+  it('keeps canonical markers visible in source mode', () => {
+    render(<ControlledEditor initial={'- item\r\n> quote'} sourceMode />)
+
+    expect(
+      (screen.getByLabelText('Markdown source') as HTMLTextAreaElement).value,
+    ).toBe('- item\n> quote')
+  })
+
+  it('activates quote styling as soon as a paragraph becomes a quote', () => {
+    const result = render(<ControlledEditor initial="plain" />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: { value: '> quoted', selectionStart: 8, selectionEnd: 8 },
+    })
+
+    expect(editor.value).toBe('quoted')
+    expect(
+      editor.closest('.editor-block-row')?.classList.contains('is-active-quote'),
+    ).toBe(true)
+  })
+
+  it('hides multiline nested quote markers and continues the current depth', () => {
+    render(<ControlledEditor initial={'> one\r\n>> two'} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    expect(editor.value).toBe('one\ntwo')
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    fireEvent.change(editor, {
+      target: { value: 'one\ntwo\nthree', selectionStart: 13, selectionEnd: 13 },
+    })
+
+    expect(editor.value).toBe('one\ntwo\nthree')
+  })
+})

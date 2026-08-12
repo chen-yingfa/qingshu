@@ -49,6 +49,10 @@ import {
   type FormatCommand,
   type FormatRequest,
 } from './DocumentSourceEditor'
+import {
+  createMarkerProjection,
+  type MarkerProjectionMode,
+} from './markerProjection'
 
 export type { FormatCommand } from './DocumentSourceEditor'
 export {
@@ -1304,6 +1308,21 @@ export function LiveEditor({
   )
   const activeFrontmatter =
     active.type === 'yaml' || active.type === 'toml'
+  const projectionModeFor = (value: string): MarkerProjectionMode => {
+    if (fencedCode || displayMath || activeFrontmatter) return 'plain'
+    if (active.type === 'listItem') return 'list'
+    if (
+      active.type === 'blockquote' ||
+      /^(?:[ \t]*>[ \t]?)+/u.test(value)
+    ) {
+      return 'quote'
+    }
+    return 'plain'
+  }
+  const markerProjection = useMemo(
+    () => createMarkerProjection(draft, projectionModeFor(draft)),
+    [active.type, activeFrontmatter, displayMath, draft, fencedCode],
+  )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({
@@ -1654,18 +1673,18 @@ export function LiveEditor({
       const deferred = deferredSelectionRef.current
       const pending = deferred ?? selectionRef.current
       textarea.setSelectionRange(
-        Math.min(pending.start, textarea.value.length),
-        Math.min(pending.end, textarea.value.length),
+        markerProjection.toVisibleOffset(pending.start),
+        markerProjection.toVisibleOffset(pending.end),
         selectionRef.current.direction,
       )
     }
-  }, [active.id, draft, safeActive])
+  }, [active.id, draft, markerProjection, safeActive])
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || sourceMode || !selection) return
-    const start = Math.min(selection.start, textarea.value.length)
-    const end = Math.min(selection.end, textarea.value.length)
+    const start = markerProjection.toVisibleOffset(selection.start)
+    const end = markerProjection.toVisibleOffset(selection.end)
     if (
       textarea.selectionStart !== start ||
       textarea.selectionEnd !== end ||
@@ -1674,7 +1693,7 @@ export function LiveEditor({
       invalidateMathInteraction()
       setEditorSelection(textarea, start, end, selection.direction)
     }
-  }, [activeSession, selection, sourceMode])
+  }, [activeSession, markerProjection, selection, sourceMode])
 
   const reportSelection = (textarea: HTMLTextAreaElement) => {
     selectionRef.current = {
@@ -1687,6 +1706,14 @@ export function LiveEditor({
       end: textarea.selectionEnd,
       direction: textarea.selectionDirection ?? 'none',
     })
+  }
+
+  const reportProjectedSelection = (textarea: HTMLTextAreaElement) => {
+    const direction = textarea.selectionDirection ?? 'none'
+    const start = markerProjection.toCanonicalOffset(textarea.selectionStart)
+    const end = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    selectionRef.current = { start, end, direction }
+    onSelectionChange?.({ start, end, direction })
   }
 
   function commitDraft(value: string) {
@@ -2422,6 +2449,32 @@ export function LiveEditor({
     })
   }
 
+  const canonicalizeProjectedTextarea = (textarea: HTMLTextAreaElement) => {
+    if (markerProjection.mode === 'plain') return
+    const start = markerProjection.toCanonicalOffset(textarea.selectionStart)
+    const end = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    const direction = textarea.selectionDirection ?? 'none'
+    textarea.value = draft
+    textarea.setSelectionRange(start, end, direction)
+  }
+
+  const restoreProjectedTextarea = (textarea: HTMLTextAreaElement) => {
+    const canonicalValue = textarea.value
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const direction = textarea.selectionDirection ?? 'none'
+    const projection = createMarkerProjection(
+      canonicalValue,
+      projectionModeFor(canonicalValue),
+    )
+    textarea.value = projection.visible
+    textarea.setSelectionRange(
+      projection.toVisibleOffset(start),
+      projection.toVisibleOffset(end),
+      direction,
+    )
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (readOnly) return
     if (
@@ -2463,6 +2516,45 @@ export function LiveEditor({
       invalidateMathInteraction()
     }
     if (!unmodifiedEnter) invalidateMathInteraction()
+
+    if (markerProjection.mode === 'quote' && unmodifiedEnter) {
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const lineStart = draft.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+      const nextBreak = draft.indexOf('\n', start)
+      const lineEnd = nextBreak < 0 ? draft.length : nextBreak
+      const line = draft.slice(lineStart, lineEnd)
+      const prefix = line.match(/^[ \t]*(?:>[ \t]?)+/u)?.[0]
+      if (prefix && start >= lineStart + prefix.length && end <= lineEnd) {
+        event.preventDefault()
+        const snapshot = currentUndoSnapshot()
+        if (!line.slice(prefix.length).trim()) {
+          const nextDraft =
+            draft.slice(0, lineStart) + draft.slice(lineStart + prefix.length)
+          applyControlledTextareaEdit(
+            draft,
+            nextDraft,
+            lineStart,
+            lineStart,
+            undefined,
+            snapshot,
+          )
+          return
+        }
+        const nextDraft =
+          draft.slice(0, start) + `\n${prefix}` + draft.slice(end)
+        const caret = start + 1 + prefix.length
+        applyControlledTextareaEdit(
+          draft,
+          nextDraft,
+          caret,
+          caret,
+          undefined,
+          snapshot,
+        )
+        return
+      }
+    }
 
     if (
       event.ctrlKey &&
@@ -3385,7 +3477,7 @@ export function LiveEditor({
                   {...(block.list?.ordered ? { value: block.list.value } : {})}
                   className={
                     index === safeActive
-                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${markerProjection.mode === 'quote' ? ' is-active-quote' : ''}${block.list?.task ? ' active-task-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
                       : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
                   }
                 >
@@ -3432,6 +3524,18 @@ export function LiveEditor({
                   )}
                   {index === safeActive ? (
                     <div className="active-block">
+                      {active.list?.task && (
+                        <input
+                          className="active-task-marker"
+                          type="checkbox"
+                          checked={/^[ \t]*[-+*][ \t]+\[[xX]\]/u.test(draft)}
+                          disabled
+                          aria-label={
+                            markerProjection.visible.split(/\r?\n/u, 1)[0] ||
+                            'Task item'
+                          }
+                        />
+                      )}
                       <textarea
                         ref={textareaRef}
                         className={
@@ -3457,11 +3561,30 @@ export function LiveEditor({
                           !fencedCode && !displayMath && !activeFrontmatter
                         }
                         readOnly={readOnly}
-                        value={draft}
+                        value={markerProjection.visible}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
+                          const canonicalValue =
+                            markerProjection.applyVisibleEdit(textarea.value)
+                          const nextProjection = createMarkerProjection(
+                            canonicalValue,
+                            projectionModeFor(canonicalValue),
+                          )
+                          const selectionStart = nextProjection.toCanonicalOffset(
+                            textarea.selectionStart,
+                          )
+                          const selectionEnd = nextProjection.toCanonicalOffset(
+                            textarea.selectionEnd,
+                          )
+                          const direction = textarea.selectionDirection ?? 'none'
+                          textarea.value = canonicalValue
+                          textarea.setSelectionRange(
+                            selectionStart,
+                            selectionEnd,
+                            direction,
+                          )
                           const inputType = (event.nativeEvent as InputEvent)
                             .inputType
                           const historyInput =
@@ -3470,20 +3593,22 @@ export function LiveEditor({
                           if (
                             !historyInput &&
                             !composingRef.current &&
-                            enterDisplayMathMode(textarea.value)
+                            enterDisplayMathMode(canonicalValue)
                           ) {
+                            restoreProjectedTextarea(textarea)
                             return
                           }
                           invalidateMathInteraction()
-                          commitDraft(textarea.value)
+                          commitDraft(canonicalValue)
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
                             normalize(
-                              textarea.value,
-                              textarea.selectionStart,
-                              textarea.selectionEnd,
+                              canonicalValue,
+                              selectionStart,
+                              selectionEnd,
                             )
                           }
+                          restoreProjectedTextarea(textarea)
                         }}
                         onSelect={(event) => {
                           const textarea = event.currentTarget
@@ -3497,7 +3622,7 @@ export function LiveEditor({
                             ) {
                               deferredSelectionRef.current = null
                               invalidateMathInteraction()
-                              reportSelection(textarea)
+                              reportProjectedSelection(textarea)
                             }
                             return
                           }
@@ -3510,7 +3635,7 @@ export function LiveEditor({
                           ) {
                             invalidateMathInteraction()
                           }
-                          reportSelection(textarea)
+                          reportProjectedSelection(textarea)
                         }}
                         onPointerDown={() => {
                           invalidateMathInteraction()
@@ -3520,11 +3645,13 @@ export function LiveEditor({
                           setActiveInputFocused(false)
                           composingRef.current = false
                           codeTabEscapeRef.current = false
+                          canonicalizeProjectedTextarea(event.currentTarget)
                           normalize(
                             event.currentTarget.value,
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          restoreProjectedTextarea(event.currentTarget)
                         }}
                         onCompositionStart={() => {
                           invalidateMathInteraction()
@@ -3533,7 +3660,9 @@ export function LiveEditor({
                         onCompositionEnd={(event) => {
                           composingRef.current = false
                           invalidateMathInteraction()
+                          canonicalizeProjectedTextarea(event.currentTarget)
                           if (enterDisplayMathMode(event.currentTarget.value)) {
+                            restoreProjectedTextarea(event.currentTarget)
                             return
                           }
                           normalize(
@@ -3541,8 +3670,13 @@ export function LiveEditor({
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          restoreProjectedTextarea(event.currentTarget)
                         }}
-                        onKeyDown={handleKeyDown}
+                        onKeyDown={(event) => {
+                          canonicalizeProjectedTextarea(event.currentTarget)
+                          handleKeyDown(event)
+                          restoreProjectedTextarea(event.currentTarget)
+                        }}
                       />
                       {activeInputFocused && (
                         <ActiveBlockPreview source={draft} />

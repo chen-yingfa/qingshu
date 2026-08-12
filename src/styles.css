@@ -447,6 +447,26 @@ button {
   color: currentColor;
 }
 
+.active-task-list-item {
+  list-style: none;
+}
+
+.active-task-marker {
+  position: absolute;
+  top: 11px;
+  left: -1.55em;
+  margin: 0;
+}
+
+.editor-block-row.is-active-quote {
+  padding-left: 1.1em;
+  border-left: 3px solid var(--accent);
+}
+
+.is-active-quote .source-block {
+  color: var(--muted);
+}
+
 .semantic-list-item-content {
   min-height: 1.85em;
 }
