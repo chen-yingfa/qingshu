@@ -482,6 +482,18 @@ button {
   color: currentColor;
 }
 
+.custom-ordered-list-item {
+  list-style: none;
+}
+
+.ordered-list-marker {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 0.45em);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .active-task-list-item {
   list-style: none;
 }

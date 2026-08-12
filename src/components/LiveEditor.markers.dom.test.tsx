@@ -50,6 +50,53 @@ describe('LiveEditor marker projection', () => {
     expect(result.container.querySelectorAll('li.semantic-list-item-row')).toHaveLength(1)
   })
 
+  it.each([
+    ['1. [x] done', true],
+    ['1) [X] done', true],
+    ['1. [ ] pending', false],
+  ])('renders the active ordered task check state for %s', (source, checked) => {
+    render(<ControlledEditor initial={source} />)
+
+    expect(
+      (screen.getByRole('checkbox', {
+        name: source.includes('pending') ? 'pending' : 'done',
+      }) as HTMLInputElement).checked,
+    ).toBe(checked)
+  })
+
+  it.each([
+    ['3) first\n4) second', ['3)', '4)']],
+    ['007. first\n008. second', ['007.', '008.']],
+  ])('renders exact ordered source markers in active and inactive rows', (
+    source,
+    markers,
+  ) => {
+    const result = render(<ControlledEditor initial={source} />)
+
+    expect(
+      Array.from(result.container.querySelectorAll('.ordered-list-marker')).map(
+        (marker) => marker.textContent,
+      ),
+    ).toEqual(markers)
+    expect(result.container.querySelectorAll('ol.semantic-list-group')).toHaveLength(1)
+    expect(
+      Array.from(result.container.querySelectorAll('ol > li')).map((item) =>
+        item.getAttribute('value'),
+      ),
+    ).toEqual(markers.map((marker) => String(Number.parseInt(marker, 10))))
+  })
+
+  it('uses checkboxes without duplicate numeric markers for ordered tasks', async () => {
+    const result = render(<ControlledEditor initial={'1. [x] done\n2. [ ] pending'} />)
+
+    await waitFor(() =>
+      expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2),
+    )
+    expect(result.container.querySelectorAll('.ordered-list-marker')).toHaveLength(0)
+    expect(result.container.querySelector('ol')?.getAttribute('start')).toBe('1')
+    expect(result.container.querySelectorAll('ol > li')).toHaveLength(2)
+  })
+
   it('edits prose and nested source while preserving exact marker syntax', () => {
     const onChange = vi.fn()
     render(

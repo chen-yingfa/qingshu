@@ -3487,8 +3487,8 @@ export function LiveEditor({
                   {...(block.list?.ordered ? { value: block.list.value } : {})}
                   className={
                     index === safeActive
-                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${markerProjection.mode === 'quote' ? ' is-active-quote' : ''}${block.list?.task ? ' active-task-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
-                      : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${block.list?.ordered ? ' custom-ordered-list-item' : ''} is-active${markerProjection.mode === 'quote' ? ' is-active-quote' : ''}${block.list?.task ? ' active-task-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${block.list?.ordered ? ' custom-ordered-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
                   }
                 >
                   {realIndex !== undefined && block.list && (
@@ -3532,13 +3532,22 @@ export function LiveEditor({
                       }}
                     />
                   )}
+                  {block.list?.ordered && !block.list.task && (
+                    <span className="ordered-list-marker" aria-hidden="true">
+                      {block.list.marker}
+                    </span>
+                  )}
                   {index === safeActive ? (
                     <div className="active-block">
                       {active.list?.task && (
                         <input
                           className="active-task-marker"
                           type="checkbox"
-                          checked={/^[ \t]*[-+*][ \t]+\[[xX]\]/u.test(draft)}
+                          checked={
+                            /^(?:\uFEFF)?[ \t]*(?:\d{1,9}[.)]|[-+*])[ \t]+\[[xX]\]/u.test(
+                              draft,
+                            )
+                          }
                           disabled
                           aria-label={
                             markerProjection.visible.split(/\r?\n/u, 1)[0] ||
