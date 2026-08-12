@@ -69,6 +69,33 @@ describe('LiveEditor marker projection', () => {
     expect(onChange).toHaveBeenLastCalledWith('007) changed\r\n     * child')
   })
 
+  it('deletes the selected first of two identical visible quote lines by input range', () => {
+    const onChange = vi.fn()
+    render(
+      <LiveEditor
+        content={'> a\n>> a'}
+        activeBlock={0}
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 2)
+    fireEvent.select(editor)
+    editor.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'deleteByCut',
+    }))
+
+    fireEvent.input(editor, {
+      target: { value: 'a', selectionStart: 0, selectionEnd: 0 },
+      inputType: 'deleteByCut',
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith('>> a')
+  })
+
   it('keeps canonical markers visible in source mode', () => {
     render(<ControlledEditor initial={'- item\r\n> quote'} sourceMode />)
 

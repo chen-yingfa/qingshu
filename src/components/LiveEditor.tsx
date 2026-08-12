@@ -52,6 +52,7 @@ import {
 import {
   createMarkerProjection,
   type MarkerProjectionMode,
+  type VisibleEdit,
 } from './markerProjection'
 
 export type { FormatCommand } from './DocumentSourceEditor'
@@ -1347,6 +1348,8 @@ export function LiveEditor({
     end: 0,
     direction: 'none' as SelectionDirection,
   })
+  const pendingVisibleEditRef = useRef<VisibleEdit | null>(null)
+  const visibleSelectionRef = useRef({ start: 0, end: 0 })
   const deferredSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
   )
@@ -3578,12 +3581,31 @@ export function LiveEditor({
                         }
                         readOnly={readOnly}
                         value={markerProjection.visible}
+                        onBeforeInput={(event) => {
+                          const textarea = event.currentTarget
+                          pendingVisibleEditRef.current = {
+                            selectionStart: textarea.selectionStart,
+                            selectionEnd: textarea.selectionEnd,
+                            inputType: (event.nativeEvent as InputEvent).inputType,
+                          }
+                        }}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
+                          const visibleEdit = pendingVisibleEditRef.current
+                          pendingVisibleEditRef.current = null
+                          const inputType = (event.nativeEvent as InputEvent)
+                            .inputType
                           const canonicalValue =
-                            markerProjection.applyVisibleEdit(textarea.value)
+                            markerProjection.applyVisibleEdit(
+                              textarea.value,
+                              visibleEdit ?? {
+                                selectionStart: visibleSelectionRef.current.start,
+                                selectionEnd: visibleSelectionRef.current.end,
+                                inputType,
+                              },
+                            )
                           const nextProjection = createMarkerProjection(
                             canonicalValue,
                             projectionModeFor(canonicalValue),
@@ -3601,8 +3623,6 @@ export function LiveEditor({
                             selectionEnd,
                             direction,
                           )
-                          const inputType = (event.nativeEvent as InputEvent)
-                            .inputType
                           const historyInput =
                             inputType === 'historyUndo' ||
                             inputType === 'historyRedo'
@@ -3628,6 +3648,10 @@ export function LiveEditor({
                         }}
                         onSelect={(event) => {
                           const textarea = event.currentTarget
+                          visibleSelectionRef.current = {
+                            start: textarea.selectionStart,
+                            end: textarea.selectionEnd,
+                          }
                           const deferred = deferredSelectionRef.current
                           const token = mathEnterTokenRef.current
                           if (deferred) {

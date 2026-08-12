@@ -48,6 +48,41 @@ describe('marker projection', () => {
     )
   })
 
+  it('fills a projected empty quote line without moving its hidden marker', () => {
+    const projection = createMarkerProjection('> one\n>> two\n>> ', 'quote')
+
+    expect(projection.applyVisibleEdit('one\ntwo\nthree')).toBe(
+      '> one\n>> two\n>> three',
+    )
+  })
+
+  it('uses the actual selected range when identical quote lines are deleted', () => {
+    const projection = createMarkerProjection('> a\n>> a', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('a', {
+        selectionStart: 0,
+        selectionEnd: 2,
+        inputType: 'deleteByCut',
+      }),
+    ).toBe('>> a')
+  })
+
+  it('preserves line-specific quote markers for multiline replacement with CRLF', () => {
+    const projection = createMarkerProjection(
+      '> same\r\n>> same\r\n> > tail',
+      'quote',
+    )
+
+    expect(
+      projection.applyVisibleEdit('first\r\nsecond\r\nthird', {
+        selectionStart: 0,
+        selectionEnd: projection.visible.length,
+        inputType: 'insertText',
+      }),
+    ).toBe('> first\r\n>> second\r\n> > third')
+  })
+
   it('maps quote offsets in both directions at line boundaries', () => {
     const projection = createMarkerProjection('> one\n>> two', 'quote')
 

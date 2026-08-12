@@ -14,7 +14,13 @@ export interface MarkerProjection {
   mode: MarkerProjectionMode
   toCanonicalOffset(visibleOffset: number): number
   toVisibleOffset(canonicalOffset: number): number
-  applyVisibleEdit(nextVisible: string): string
+  applyVisibleEdit(nextVisible: string, edit?: VisibleEdit): string
+}
+
+export interface VisibleEdit {
+  selectionStart: number
+  selectionEnd: number
+  inputType?: string
 }
 
 function clamp(offset: number, length: number): number {
@@ -117,13 +123,57 @@ export function createMarkerProjection(
     return canonicalOffset
   }
 
-  const applyVisibleEdit = (nextVisible: string): string => {
+  const applyVisibleEdit = (nextVisible: string, edit?: VisibleEdit): string => {
     if (nextVisible === visible) return canonical
-    const change = replacementRange(visible, nextVisible)
-    const canonicalStart = toCanonicalOffset(change.start)
-    const canonicalEnd = toCanonicalOffset(change.beforeEnd)
+    let change = replacementRange(visible, nextVisible)
+    if (edit) {
+      let start = clamp(edit.selectionStart, visible.length)
+      let beforeEnd = clamp(edit.selectionEnd, visible.length)
+      if (start === beforeEnd && edit.inputType === 'deleteContentBackward' && start > 0) {
+        start -= 1
+      } else if (
+        start === beforeEnd &&
+        edit.inputType === 'deleteContentForward' &&
+        beforeEnd < visible.length
+      ) {
+        beforeEnd += 1
+      }
+      const replacementLength =
+        nextVisible.length - (visible.length - (beforeEnd - start))
+      if (
+        replacementLength >= 0 &&
+        visible.slice(0, start) === nextVisible.slice(0, start) &&
+        visible.slice(beforeEnd) === nextVisible.slice(start + replacementLength)
+      ) {
+        change = {
+          start,
+          beforeEnd,
+          replacement: nextVisible.slice(start, start + replacementLength),
+        }
+      }
+    }
+    const markerAtVisibleStart = (offset: number) => {
+      let removed = 0
+      return markers.find((marker) => {
+        const visibleStart = marker.start - removed
+        removed += marker.end - marker.start
+        return visibleStart === offset
+      })
+    }
+    const startsAtQuoteMarker =
+      mode === 'quote' &&
+      change.start < change.beforeEnd &&
+      markerAtVisibleStart(change.start)
+    const canonicalStart = startsAtQuoteMarker
+      ? startsAtQuoteMarker.start
+      : toCanonicalOffset(change.start)
+    const endMarker =
+      mode === 'quote' && change.beforeEnd > change.start
+        ? markerAtVisibleStart(change.beforeEnd)
+        : undefined
+    const canonicalEnd = endMarker?.start ?? toCanonicalOffset(change.beforeEnd)
     let replacement = change.replacement
-    if (mode === 'quote' && replacement.includes('\n')) {
+    if (mode === 'quote' && replacement) {
       const currentMarker =
         [...markers]
           .reverse()
@@ -132,10 +182,13 @@ export function createMarkerProjection(
               marker.lineStart <= canonicalStart && canonicalStart <= marker.lineEnd,
           ) ?? markers[0]
       if (currentMarker) {
-        replacement = replacement.replace(
-          /\r?\n/gu,
-          (eol) => `${eol}${currentMarker.prefix}`,
-        )
+        const firstLine = visible.slice(0, change.start).split(/\r?\n/u).length - 1
+        let line = 0
+        replacement = replacement.replace(/\r?\n/gu, (eol) => {
+          line += 1
+          return `${eol}${markers[firstLine + line]?.prefix ?? currentMarker.prefix}`
+        })
+        if (startsAtQuoteMarker) replacement = startsAtQuoteMarker.prefix + replacement
       }
     }
     return (
