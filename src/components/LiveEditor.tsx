@@ -66,6 +66,16 @@ interface SourceRange {
   end: number
 }
 
+interface AcknowledgedBlockEdit {
+  content: string
+  range: SourceRange
+  selection: {
+    start: number
+    end: number
+    direction: SelectionDirection
+  }
+}
+
 interface MathEnterToken {
   revision: number
   value: string
@@ -663,6 +673,51 @@ function preserveEditingBoundary(
     ...replacement,
     ...blocks.slice(containingIndex + 1),
   ]
+}
+
+function blockContainingFocus(
+  blocks: MarkdownBlock[],
+  focus: number,
+  documentLength: number,
+): MarkdownBlock | undefined {
+  if (blocks.length === 0) return undefined
+  if (focus >= documentLength) return blocks.at(-1)
+  return (
+    blocks.find(
+      (block) =>
+        (block.start <= focus && focus < block.end) ||
+        (block.start === block.end && block.start === focus),
+    ) ??
+    blocks.find((block) => block.start > focus) ??
+    blocks.at(-1)
+  )
+}
+
+function editorOffsetForSourceOffset(source: string, offset: number): number {
+  return toEditorValue(source.slice(0, Math.max(0, Math.min(offset, source.length))))
+    .length
+}
+
+function projectionModeForBlock(
+  block: MarkdownBlock,
+  value: string,
+): MarkerProjectionMode {
+  if (
+    parseFencedCode(value) ||
+    (value.startsWith('$$\n') && value.endsWith('\n$$')) ||
+    block.type === 'yaml' ||
+    block.type === 'toml'
+  ) {
+    return 'plain'
+  }
+  if (block.type === 'listItem') return 'list'
+  if (
+    block.type === 'blockquote' ||
+    /^(?:[ \t]*>[ \t]?)+/u.test(value)
+  ) {
+    return 'quote'
+  }
+  return 'plain'
 }
 
 function reorderInsertedBlocks(
@@ -1302,6 +1357,7 @@ export function LiveEditor({
   const [draft, setDraft] = useState(toEditorValue(initialEditingBlock.source))
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
+  const [activeGroupSession, setActiveGroupSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
   const displayMath = useMemo(
     () => draft.startsWith('$$\n') && draft.endsWith('\n$$'),
@@ -1309,17 +1365,8 @@ export function LiveEditor({
   )
   const activeFrontmatter =
     active.type === 'yaml' || active.type === 'toml'
-  const projectionModeFor = (value: string): MarkerProjectionMode => {
-    if (fencedCode || displayMath || activeFrontmatter) return 'plain'
-    if (active.type === 'listItem') return 'list'
-    if (
-      active.type === 'blockquote' ||
-      /^(?:[ \t]*>[ \t]?)+/u.test(value)
-    ) {
-      return 'quote'
-    }
-    return 'plain'
-  }
+  const projectionModeFor = (value: string): MarkerProjectionMode =>
+    projectionModeForBlock(active, value)
   const markerProjection = useMemo(
     () => createMarkerProjection(draft, projectionModeFor(draft)),
     [active.type, activeFrontmatter, displayMath, draft, fencedCode],
@@ -1361,6 +1408,11 @@ export function LiveEditor({
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
   const parentContentRef = useRef(content)
   const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+  const acknowledgedBlockEditRef = useRef<AcknowledgedBlockEdit | null>(null)
+  const pendingSplitActivationRef = useRef<{
+    content: string
+    index: number
+  } | null>(null)
   const handledFormatRef = useRef(0)
   const activationRef = useRef(onActiveBlockChange)
   activationRef.current = onActiveBlockChange
@@ -1468,9 +1520,13 @@ export function LiveEditor({
   const rotateEditorSession = (
     preserveBoundary = false,
     preservePendingUndo = false,
+    preserveComposition = false,
+    preserveListGroup = false,
   ) => {
-    composingRef.current = false
-    compositionUndoRef.current = null
+    if (!preserveComposition) {
+      composingRef.current = false
+      compositionUndoRef.current = null
+    }
     codeTabEscapeRef.current = false
     invalidateMathInteraction()
     if (!preservePendingUndo) pendingUndoRestoreRef.current = null
@@ -1484,6 +1540,7 @@ export function LiveEditor({
       setEditingBoundary(null)
     }
     setActiveSession((session) => session + 1)
+    if (!preserveListGroup) setActiveGroupSession((session) => session + 1)
   }
 
   useLayoutEffect(() => {
@@ -1493,16 +1550,96 @@ export function LiveEditor({
     const parentChanged = content !== parentContentRef.current
     const acknowledged =
       parentChanged && pendingAcknowledgementRef.current === content
+    const acknowledgedBlockEdit =
+      acknowledged && acknowledgedBlockEditRef.current?.content === content
+        ? acknowledgedBlockEditRef.current
+        : null
     if (parentChanged) {
       parentContentRef.current = content
       contentRef.current = content
       pendingAcknowledgementRef.current = undefined
+      acknowledgedBlockEditRef.current = null
     }
     if (sourceMode) {
       if (sourceModeChanged) rotateEditorSession()
       previousActiveRef.current = safeActive
       previousSourceModeRef.current = true
       return
+    }
+    const pendingSplitActivation = pendingSplitActivationRef.current
+    if (activeChanged && pendingSplitActivation) {
+      pendingSplitActivationRef.current = null
+      if (
+        pendingSplitActivation.content === content &&
+        pendingSplitActivation.index === safeActive
+      ) {
+        activeIndexRef.current = safeActive
+        previousActiveRef.current = safeActive
+        previousSourceModeRef.current = false
+        return
+      }
+    }
+    if (acknowledgedBlockEdit && !activeChanged) {
+      const splitBlocks = parsedEditorBlocks.filter(
+        (block) =>
+          block.start >= acknowledgedBlockEdit.range.start &&
+          block.end <= acknowledgedBlockEdit.range.end,
+      )
+      if (splitBlocks.length > 1) {
+        const focus =
+          acknowledgedBlockEdit.selection.direction === 'backward'
+            ? acknowledgedBlockEdit.selection.start
+            : acknowledgedBlockEdit.selection.end
+        const focusedBlock = blockContainingFocus(
+          splitBlocks,
+          focus,
+          acknowledgedBlockEdit.range.end,
+        )
+        const focusedIndex = focusedBlock
+          ? parsedEditorBlocks.indexOf(focusedBlock)
+          : -1
+        if (focusedBlock && focusedIndex >= 0) {
+          const focusedDraft = toEditorValue(focusedBlock.source)
+          const localSelection = {
+            start: editorOffsetForSourceOffset(
+              focusedBlock.source,
+              acknowledgedBlockEdit.selection.start - focusedBlock.start,
+            ),
+            end: editorOffsetForSourceOffset(
+              focusedBlock.source,
+              acknowledgedBlockEdit.selection.end - focusedBlock.start,
+            ),
+            direction: acknowledgedBlockEdit.selection.direction,
+          }
+          const remappedUndo = editorUndoRef.current.at(-1)
+          if (remappedUndo?.expectedContent === content) {
+            remappedUndo.expectedActiveBlock = focusedIndex
+            remappedUndo.expectedDraft = focusedDraft
+            remappedUndo.expectedBlockId = focusedBlock.id
+          }
+          activeIndexRef.current = focusedIndex
+          rotateEditorSession(false, true, composingRef.current, true)
+          setDraft(focusedDraft)
+          rangeRef.current = {
+            start: focusedBlock.start,
+            end: focusedBlock.end,
+          }
+          selectionRef.current = localSelection
+          deferredSelectionRef.current = {
+            start: localSelection.start,
+            end: localSelection.end,
+          }
+          onSelectionChange?.(localSelection)
+          pendingSplitActivationRef.current = {
+            content,
+            index: focusedIndex,
+          }
+          previousActiveRef.current = safeActive
+          previousSourceModeRef.current = false
+          activationRef.current(focusedIndex)
+          return
+        }
+      }
     }
     const externalChange = parentChanged && !acknowledged
     const acknowledgedTransaction =
@@ -1721,7 +1858,10 @@ export function LiveEditor({
     onSelectionChange?.({ start, end, direction })
   }
 
-  function commitDraft(value: string) {
+  function commitDraft(
+    value: string,
+    acknowledgedSelection?: AcknowledgedBlockEdit['selection'],
+  ) {
     transformSyntheticListSeparators(draft, value)
     const previousContent = contentRef.current
     const previous = { ...rangeRef.current }
@@ -1773,6 +1913,24 @@ export function LiveEditor({
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
     pendingAcknowledgementRef.current = nextContent
+    acknowledgedBlockEditRef.current = acknowledgedSelection
+      ? {
+          content: nextContent,
+          range: {
+            start: previous.start,
+            end: previous.start + sourceValue.length,
+          },
+          selection: {
+            start:
+              previous.start +
+              sourceOffsetForEditorOffset(sourceValue, acknowledgedSelection.start),
+            end:
+              previous.start +
+              sourceOffsetForEditorOffset(sourceValue, acknowledgedSelection.end),
+            direction: acknowledgedSelection.direction,
+          },
+        }
+      : null
     onChange(nextContent)
   }
 
@@ -3706,7 +3864,11 @@ export function LiveEditor({
                             return
                           }
                           invalidateMathInteraction()
-                          commitDraft(canonicalValue)
+                          commitDraft(canonicalValue, {
+                            start: selectionStart,
+                            end: selectionEnd,
+                            direction,
+                          })
                           if (undoSnapshot) {
                             pushEditorUndo(
                               undoSnapshot,
@@ -3868,7 +4030,7 @@ export function LiveEditor({
                   key={
                     safeActive >= unit.start &&
                     safeActive < unit.start + unit.blocks.length
-                      ? `active-list-group-${activeSession}`
+                      ? `active-list-group-${activeGroupSession}`
                       : first.list.groupId
                   }
                   blocks={unit.blocks}

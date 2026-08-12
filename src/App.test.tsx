@@ -116,6 +116,64 @@ describe('document replacement', () => {
       ).toBe('# Opened'),
     )
   })
+
+  it('isolates pasted mixed-list rows and activates each later top-level item', async () => {
+    const mixed = [
+      '- first',
+      '  - nested',
+      '- second',
+      '',
+      '1. ordered',
+      '',
+      '- [ ] task',
+      '',
+      '> quote',
+      '',
+      'Paragraph',
+    ].join('\n')
+    render(<App />)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: {
+        value: mixed,
+        selectionStart: mixed.length,
+        selectionEnd: mixed.length,
+      },
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('Paragraph'),
+    )
+
+    fireEvent.click(await screen.findByText('second'))
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('second'),
+    )
+
+    fireEvent.click(await screen.findByText('first'))
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('first\n  - nested'),
+    )
+
+    fireEvent.click(await screen.findByText('task'))
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('task'),
+    )
+  })
 })
 
 describe('document tabs', () => {

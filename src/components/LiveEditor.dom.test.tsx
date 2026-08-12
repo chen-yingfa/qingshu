@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { ComponentProps } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as markdown from '../markdown/markdown'
@@ -33,6 +33,28 @@ function renderEditor(
     />,
   )
   return { ...result, onChange, onActiveBlockChange }
+}
+
+function StatefulEditor({
+  initialContent,
+  onChange,
+}: {
+  initialContent: string
+  onChange?(content: string): void
+}) {
+  const [content, setContent] = useState(initialContent)
+  const [activeBlock, setActiveBlock] = useState(0)
+  return (
+    <LiveEditor
+      content={content}
+      activeBlock={activeBlock}
+      onChange={(nextContent) => {
+        onChange?.(nextContent)
+        setContent(nextContent)
+      }}
+      onActiveBlockChange={setActiveBlock}
+    />
+  )
 }
 
 describe('LiveEditor state synchronization', () => {
@@ -282,6 +304,181 @@ describe('LiveEditor state synchronization', () => {
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).not.toHaveBeenCalled()
     fireEvent.compositionEnd(editor)
+  })
+
+  it.each([
+    {
+      name: 'first item',
+      selectionStart: 20,
+      selectionEnd: 20,
+      direction: 'none' as const,
+      expected: 'duplicate\n\t- nested child',
+      expectedSelection: 17,
+    },
+    {
+      name: 'middle ordered item from a backward selection focus',
+      selectionStart: 42,
+      selectionEnd: 56,
+      direction: 'backward' as const,
+      expected: 'ordered',
+      expectedSelection: 0,
+    },
+    {
+      name: 'last paragraph at document end',
+      selectionStart: 102,
+      selectionEnd: 102,
+      direction: 'none' as const,
+      expected: 'Paragraph',
+      expectedSelection: 9,
+    },
+  ])(
+    'reconciles a mixed CRLF/BOM paste to the $name',
+    async ({
+      selectionStart,
+      selectionEnd,
+      direction,
+      expected,
+      expectedSelection,
+    }) => {
+      const mixed = [
+        '\uFEFF- duplicate',
+        '\t- nested child',
+        '- duplicate',
+        '',
+        '1. ordered',
+        '',
+        '- [ ] task',
+        '',
+        '> quoted',
+        '>',
+        '> continuation',
+        '',
+        'Paragraph',
+      ].join('\n')
+      const onChange = vi.fn()
+      render(
+        <StatefulEditor
+          initialContent={'\uFEFFSeed\r\n\r\nAfter'}
+          onChange={onChange}
+        />,
+      )
+      const editor = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+
+      fireEvent.change(editor, {
+        target: {
+          value: mixed,
+          selectionStart,
+          selectionEnd,
+          selectionDirection: direction,
+        },
+      })
+
+      await waitFor(() => {
+        const active = screen.getByLabelText(
+          'Active Markdown block',
+        ) as HTMLTextAreaElement
+        expect(active.value).toBe(expected)
+        expect(active.selectionStart).toBe(expectedSelection)
+      })
+      expect(onChange.mock.calls[0][0]).toBe(
+        mixed.replaceAll('\n', '\r\n') + '\r\n\r\nAfter',
+      )
+    },
+  )
+
+  it('retains composition and projected undo while a mixed edit changes the active block', async () => {
+    const mixed = '- first\n- second\n\n> quote\n\nParagraph'
+    render(<StatefulEditor initialContent="- seed" />)
+    const original = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    fireEvent.compositionStart(original)
+
+    fireEvent.change(original, {
+      target: {
+        value: mixed,
+        selectionStart: mixed.length,
+        selectionEnd: mixed.length,
+      },
+    })
+    const paragraph = await screen.findByLabelText('Active Markdown block')
+    await waitFor(() =>
+      expect((paragraph as HTMLTextAreaElement).value).toBe('Paragraph'),
+    )
+
+    fireEvent.keyDown(paragraph, { key: 'Tab' })
+    expect((paragraph as HTMLTextAreaElement).value).toBe('Paragraph')
+    fireEvent.compositionEnd(paragraph)
+    fireEvent.keyDown(paragraph, { key: 'z', ctrlKey: true })
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('seed'),
+    )
+  })
+
+  it('keeps each mixed pasted item isolated when later duplicate and quote rows activate', async () => {
+    const mixed = [
+      '- duplicate',
+      '\t- nested child',
+      '- duplicate',
+      '',
+      '1. ordered',
+      '',
+      '- [ ] task',
+      '',
+      '> quoted',
+      '>',
+      '> continuation',
+      '',
+      'Paragraph',
+    ].join('\n')
+    render(<StatefulEditor initialContent="" />)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+
+    fireEvent.change(editor, {
+      target: {
+        value: mixed,
+        selectionStart: mixed.length,
+        selectionEnd: mixed.length,
+      },
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('Paragraph'),
+    )
+
+    fireEvent.click((await screen.findAllByText('duplicate'))[0])
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('duplicate\n\t- nested child'),
+    )
+
+    fireEvent.click((await screen.findAllByText('duplicate'))[0])
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('duplicate'),
+    )
+
+    fireEvent.click(await screen.findByText('quoted'))
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toBe('quoted\n\ncontinuation'),
+    )
   })
 
   it('rotates active list DOM identity for an external semantic replacement', () => {
