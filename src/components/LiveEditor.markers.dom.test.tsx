@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -103,5 +103,84 @@ describe('LiveEditor marker projection', () => {
     })
 
     expect(editor.value).toBe('one\ntwo\nthree')
+  })
+
+  it('continues a quote with its exact marker depth and CRLF', () => {
+    const onChange = vi.fn()
+    render(
+      <LiveEditor
+        content={'>> nested\r\n>> second'}
+        activeBlock={0}
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(onChange).toHaveBeenLastCalledWith('>> nested\r\n>> second\r\n>> ')
+    expect(editor.value).toBe('nested\nsecond\n')
+  })
+
+  it('exits an empty quote line to plain paragraph mode', () => {
+    render(<ControlledEditor initial="> " />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    expect(editor.value).toBe('')
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(editor.value).toBe('')
+    expect(
+      editor.closest('.editor-block-row')?.classList.contains('is-active-quote'),
+    ).toBe(false)
+  })
+
+  it('maps visible selections for toolbar formatting without touching the marker', async () => {
+    const onChange = vi.fn()
+    const result = render(
+      <LiveEditor
+        content="- item"
+        activeBlock={0}
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 4)
+    result.rerender(
+      <LiveEditor
+        content="- item"
+        activeBlock={0}
+        formatRequest={{ id: 1, command: 'bold' }}
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('- **item**'))
+  })
+
+  it('preserves the hidden marker during IME and automatic spacing', () => {
+    const onChange = vi.fn()
+    render(
+      <LiveEditor
+        content="- 中文"
+        activeBlock={0}
+        autoSpacing
+        onChange={onChange}
+        onActiveBlockChange={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    fireEvent.compositionStart(editor)
+    fireEvent.change(editor, {
+      target: { value: '中文text', selectionStart: 6, selectionEnd: 6 },
+    })
+    expect(onChange).toHaveBeenLastCalledWith('- 中文text')
+
+    fireEvent.compositionEnd(editor, { data: 'text' })
+    expect(onChange).toHaveBeenLastCalledWith('- 中文 text')
   })
 })

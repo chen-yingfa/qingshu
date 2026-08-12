@@ -1338,7 +1338,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith(expected)
     await waitFor(() => {
       expect(editor.selectionStart).toBe(start)
-      expect(editor.selectionEnd).toBe(editor.value.length)
+      expect(editor.selectionEnd).toBe(end - 2)
       expect(editor.selectionDirection).toBe('forward')
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
