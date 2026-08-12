@@ -1930,6 +1930,14 @@ export function LiveEditor({
     rangeRef.current = { ...snapshot.range }
     contentRef.current = snapshot.content
     pendingAcknowledgementRef.current = snapshot.content
+    if (textareaRef.current) {
+      textareaRef.current.value = snapshot.draft
+      textareaRef.current.setSelectionRange(
+        snapshot.selection.start,
+        snapshot.selection.end,
+        snapshot.selection.direction,
+      )
+    }
     onChange(snapshot.content)
     onActiveBlockChange(snapshot.activeBlock)
     return true
@@ -3597,6 +3605,34 @@ export function LiveEditor({
                           pendingVisibleEditRef.current = null
                           const inputType = (event.nativeEvent as InputEvent)
                             .inputType
+                          const historyInput =
+                            inputType === 'historyUndo' ||
+                            inputType === 'historyRedo'
+                          if (inputType === 'historyUndo') {
+                            textarea.value = draft
+                            if (restoreEditorUndo()) {
+                              restoreProjectedTextarea(textarea)
+                              return
+                            }
+                          }
+                          const undoSnapshot =
+                            markerProjection.mode === 'plain' || historyInput
+                              ? null
+                              : {
+                                  ...currentUndoSnapshot(),
+                                  selection: {
+                                    start: markerProjection.toCanonicalOffset(
+                                      visibleEdit?.selectionStart ??
+                                        visibleSelectionRef.current.start,
+                                    ),
+                                    end: markerProjection.toCanonicalOffset(
+                                      visibleEdit?.selectionEnd ??
+                                        visibleSelectionRef.current.end,
+                                    ),
+                                    direction:
+                                      textarea.selectionDirection ?? 'none',
+                                  },
+                                }
                           const canonicalValue =
                             markerProjection.applyVisibleEdit(
                               textarea.value,
@@ -3623,9 +3659,6 @@ export function LiveEditor({
                             selectionEnd,
                             direction,
                           )
-                          const historyInput =
-                            inputType === 'historyUndo' ||
-                            inputType === 'historyRedo'
                           if (
                             !historyInput &&
                             !composingRef.current &&
@@ -3636,6 +3669,14 @@ export function LiveEditor({
                           }
                           invalidateMathInteraction()
                           commitDraft(canonicalValue)
+                          if (undoSnapshot) {
+                            pushEditorUndo(
+                              undoSnapshot,
+                              contentRef.current,
+                              safeActive,
+                              canonicalValue,
+                            )
+                          }
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
                             normalize(

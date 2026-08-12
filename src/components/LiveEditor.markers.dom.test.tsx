@@ -148,6 +148,60 @@ describe('LiveEditor marker projection', () => {
     expect(onChange).toHaveBeenLastCalledWith('>> a')
   })
 
+  it('undoes a projected CRLF deletion with each original quote depth intact', async () => {
+    const onChange = vi.fn()
+    render(
+      <ControlledEditor
+        initial={'> a\r\n>> a'}
+        onChangeSpy={onChange}
+      />,
+    )
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 2)
+    fireEvent.select(editor)
+    fireEvent.input(editor, {
+      target: { value: 'a', selectionStart: 0, selectionEnd: 0 },
+      inputType: 'deleteByCut',
+    })
+    expect(onChange).toHaveBeenLastCalledWith('>> a')
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+      ).toBe('a'),
+    )
+
+    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), {
+      key: 'z',
+      ctrlKey: true,
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith('> a\r\n>> a')
+  })
+
+  it('handles native historyUndo for a projected identical-line deletion', async () => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial={'> a\n>> a'} onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(0, 2)
+    fireEvent.select(editor)
+    fireEvent.input(editor, {
+      target: { value: 'a', selectionStart: 0, selectionEnd: 0 },
+      inputType: 'deleteByCut',
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
+      ).toBe('a'),
+    )
+
+    fireEvent.input(screen.getByLabelText('Active Markdown block'), {
+      target: { value: 'a\na', selectionStart: 2, selectionEnd: 2 },
+      inputType: 'historyUndo',
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith('> a\n>> a')
+  })
+
   it('keeps canonical markers visible in source mode', () => {
     render(<ControlledEditor initial={'- item\r\n> quote'} sourceMode />)
 
