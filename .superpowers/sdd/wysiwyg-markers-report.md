@@ -13,7 +13,8 @@ amending commits.
   ordered, and task list items hide their own marker while retaining exact
   canonical source and nested child source.
 - Active task items render one disabled task checkbox in the marker position;
-  other list items retain native `li`/`ol`/`ul` marker semantics.
+  ordered items use accessible custom markers so `3)` and zero-padded forms
+  remain visually faithful while retaining semantic `ol`/`li` values.
 - Active blockquotes hide each line's quote prefix, render quote styling
   immediately, preserve nested quote depth and CRLF, continue on Enter, and
   exit an empty quote line.
@@ -23,10 +24,10 @@ amending commits.
   Shift+Tab nesting, Backspace marker exit, controlled undo, IME,
   acknowledgement rerenders, formatting requests, drag/reorder, CRLF, and
   source-mode round trips.
-- Every toolbar button, including Recent Files, now has an ARIA-associated
-  custom tooltip for hover and keyboard focus. Tooltips use viewport-fixed,
-  clamped positioning, theme variables, modest delay/animation, and a
-  reduced-motion override. Native `title` remains as fallback.
+- Every toolbar button, including Recent Files, now has a custom tooltip for
+  hover and keyboard focus. Tooltips use measured viewport-fixed positioning,
+  clamping/flipping, independent hover/focus state, theme variables, modest
+  animation, and a reduced-motion override without duplicate native titles.
 
 ## TDD Evidence
 
@@ -49,10 +50,12 @@ amending commits.
 - `5fb9e3e` — test: map projected list selections
 - `3655aea` — test: cover projected quote and formatting interactions
 - `a0036cb` — fix: map projected toolbar formatting selections
+- `47b28e1` through `fcc31a0` — harden quote boundaries, marker rendering,
+  tooltip positioning, projected undo/redo, and atomic IME history
 
 ## Verification
 
-- `npm test` — 30 test files passed, 570 tests passed.
+- `npm test` — 30 test files passed, 601 tests passed.
 - `npm run typecheck` — passed both renderer and Node TypeScript projects.
 - `npm run build` — passed Vite renderer/main/preload builds and
   electron-builder Linux AppImage packaging.
