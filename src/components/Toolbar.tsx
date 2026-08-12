@@ -1,4 +1,14 @@
-import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  memo,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FocusEvent,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 
 import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
@@ -33,6 +43,49 @@ const formats: Array<[FormatCommand, IconName, string]> = [
   ['unordered-list', 'list', 'Bullet list'],
 ]
 
+function useToolbarTooltip(label: string) {
+  const id = `toolbar-tooltip-${useId().replace(/:/gu, '')}`
+  const [visible, setVisible] = useState(false)
+  const [position, setPosition] = useState({ left: 0, top: 0 })
+  const show = (button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect()
+    const halfWidth = Math.min(110, window.innerWidth / 2 - 8)
+    setPosition({
+      left: Math.max(halfWidth, Math.min(rect.left + rect.width / 2, window.innerWidth - halfWidth)),
+      top: Math.min(rect.bottom + 7, window.innerHeight - 32),
+    })
+    setVisible(true)
+  }
+  const tooltip = (
+    <span
+      id={id}
+      role="tooltip"
+      className="toolbar-tooltip"
+      data-visible={visible}
+      style={
+        {
+          '--tooltip-left': `${position.left}px`,
+          '--tooltip-top': `${position.top}px`,
+        } as CSSProperties
+      }
+    >
+      {label}
+    </span>
+  )
+  return {
+    id,
+    tooltip,
+    events: {
+      onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) =>
+        show(event.currentTarget),
+      onMouseLeave: () => setVisible(false),
+      onFocus: (event: FocusEvent<HTMLButtonElement>) =>
+        show(event.currentTarget),
+      onBlur: () => setVisible(false),
+    },
+  }
+}
+
 function ToolButton({
   label,
   icon,
@@ -44,16 +97,20 @@ function ToolButton({
   active?: boolean
   onClick(): void
 }) {
+  const tooltip = useToolbarTooltip(label)
   return (
     <button
       type="button"
       className={active ? 'tool-button is-active' : 'tool-button'}
       aria-label={label}
+      aria-describedby={tooltip.id}
       title={label}
       aria-pressed={active}
       onClick={onClick}
+      {...tooltip.events}
     >
       <Icon name={icon} />
+      {tooltip.tooltip}
     </button>
   )
 }
@@ -78,6 +135,7 @@ export const Toolbar = memo(function Toolbar({
   const recentTriggerRef = useRef<HTMLButtonElement>(null)
   const recentMenuRef = useRef<HTMLDivElement>(null)
   const recentItemsRef = useRef<Array<HTMLButtonElement | null>>([])
+  const recentTooltip = useToolbarTooltip('Recent files')
 
   useEffect(() => {
     if (!recentOpen) return undefined
@@ -123,11 +181,15 @@ export const Toolbar = memo(function Toolbar({
             type="button"
             className="tool-button recent-files-button"
             aria-label="Recent files"
+            aria-describedby={recentTooltip.id}
+            title="Recent files"
             aria-haspopup="menu"
             aria-expanded={recentOpen}
             onClick={() => setRecentOpen((open) => !open)}
+            {...recentTooltip.events}
           >
             <span aria-hidden="true">↶</span>
+            {recentTooltip.tooltip}
           </button>
           {recentOpen && (
             <div

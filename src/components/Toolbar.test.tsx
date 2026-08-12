@@ -64,3 +64,32 @@ describe('recent files menu', () => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 })
+
+describe('toolbar tooltips', () => {
+  it('associates every toolbar button with a custom tooltip', () => {
+    renderToolbar()
+
+    for (const button of screen.getAllByRole('button')) {
+      const tooltipId = button.getAttribute('aria-describedby')
+      expect(tooltipId).toBeTruthy()
+      const tooltip = document.getElementById(tooltipId!)
+      expect(tooltip?.getAttribute('role')).toBe('tooltip')
+      expect(tooltip?.textContent).toBe(button.getAttribute('aria-label'))
+    }
+  })
+
+  it('shows the recent-files tooltip on hover and keyboard focus', () => {
+    renderToolbar()
+    const button = screen.getByRole('button', { name: 'Recent files' })
+    const tooltip = document.getElementById(button.getAttribute('aria-describedby')!)
+
+    fireEvent.mouseEnter(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('true')
+    fireEvent.mouseLeave(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('false')
+    fireEvent.focus(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('true')
+    fireEvent.blur(button)
+    expect(tooltip?.getAttribute('data-visible')).toBe('false')
+  })
+})
