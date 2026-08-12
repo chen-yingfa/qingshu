@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useState, type ComponentProps } from 'react'
+import { useLayoutEffect, useRef, useState, type ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as markdown from '../markdown/markdown'
@@ -54,6 +54,39 @@ function StatefulEditor({
       }}
       onActiveBlockChange={setActiveBlock}
     />
+  )
+}
+
+function BrowserControlledEditor({
+  initialContent,
+  onChange,
+  onCommit,
+}: {
+  initialContent: string
+  onChange?(content: string): void
+  onCommit(value: string): void
+}) {
+  const [content, setContent] = useState(initialContent)
+  const [activeBlock, setActiveBlock] = useState(0)
+  const hostRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const textarea = hostRef.current?.querySelector(
+      '[aria-label="Active Markdown block"]',
+    ) as HTMLTextAreaElement | null
+    if (textarea) onCommit(textarea.value)
+  })
+  return (
+    <div ref={hostRef}>
+      <LiveEditor
+        content={content}
+        activeBlock={activeBlock}
+        onChange={(nextContent) => {
+          onChange?.(nextContent)
+          setContent(nextContent)
+        }}
+        onActiveBlockChange={setActiveBlock}
+      />
+    </div>
   )
 }
 
@@ -479,6 +512,80 @@ describe('LiveEditor state synchronization', () => {
       expect(restored.selectionEnd).toBe(4)
       expect(document.activeElement).toBe(restored)
     })
+  })
+
+  it('isolates a real mixed paste on the first controlled rerender and preserves undo', () => {
+    const mixed = [
+      '- first',
+      '  - nested child',
+      '',
+      '1. ordered',
+      '',
+      '- [ ] task',
+      '',
+      '> quoted',
+      '>',
+      '> continuation',
+    ].join('\r\n')
+    const onChange = vi.fn()
+    const committedValues: string[] = []
+    const result = render(
+      <BrowserControlledEditor
+        initialContent=""
+        onChange={onChange}
+        onCommit={(value) => committedValues.push(value)}
+      />,
+    )
+    const original = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    original.focus()
+    original.setSelectionRange(0, 0)
+    fireEvent.select(original)
+    original.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertFromPaste',
+    }))
+
+    fireEvent.input(original, {
+      target: {
+        value: mixed,
+        selectionStart: mixed.length,
+        selectionEnd: mixed.length,
+      },
+      inputType: 'insertFromPaste',
+    })
+
+    const pasted = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(committedValues[0]).toBe('')
+    expect(committedValues[1]).toBe('quoted\n\ncontinuation')
+    expect(pasted).not.toBe(original)
+    expect(pasted.value).toBe('quoted\n\ncontinuation')
+    expect(pasted.value).not.toContain('ordered')
+    expect(pasted.selectionStart).toBe(pasted.value.length)
+    expect(document.activeElement).toBe(pasted)
+    expect(result.container.querySelectorAll('.semantic-list-item-row')).toHaveLength(3)
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(pasted, undo)
+
+    const restored = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    expect(undo.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenLastCalledWith('')
+    expect(restored.value).toBe('')
+    expect(restored.selectionStart).toBe(0)
+    expect(restored.selectionEnd).toBe(0)
+    expect(document.activeElement).toBe(restored)
   })
 
   it.each([

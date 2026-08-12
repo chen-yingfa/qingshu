@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { DocumentFont } from '../settings'
 import type { FormatCommand } from './LiveEditor'
@@ -45,12 +46,15 @@ const formats: Array<[FormatCommand, IconName, string]> = [
   ['unordered-list', 'list', 'Bullet list'],
 ]
 
+const TOOLTIP_THEME_VARIABLES = ['--paper', '--text', '--line'] as const
+
 function useToolbarTooltip(label: string) {
   const id = `toolbar-tooltip-${useId().replace(/:/gu, '')}`
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const visible = hovered || focused
   const [position, setPosition] = useState({ left: 0, top: 0 })
+  const [themeVariables, setThemeVariables] = useState<Record<string, string>>({})
   const anchorRef = useRef<HTMLButtonElement | null>(null)
   const tooltipRef = useRef<HTMLSpanElement>(null)
   const measure = useCallback(() => {
@@ -75,6 +79,16 @@ function useToolbarTooltip(label: string) {
   }, [])
   const show = (button: HTMLButtonElement) => {
     anchorRef.current = button
+    const source = button.closest('.app-shell') ?? button
+    const computed = window.getComputedStyle(source)
+    setThemeVariables(
+      Object.fromEntries(
+        TOOLTIP_THEME_VARIABLES.map((variable) => [
+          variable,
+          computed.getPropertyValue(variable).trim(),
+        ]),
+      ),
+    )
   }
   useLayoutEffect(() => {
     if (visible) measure()
@@ -99,6 +113,7 @@ function useToolbarTooltip(label: string) {
         {
           '--tooltip-left': `${position.left}px`,
           '--tooltip-top': `${position.top}px`,
+          ...themeVariables,
         } as CSSProperties
       }
     >
@@ -108,7 +123,7 @@ function useToolbarTooltip(label: string) {
   return {
     id,
     visible,
-    tooltip,
+    tooltip: createPortal(tooltip, document.body),
     events: {
       onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) => {
         show(event.currentTarget)

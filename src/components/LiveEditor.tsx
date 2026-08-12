@@ -1326,6 +1326,13 @@ export function LiveEditor({
   const dragPointerRef = useRef<number | null>(null)
   const dragContentRef = useRef<string | null>(null)
   const editorRef = useRef<HTMLElement>(null)
+  const parentContentRef = useRef(content)
+  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+  const acknowledgedBlockEditRef = useRef<AcknowledgedBlockEdit | null>(null)
+  const pendingSplitActivationRef = useRef<{
+    content: string
+    index: number
+  } | null>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(
@@ -1343,11 +1350,56 @@ export function LiveEditor({
     () => editorBlocks(content, model.blocks, currentInsertedBlocks),
     [content, currentInsertedBlocks, model.blocks],
   )
+  const acknowledgedRenderEdit =
+    content !== parentContentRef.current &&
+    pendingAcknowledgementRef.current === content &&
+    acknowledgedBlockEditRef.current?.content === content
+      ? acknowledgedBlockEditRef.current
+      : null
+  const acknowledgedRenderTarget = (() => {
+    if (!acknowledgedRenderEdit) return null
+    const candidates = model.blocks.filter(
+      (block) =>
+        block.start >= acknowledgedRenderEdit.range.start &&
+        block.end <= acknowledgedRenderEdit.range.end,
+    )
+    if (candidates.length <= 1) return null
+    const focus =
+      acknowledgedRenderEdit.selection.direction === 'backward'
+        ? acknowledgedRenderEdit.selection.start
+        : acknowledgedRenderEdit.selection.end
+    const block = blockContainingFocus(
+      candidates,
+      focus,
+      acknowledgedRenderEdit.range.end,
+    )
+    if (!block) return null
+    const index = parsedEditorBlocks.findIndex(
+      (candidate) =>
+        candidate.start === block.start && candidate.end === block.end,
+    )
+    return index >= 0 ? { block, index } : null
+  })()
+  const pendingRenderTarget = (() => {
+    const pending = pendingSplitActivationRef.current
+    if (
+      !pending ||
+      pending.content !== content ||
+      pending.index === activeBlock
+    ) {
+      return null
+    }
+    const block = parsedEditorBlocks[pending.index]
+    return block ? { block, index: pending.index } : null
+  })()
+  const reconciliationRenderTarget =
+    acknowledgedRenderTarget ?? pendingRenderTarget
   const blocks = useMemo(
     () =>
       preserveEditingBoundary(content, parsedEditorBlocks, editingBoundary),
     [content, editingBoundary, parsedEditorBlocks],
   )
+  const renderedBlocks = reconciliationRenderTarget ? parsedEditorBlocks : blocks
   const renderContext = model.renderContext
   const movableBlocks = useMemo(() => {
     const protectedEnd = frontMatterEnd(content)
@@ -1357,25 +1409,32 @@ export function LiveEditor({
     () => new Map(movableBlocks.map((block, index) => [block.id, index])),
     [movableBlocks],
   )
-  const safeActive = Math.min(activeBlock, blocks.length - 1)
-  const active = blocks[safeActive]
+  const safeActive = Math.min(
+    reconciliationRenderTarget?.index ?? activeBlock,
+    renderedBlocks.length - 1,
+  )
+  const active = renderedBlocks[safeActive]
   const initialEditingBlock = active
   const [draft, setDraft] = useState(toEditorValue(initialEditingBlock.source))
+  const renderedDraft = reconciliationRenderTarget
+    ? toEditorValue(reconciliationRenderTarget.block.source)
+    : draft
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
   const [activeGroupSession, setActiveGroupSession] = useState(0)
-  const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
+  const fencedCode = useMemo(() => parseFencedCode(renderedDraft), [renderedDraft])
   const displayMath = useMemo(
-    () => draft.startsWith('$$\n') && draft.endsWith('\n$$'),
-    [draft],
+    () => renderedDraft.startsWith('$$\n') && renderedDraft.endsWith('\n$$'),
+    [renderedDraft],
   )
   const activeFrontmatter =
     active.type === 'yaml' || active.type === 'toml'
   const projectionModeFor = (value: string): MarkerProjectionMode =>
     projectionModeForBlock(active, value)
   const markerProjection = useMemo(
-    () => createMarkerProjection(draft, projectionModeFor(draft)),
-    [active.type, activeFrontmatter, displayMath, draft, fencedCode],
+    () =>
+      createMarkerProjection(renderedDraft, projectionModeFor(renderedDraft)),
+    [active.type, activeFrontmatter, displayMath, fencedCode, renderedDraft],
   )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
@@ -1416,13 +1475,6 @@ export function LiveEditor({
   const undoSessionRef = useRef(0)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
-  const parentContentRef = useRef(content)
-  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
-  const acknowledgedBlockEditRef = useRef<AcknowledgedBlockEdit | null>(null)
-  const pendingSplitActivationRef = useRef<{
-    content: string
-    index: number
-  } | null>(null)
   const handledFormatRef = useRef(0)
   const activationRef = useRef(onActiveBlockChange)
   activationRef.current = onActiveBlockChange
@@ -1577,6 +1629,12 @@ export function LiveEditor({
       return
     }
     const pendingSplitActivation = pendingSplitActivationRef.current
+    if (
+      pendingSplitActivation?.content === content &&
+      pendingSplitActivation.index === activeBlock
+    ) {
+      pendingSplitActivationRef.current = null
+    }
     if (activeChanged && pendingSplitActivation) {
       pendingSplitActivationRef.current = null
       if (
@@ -1589,8 +1647,11 @@ export function LiveEditor({
         return
       }
     }
-    if (acknowledgedBlockEdit && !activeChanged) {
-      const splitBlocks = parsedEditorBlocks.filter(
+    if (
+      acknowledgedBlockEdit &&
+      (!activeChanged || acknowledgedRenderTarget !== null)
+    ) {
+      const splitBlocks = model.blocks.filter(
         (block) =>
           block.start >= acknowledgedBlockEdit.range.start &&
           block.end <= acknowledgedBlockEdit.range.end,
@@ -1606,7 +1667,11 @@ export function LiveEditor({
           acknowledgedBlockEdit.range.end,
         )
         const focusedIndex = focusedBlock
-          ? parsedEditorBlocks.indexOf(focusedBlock)
+          ? parsedEditorBlocks.findIndex(
+              (block) =>
+                block.start === focusedBlock.start &&
+                block.end === focusedBlock.end,
+            )
           : -1
         if (focusedBlock && focusedIndex >= 0) {
           const focusedDraft = toEditorValue(focusedBlock.source)
@@ -4076,7 +4141,7 @@ export function LiveEditor({
               blocks: MarkdownBlock[]
               start: number
             }> = []
-            blocks.forEach((block, index) => {
+            renderedBlocks.forEach((block, index) => {
               const previous = units.at(-1)
               if (
                 block.list &&

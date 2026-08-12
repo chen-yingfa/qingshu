@@ -33,6 +33,11 @@ function renderToolbar() {
   return onRecent
 }
 
+function getTooltip(label: string): HTMLElement {
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="tooltip"]'))
+    .find((tooltip) => tooltip.textContent === label)!
+}
+
 describe('recent files menu', () => {
   it('focuses and navigates menuitems with menu keyboard semantics', () => {
     renderToolbar()
@@ -104,7 +109,7 @@ describe('toolbar tooltips', () => {
   it('keeps a focused tooltip visible after the pointer leaves', () => {
     renderToolbar()
     const button = screen.getByRole('button', { name: 'Recent files' })
-    const tooltip = button.querySelector('[role="tooltip"]')
+    const tooltip = getTooltip('Recent files')
 
     fireEvent.mouseEnter(button)
     fireEvent.focus(button)
@@ -119,7 +124,7 @@ describe('toolbar tooltips', () => {
   it('keeps a hovered tooltip visible after the button blurs', () => {
     renderToolbar()
     const button = screen.getByRole('button', { name: 'Recent files' })
-    const tooltip = button.querySelector('[role="tooltip"]')
+    const tooltip = getTooltip('Recent files')
 
     fireEvent.focus(button)
     fireEvent.mouseEnter(button)
@@ -147,7 +152,7 @@ describe('toolbar tooltips', () => {
       height: 20,
       toJSON: () => ({}),
     })
-    const tooltip = button.querySelector('[role="tooltip"]') as HTMLElement
+    const tooltip = getTooltip('Recent files')
     vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue({
       x: 0,
       y: 0,
@@ -181,7 +186,7 @@ describe('toolbar tooltips', () => {
       height: 20,
       toJSON: () => ({}),
     }))
-    const tooltip = button.querySelector('[role="tooltip"]') as HTMLElement
+    const tooltip = getTooltip('Recent files')
     vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue({
       x: 0,
       y: 0,
@@ -202,5 +207,52 @@ describe('toolbar tooltips', () => {
     left = 300
     fireEvent.scroll(window)
     expect(tooltip.style.getPropertyValue('--tooltip-left')).toBe('280px')
+  })
+
+  it('portals the recent-files tooltip with inherited theme outside narrowed toolbar overflow', () => {
+    const shell = document.createElement('div')
+    shell.className = 'app-shell theme-dark'
+    shell.style.setProperty('--paper', '#242321')
+    shell.style.setProperty('--text', '#e9e5dd')
+    shell.style.setProperty('--line', '#403d38')
+    shell.style.width = '80px'
+    shell.style.overflow = 'hidden'
+    document.body.append(shell)
+    render(
+      <Toolbar
+        dark
+        focus={false}
+        a4={false}
+        autoSpacing={false}
+        sourceMode={false}
+        documentFont="sans"
+        recentPaths={['/notes/one.md']}
+        onFile={vi.fn()}
+        onFormat={vi.fn()}
+        onFontChange={vi.fn()}
+        onSettings={vi.fn()}
+        onRecent={vi.fn()}
+        onToggle={vi.fn()}
+      />,
+      { container: shell },
+    )
+    const button = screen.getByRole('button', { name: 'Recent files' })
+
+    fireEvent.mouseEnter(button)
+    const tooltip = document.getElementById(
+      button.getAttribute('aria-describedby')!,
+    ) as HTMLElement
+    expect(tooltip.parentElement).toBe(document.body)
+    expect(tooltip.dataset.visible).toBe('true')
+    expect(tooltip.style.getPropertyValue('--paper')).toBe('#242321')
+    expect(tooltip.style.getPropertyValue('--text')).toBe('#e9e5dd')
+    expect(tooltip.style.getPropertyValue('--line')).toBe('#403d38')
+
+    fireEvent.focus(button)
+    fireEvent.mouseLeave(button)
+    expect(tooltip.dataset.visible).toBe('true')
+    fireEvent.click(button)
+    expect(screen.getByRole('menu')).not.toBeNull()
+    expect(document.body.contains(tooltip)).toBe(true)
   })
 })
