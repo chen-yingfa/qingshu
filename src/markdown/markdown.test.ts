@@ -12,6 +12,40 @@ import {
 } from './markdown'
 
 describe('parseBlocks', () => {
+  it('keeps every item exact across adjacent tight loose and ordered lists', () => {
+    const source = [
+      '- Tight 1',
+      '- Tight 2',
+      '- Tight 3',
+      '',
+      '- Loose 1',
+      '',
+      '- Loose 2',
+      '',
+      '- Loose 3',
+      '',
+      '1. Ordered 1',
+      '1. Ordered 2',
+      '1. Ordered 3',
+    ].join('\n')
+    const items = parseBlocks(source).filter((block) => block.type === 'listItem')
+
+    expect(items.map((block) => block.source)).toEqual([
+      '- Tight 1',
+      '- Tight 2',
+      '- Tight 3',
+      '- Loose 1',
+      '- Loose 2',
+      '- Loose 3',
+      '1. Ordered 1',
+      '1. Ordered 2',
+      '1. Ordered 3',
+    ])
+    for (const item of items) {
+      expect(source.slice(item.start, item.end)).toBe(item.source)
+    }
+  })
+
   it('parses YAML frontmatter as one exact protected block', () => {
     const source =
       '---\ntitle: 你好 Qingshu\ntags:\n  - markdown\n---\n\n# Document'

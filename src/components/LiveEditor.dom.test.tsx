@@ -36,6 +36,34 @@ function renderEditor(
 }
 
 describe('LiveEditor state synchronization', () => {
+  it('activates exactly one item in mixed tight loose and ordered lists', () => {
+    const source = [
+      '- Tight 1',
+      '- Tight 2',
+      '- Tight 3',
+      '',
+      '- Loose 1',
+      '',
+      '- Loose 2',
+      '',
+      '- Loose 3',
+      '',
+      '1. Ordered 1',
+      '1. Ordered 2',
+      '1. Ordered 3',
+    ].join('\n')
+    const activeBlock = markdown
+      .parseBlocks(source)
+      .findIndex((block) => block.source === '1. Ordered 2')
+
+    renderEditor(source, { activeBlock })
+
+    expect(
+      (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+        .value,
+    ).toBe('1. Ordered 2')
+  })
+
   it('renders adjacent list-item blocks in one semantic list with per-item rows', async () => {
     const source = '1. first\n1. second\n\n- [x] done\n- [ ] pending\n\nAfter'
     const result = renderEditor(source, { activeBlock: 4 })
