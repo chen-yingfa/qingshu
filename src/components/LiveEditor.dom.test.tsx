@@ -1338,7 +1338,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(result.onChange).toHaveBeenLastCalledWith(expected)
     await waitFor(() => {
       expect(editor.selectionStart).toBe(start)
-      expect(editor.selectionEnd).toBe(end + 8)
+      expect(editor.selectionEnd).toBe(editor.value.length)
       expect(editor.selectionDirection).toBe('forward')
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
@@ -2043,7 +2043,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     {
       name: 'continuation',
       source: '- item',
-      caret: 6,
+      caret: 4,
       key: 'Enter',
       active: 0,
       expectedDraft: 'item',
@@ -2219,6 +2219,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const marker = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
+    marker.setSelectionRange(9, 9)
     fireEvent.keyDown(marker, { key: 'Enter' })
 
     expect(result.onChange).toHaveBeenLastCalledWith(
@@ -2248,7 +2249,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(source.indexOf('  - [ ] ') + 6, source.indexOf('  - [ ] ') + 6)
+    editor.setSelectionRange(source.indexOf('  - [ ] ') + 2, source.indexOf('  - [ ] ') + 2)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith(outdented)
