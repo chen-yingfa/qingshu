@@ -1733,6 +1733,7 @@ export function LiveEditor({
     selectionEnd = selectionStart,
     afterCommit?: () => void,
     undoSnapshot?: EditorUndoSnapshot,
+    selectionDirection: SelectionDirection = 'none',
   ) => {
     const textarea = textareaRef.current
     if (!textarea) return
@@ -1744,7 +1745,12 @@ export function LiveEditor({
       change.end,
       'preserve',
     )
-    setEditorSelection(textarea, selectionStart, selectionEnd)
+    setEditorSelection(
+      textarea,
+      selectionStart,
+      selectionEnd,
+      selectionDirection,
+    )
     commitDraft(textarea.value)
     if (undoSnapshot) {
       pushEditorUndo(undoSnapshot, contentRef.current, safeActive, value)
@@ -1756,7 +1762,13 @@ export function LiveEditor({
       end: selectionEnd,
     }
     afterInteractionPaint(textarea, () => {
-      setEditorSelection(textarea, selectionStart, selectionEnd)
+      setEditorSelection(
+        textarea,
+        selectionStart,
+        selectionEnd,
+        selectionDirection,
+      )
+      reportSelection(textarea)
     })
   }
 
@@ -2501,6 +2513,7 @@ export function LiveEditor({
             nextEnd,
             undefined,
             snapshot,
+            direction,
           )
           setEditorSelection(textarea, nextStart, nextEnd, direction)
           reportSelection(textarea)
@@ -2576,6 +2589,7 @@ export function LiveEditor({
             }
           },
           snapshot,
+          direction,
         )
         setEditorSelection(textarea, nextStart, nextEnd, direction)
         reportSelection(textarea)
