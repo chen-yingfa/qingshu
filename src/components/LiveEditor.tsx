@@ -49,6 +49,11 @@ import {
   type FormatCommand,
   type FormatRequest,
 } from './DocumentSourceEditor'
+import {
+  createMarkerProjection,
+  type MarkerProjectionMode,
+  type VisibleEdit,
+} from './markerProjection'
 
 export type { FormatCommand } from './DocumentSourceEditor'
 export {
@@ -59,6 +64,16 @@ export {
 interface SourceRange {
   start: number
   end: number
+}
+
+interface AcknowledgedBlockEdit {
+  content: string
+  range: SourceRange
+  selection: {
+    start: number
+    end: number
+    direction: SelectionDirection
+  }
 }
 
 interface MathEnterToken {
@@ -98,6 +113,12 @@ interface EditorUndoSnapshot {
   expectedBlockId?: string
   expectedSession: number
 }
+
+const STRUCTURAL_INPUT_TYPES = new Set([
+  'insertFromPaste',
+  'insertFromDrop',
+  'insertReplacementText',
+])
 
 export interface InsertedBlock {
   offset: number
@@ -658,6 +679,51 @@ function preserveEditingBoundary(
     ...replacement,
     ...blocks.slice(containingIndex + 1),
   ]
+}
+
+function blockContainingFocus(
+  blocks: MarkdownBlock[],
+  focus: number,
+  documentLength: number,
+): MarkdownBlock | undefined {
+  if (blocks.length === 0) return undefined
+  if (focus >= documentLength) return blocks.at(-1)
+  return (
+    blocks.find(
+      (block) =>
+        (block.start <= focus && focus < block.end) ||
+        (block.start === block.end && block.start === focus),
+    ) ??
+    blocks.find((block) => block.start > focus) ??
+    blocks.at(-1)
+  )
+}
+
+function editorOffsetForSourceOffset(source: string, offset: number): number {
+  return toEditorValue(source.slice(0, Math.max(0, Math.min(offset, source.length))))
+    .length
+}
+
+function projectionModeForBlock(
+  block: MarkdownBlock,
+  value: string,
+): MarkerProjectionMode {
+  if (
+    parseFencedCode(value) ||
+    (value.startsWith('$$\n') && value.endsWith('\n$$')) ||
+    block.type === 'yaml' ||
+    block.type === 'toml'
+  ) {
+    return 'plain'
+  }
+  if (block.type === 'listItem') return 'list'
+  if (
+    block.type === 'blockquote' ||
+    /^(?:[ \t]*>[ \t]?)+/u.test(value)
+  ) {
+    return 'quote'
+  }
+  return 'plain'
 }
 
 function reorderInsertedBlocks(
@@ -1260,6 +1326,13 @@ export function LiveEditor({
   const dragPointerRef = useRef<number | null>(null)
   const dragContentRef = useRef<string | null>(null)
   const editorRef = useRef<HTMLElement>(null)
+  const parentContentRef = useRef(content)
+  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
+  const acknowledgedBlockEditRef = useRef<AcknowledgedBlockEdit | null>(null)
+  const pendingSplitActivationRef = useRef<{
+    content: string
+    index: number
+  } | null>(null)
   const currentInsertedBlocks =
     insertedBlocks.content === content ? insertedBlocks.blocks : []
   const model = useMemo(
@@ -1277,11 +1350,56 @@ export function LiveEditor({
     () => editorBlocks(content, model.blocks, currentInsertedBlocks),
     [content, currentInsertedBlocks, model.blocks],
   )
+  const acknowledgedRenderEdit =
+    content !== parentContentRef.current &&
+    pendingAcknowledgementRef.current === content &&
+    acknowledgedBlockEditRef.current?.content === content
+      ? acknowledgedBlockEditRef.current
+      : null
+  const acknowledgedRenderTarget = (() => {
+    if (!acknowledgedRenderEdit) return null
+    const candidates = model.blocks.filter(
+      (block) =>
+        block.start >= acknowledgedRenderEdit.range.start &&
+        block.end <= acknowledgedRenderEdit.range.end,
+    )
+    if (candidates.length <= 1) return null
+    const focus =
+      acknowledgedRenderEdit.selection.direction === 'backward'
+        ? acknowledgedRenderEdit.selection.start
+        : acknowledgedRenderEdit.selection.end
+    const block = blockContainingFocus(
+      candidates,
+      focus,
+      acknowledgedRenderEdit.range.end,
+    )
+    if (!block) return null
+    const index = parsedEditorBlocks.findIndex(
+      (candidate) =>
+        candidate.start === block.start && candidate.end === block.end,
+    )
+    return index >= 0 ? { block, index } : null
+  })()
+  const pendingRenderTarget = (() => {
+    const pending = pendingSplitActivationRef.current
+    if (
+      !pending ||
+      pending.content !== content ||
+      pending.index === activeBlock
+    ) {
+      return null
+    }
+    const block = parsedEditorBlocks[pending.index]
+    return block ? { block, index: pending.index } : null
+  })()
+  const reconciliationRenderTarget =
+    acknowledgedRenderTarget ?? pendingRenderTarget
   const blocks = useMemo(
     () =>
       preserveEditingBoundary(content, parsedEditorBlocks, editingBoundary),
     [content, editingBoundary, parsedEditorBlocks],
   )
+  const renderedBlocks = reconciliationRenderTarget ? parsedEditorBlocks : blocks
   const renderContext = model.renderContext
   const movableBlocks = useMemo(() => {
     const protectedEnd = frontMatterEnd(content)
@@ -1291,19 +1409,33 @@ export function LiveEditor({
     () => new Map(movableBlocks.map((block, index) => [block.id, index])),
     [movableBlocks],
   )
-  const safeActive = Math.min(activeBlock, blocks.length - 1)
-  const active = blocks[safeActive]
+  const safeActive = Math.min(
+    reconciliationRenderTarget?.index ?? activeBlock,
+    renderedBlocks.length - 1,
+  )
+  const active = renderedBlocks[safeActive]
   const initialEditingBlock = active
   const [draft, setDraft] = useState(toEditorValue(initialEditingBlock.source))
+  const renderedDraft = reconciliationRenderTarget
+    ? toEditorValue(reconciliationRenderTarget.block.source)
+    : draft
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
-  const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
+  const [activeGroupSession, setActiveGroupSession] = useState(0)
+  const fencedCode = useMemo(() => parseFencedCode(renderedDraft), [renderedDraft])
   const displayMath = useMemo(
-    () => draft.startsWith('$$\n') && draft.endsWith('\n$$'),
-    [draft],
+    () => renderedDraft.startsWith('$$\n') && renderedDraft.endsWith('\n$$'),
+    [renderedDraft],
   )
   const activeFrontmatter =
     active.type === 'yaml' || active.type === 'toml'
+  const projectionModeFor = (value: string): MarkerProjectionMode =>
+    projectionModeForBlock(active, value)
+  const markerProjection = useMemo(
+    () =>
+      createMarkerProjection(renderedDraft, projectionModeFor(renderedDraft)),
+    [active.type, activeFrontmatter, displayMath, fencedCode, renderedDraft],
+  )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
   const rangeRef = useRef<SourceRange>({
@@ -1319,6 +1451,7 @@ export function LiveEditor({
   const activeBlockIdentityRef = useRef<object>({})
   const interactionGenerationRef = useRef(0)
   const editorUndoRef = useRef<EditorUndoSnapshot[]>([])
+  const compositionUndoRef = useRef<EditorUndoSnapshot | null>(null)
   const pendingUndoRestoreRef = useRef<EditorUndoSnapshot | null>(null)
   const syntheticListSeparatorsRef = useRef<SyntheticListSeparator[]>([])
   const insertedBlocksRef = useRef(insertedBlocks)
@@ -1328,6 +1461,12 @@ export function LiveEditor({
     end: 0,
     direction: 'none' as SelectionDirection,
   })
+  const pendingVisibleEditRef = useRef<VisibleEdit | null>(null)
+  const pendingStructuralUndoRef = useRef<{
+    inputType: string
+    snapshot: EditorUndoSnapshot
+  } | null>(null)
+  const visibleSelectionRef = useRef({ start: 0, end: 0 })
   const deferredSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
   )
@@ -1336,8 +1475,6 @@ export function LiveEditor({
   const undoSessionRef = useRef(0)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
-  const parentContentRef = useRef(content)
-  const pendingAcknowledgementRef = useRef<string | undefined>(undefined)
   const handledFormatRef = useRef(0)
   const activationRef = useRef(onActiveBlockChange)
   activationRef.current = onActiveBlockChange
@@ -1445,8 +1582,13 @@ export function LiveEditor({
   const rotateEditorSession = (
     preserveBoundary = false,
     preservePendingUndo = false,
+    preserveComposition = false,
+    preserveListGroup = false,
   ) => {
-    composingRef.current = false
+    if (!preserveComposition) {
+      composingRef.current = false
+      compositionUndoRef.current = null
+    }
     codeTabEscapeRef.current = false
     invalidateMathInteraction()
     if (!preservePendingUndo) pendingUndoRestoreRef.current = null
@@ -1460,6 +1602,7 @@ export function LiveEditor({
       setEditingBoundary(null)
     }
     setActiveSession((session) => session + 1)
+    if (!preserveListGroup) setActiveGroupSession((session) => session + 1)
   }
 
   useLayoutEffect(() => {
@@ -1469,16 +1612,109 @@ export function LiveEditor({
     const parentChanged = content !== parentContentRef.current
     const acknowledged =
       parentChanged && pendingAcknowledgementRef.current === content
+    const acknowledgedBlockEdit =
+      acknowledged && acknowledgedBlockEditRef.current?.content === content
+        ? acknowledgedBlockEditRef.current
+        : null
     if (parentChanged) {
       parentContentRef.current = content
       contentRef.current = content
       pendingAcknowledgementRef.current = undefined
+      acknowledgedBlockEditRef.current = null
     }
     if (sourceMode) {
       if (sourceModeChanged) rotateEditorSession()
       previousActiveRef.current = safeActive
       previousSourceModeRef.current = true
       return
+    }
+    const pendingSplitActivation = pendingSplitActivationRef.current
+    if (
+      pendingSplitActivation?.content === content &&
+      pendingSplitActivation.index === activeBlock
+    ) {
+      pendingSplitActivationRef.current = null
+    }
+    if (activeChanged && pendingSplitActivation) {
+      pendingSplitActivationRef.current = null
+      if (
+        pendingSplitActivation.content === content &&
+        pendingSplitActivation.index === safeActive
+      ) {
+        activeIndexRef.current = safeActive
+        previousActiveRef.current = safeActive
+        previousSourceModeRef.current = false
+        return
+      }
+    }
+    if (
+      acknowledgedBlockEdit &&
+      (!activeChanged || acknowledgedRenderTarget !== null)
+    ) {
+      const splitBlocks = model.blocks.filter(
+        (block) =>
+          block.start >= acknowledgedBlockEdit.range.start &&
+          block.end <= acknowledgedBlockEdit.range.end,
+      )
+      if (splitBlocks.length > 1) {
+        const focus =
+          acknowledgedBlockEdit.selection.direction === 'backward'
+            ? acknowledgedBlockEdit.selection.start
+            : acknowledgedBlockEdit.selection.end
+        const focusedBlock = blockContainingFocus(
+          splitBlocks,
+          focus,
+          acknowledgedBlockEdit.range.end,
+        )
+        const focusedIndex = focusedBlock
+          ? parsedEditorBlocks.findIndex(
+              (block) =>
+                block.start === focusedBlock.start &&
+                block.end === focusedBlock.end,
+            )
+          : -1
+        if (focusedBlock && focusedIndex >= 0) {
+          const focusedDraft = toEditorValue(focusedBlock.source)
+          const localSelection = {
+            start: editorOffsetForSourceOffset(
+              focusedBlock.source,
+              acknowledgedBlockEdit.selection.start - focusedBlock.start,
+            ),
+            end: editorOffsetForSourceOffset(
+              focusedBlock.source,
+              acknowledgedBlockEdit.selection.end - focusedBlock.start,
+            ),
+            direction: acknowledgedBlockEdit.selection.direction,
+          }
+          const remappedUndo = editorUndoRef.current.at(-1)
+          if (remappedUndo?.expectedContent === content) {
+            remappedUndo.expectedActiveBlock = focusedIndex
+            remappedUndo.expectedDraft = focusedDraft
+            remappedUndo.expectedBlockId = focusedBlock.id
+          }
+          activeIndexRef.current = focusedIndex
+          rotateEditorSession(false, true, composingRef.current, true)
+          setDraft(focusedDraft)
+          rangeRef.current = {
+            start: focusedBlock.start,
+            end: focusedBlock.end,
+          }
+          selectionRef.current = localSelection
+          deferredSelectionRef.current = {
+            start: localSelection.start,
+            end: localSelection.end,
+          }
+          onSelectionChange?.(localSelection)
+          pendingSplitActivationRef.current = {
+            content,
+            index: focusedIndex,
+          }
+          previousActiveRef.current = safeActive
+          previousSourceModeRef.current = false
+          activationRef.current(focusedIndex)
+          return
+        }
+      }
     }
     const externalChange = parentChanged && !acknowledged
     const acknowledgedTransaction =
@@ -1587,8 +1823,8 @@ export function LiveEditor({
     textarea.focus()
     selectionRef.current = { ...snapshot.selection }
     textarea.setSelectionRange(
-      snapshot.selection.start,
-      snapshot.selection.end,
+      markerProjection.toVisibleOffset(snapshot.selection.start),
+      markerProjection.toVisibleOffset(snapshot.selection.end),
       snapshot.selection.direction,
     )
     mathEnterTokenRef.current = snapshot.mathToken
@@ -1615,8 +1851,8 @@ export function LiveEditor({
         ...snapshot.selection,
       }
       current.setSelectionRange(
-        snapshot.selection.start,
-        snapshot.selection.end,
+        markerProjection.toVisibleOffset(snapshot.selection.start),
+        markerProjection.toVisibleOffset(snapshot.selection.end),
         snapshot.selection.direction,
       )
       deferredSelectionRef.current = null
@@ -1654,18 +1890,18 @@ export function LiveEditor({
       const deferred = deferredSelectionRef.current
       const pending = deferred ?? selectionRef.current
       textarea.setSelectionRange(
-        Math.min(pending.start, textarea.value.length),
-        Math.min(pending.end, textarea.value.length),
+        markerProjection.toVisibleOffset(pending.start),
+        markerProjection.toVisibleOffset(pending.end),
         selectionRef.current.direction,
       )
     }
-  }, [active.id, draft, safeActive])
+  }, [active.id, draft, markerProjection, safeActive])
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || sourceMode || !selection) return
-    const start = Math.min(selection.start, textarea.value.length)
-    const end = Math.min(selection.end, textarea.value.length)
+    const start = markerProjection.toVisibleOffset(selection.start)
+    const end = markerProjection.toVisibleOffset(selection.end)
     if (
       textarea.selectionStart !== start ||
       textarea.selectionEnd !== end ||
@@ -1674,7 +1910,7 @@ export function LiveEditor({
       invalidateMathInteraction()
       setEditorSelection(textarea, start, end, selection.direction)
     }
-  }, [activeSession, selection, sourceMode])
+  }, [activeSession, markerProjection, selection, sourceMode])
 
   const reportSelection = (textarea: HTMLTextAreaElement) => {
     selectionRef.current = {
@@ -1689,7 +1925,18 @@ export function LiveEditor({
     })
   }
 
-  function commitDraft(value: string) {
+  const reportProjectedSelection = (textarea: HTMLTextAreaElement) => {
+    const direction = textarea.selectionDirection ?? 'none'
+    const start = markerProjection.toCanonicalOffset(textarea.selectionStart)
+    const end = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    selectionRef.current = { start, end, direction }
+    onSelectionChange?.({ start, end, direction })
+  }
+
+  function commitDraft(
+    value: string,
+    acknowledgedSelection?: AcknowledgedBlockEdit['selection'],
+  ) {
     transformSyntheticListSeparators(draft, value)
     const previousContent = contentRef.current
     const previous = { ...rangeRef.current }
@@ -1741,6 +1988,24 @@ export function LiveEditor({
     rangeRef.current.end = rangeRef.current.start + sourceValue.length
     contentRef.current = nextContent
     pendingAcknowledgementRef.current = nextContent
+    acknowledgedBlockEditRef.current = acknowledgedSelection
+      ? {
+          content: nextContent,
+          range: {
+            start: previous.start,
+            end: previous.start + sourceValue.length,
+          },
+          selection: {
+            start:
+              previous.start +
+              sourceOffsetForEditorOffset(sourceValue, acknowledgedSelection.start),
+            end:
+              previous.start +
+              sourceOffsetForEditorOffset(sourceValue, acknowledgedSelection.end),
+            direction: acknowledgedSelection.direction,
+          },
+        }
+      : null
     onChange(nextContent)
   }
 
@@ -1851,6 +2116,38 @@ export function LiveEditor({
     }
   }
 
+  const currentCanonicalUndoSnapshot = (
+    textarea: HTMLTextAreaElement,
+  ): EditorUndoSnapshot => ({
+    ...currentUndoSnapshot(),
+    selection: {
+      start: markerProjection.toCanonicalOffset(textarea.selectionStart),
+      end: markerProjection.toCanonicalOffset(textarea.selectionEnd),
+      direction: textarea.selectionDirection ?? 'none',
+    },
+  })
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const captureNativeEdit = (event: InputEvent) => {
+      pendingVisibleEditRef.current = {
+        selectionStart: textarea.selectionStart,
+        selectionEnd: textarea.selectionEnd,
+        inputType: event.inputType,
+      }
+      pendingStructuralUndoRef.current =
+        STRUCTURAL_INPUT_TYPES.has(event.inputType) && !composingRef.current
+          ? {
+              inputType: event.inputType,
+              snapshot: currentCanonicalUndoSnapshot(textarea),
+            }
+          : null
+    }
+    textarea.addEventListener('beforeinput', captureNativeEdit)
+    return () => textarea.removeEventListener('beforeinput', captureNativeEdit)
+  }, [activeSession, markerProjection, safeActive])
+
   const pushEditorUndo = (
     snapshot: EditorUndoSnapshot,
     expectedContent: string,
@@ -1871,6 +2168,21 @@ export function LiveEditor({
         expectedSession: undoSessionRef.current,
       },
     ].slice(-32)
+  }
+
+  const finishCompositionTransaction = () => {
+    const snapshot = compositionUndoRef.current
+    compositionUndoRef.current = null
+    if (!snapshot || snapshot.content === contentRef.current) return
+    const expectedDraft = toEditorValue(
+      contentRef.current.slice(rangeRef.current.start, rangeRef.current.end),
+    )
+    pushEditorUndo(
+      snapshot,
+      contentRef.current,
+      safeActive,
+      expectedDraft,
+    )
   }
 
   const restoreEditorUndo = (): boolean => {
@@ -1900,6 +2212,14 @@ export function LiveEditor({
     rangeRef.current = { ...snapshot.range }
     contentRef.current = snapshot.content
     pendingAcknowledgementRef.current = snapshot.content
+    if (textareaRef.current) {
+      textareaRef.current.value = snapshot.draft
+      textareaRef.current.setSelectionRange(
+        snapshot.selection.start,
+        snapshot.selection.end,
+        snapshot.selection.direction,
+      )
+    }
     onChange(snapshot.content)
     onActiveBlockChange(snapshot.activeBlock)
     return true
@@ -1957,17 +2277,57 @@ export function LiveEditor({
     if (readOnly) return
     invalidateMathInteraction()
     handledFormatRef.current = formatRequest.id
+    const selectionStart = markerProjection.toCanonicalOffset(
+      textarea.selectionStart,
+    )
+    const selectionEnd = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    const selectionDirection = textarea.selectionDirection ?? 'none'
+    const undoSnapshot = currentCanonicalUndoSnapshot(textarea)
     const result = formattedValue(
       formatRequest.command,
       draft,
-      textarea.selectionStart,
-      textarea.selectionEnd,
+      selectionStart,
+      selectionEnd,
     )
-    commitDraft(result.value)
-    afterInteractionPaint(textarea, () => {
-      setEditorSelection(textarea, result.selectionStart, result.selectionEnd)
+    commitDraft(result.value, {
+      start: result.selectionStart,
+      end: result.selectionEnd,
+      direction: selectionDirection,
     })
-  }, [content, draft, formatRequest, onChange])
+    if (
+      formatRequest.command === 'heading' ||
+      formatRequest.command === 'quote' ||
+      formatRequest.command === 'unordered-list'
+    ) {
+      pushEditorUndo(
+        undoSnapshot,
+        contentRef.current,
+        safeActive,
+        result.value,
+      )
+    }
+    afterInteractionPaint(textarea, () => {
+      const projection = createMarkerProjection(
+        result.value,
+        projectionModeFor(result.value),
+      )
+      selectionRef.current = {
+        start: result.selectionStart,
+        end: result.selectionEnd,
+        direction: selectionDirection,
+      }
+      textarea.setSelectionRange(
+        projection.toVisibleOffset(result.selectionStart),
+        projection.toVisibleOffset(result.selectionEnd),
+        selectionDirection,
+      )
+      onSelectionChange?.({
+        start: result.selectionStart,
+        end: result.selectionEnd,
+        direction: selectionDirection,
+      })
+    })
+  }, [content, draft, formatRequest, markerProjection, onChange, onSelectionChange])
 
   const normalize = (
     value: string,
@@ -2277,23 +2637,28 @@ export function LiveEditor({
     onActiveBlockChange(safeActive + 1)
   }
 
-  const enterDisplayMathMode = (value: string): boolean => {
+  const enterDisplayMathMode = (
+    value: string,
+    transactionSnapshot?: EditorUndoSnapshot,
+  ): boolean => {
     const isDollar = value === '$$'
     const isYen =
       cjkShortcuts && (value === '¥¥' || value === '￥￥')
     if (!isDollar && !isYen) return false
     const mathSource = '$$\n\n$$'
     invalidateMathInteraction()
-    const undoSnapshot = snapshotForDraft(value, {
-      start: value.length,
-      end: value.length,
-      direction: 'none',
-    })
+    const undoSnapshot =
+      transactionSnapshot ??
+      snapshotForDraft(value, {
+        start: value.length,
+        end: value.length,
+        direction: 'none',
+      })
     applyControlledTextareaEdit(value, mathSource, 3, 3, undefined, undoSnapshot)
     return true
   }
 
-  const exitListItem = (line: ListLine) => {
+  const exitStructuredLine = (line: Pick<ListLine, 'start' | 'end'>) => {
     const snapshot = currentUndoSnapshot()
     const previousContent = contentRef.current
     const previousRange = { ...rangeRef.current }
@@ -2422,6 +2787,32 @@ export function LiveEditor({
     })
   }
 
+  const canonicalizeProjectedTextarea = (textarea: HTMLTextAreaElement) => {
+    if (markerProjection.mode === 'plain') return
+    const start = markerProjection.toCanonicalOffset(textarea.selectionStart)
+    const end = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    const direction = textarea.selectionDirection ?? 'none'
+    textarea.value = draft
+    textarea.setSelectionRange(start, end, direction)
+  }
+
+  const restoreProjectedTextarea = (textarea: HTMLTextAreaElement) => {
+    const canonicalValue = textarea.value
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const direction = textarea.selectionDirection ?? 'none'
+    const projection = createMarkerProjection(
+      canonicalValue,
+      projectionModeFor(canonicalValue),
+    )
+    textarea.value = projection.visible
+    textarea.setSelectionRange(
+      projection.toVisibleOffset(start),
+      projection.toVisibleOffset(end),
+      direction,
+    )
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (readOnly) return
     if (
@@ -2463,6 +2854,36 @@ export function LiveEditor({
       invalidateMathInteraction()
     }
     if (!unmodifiedEnter) invalidateMathInteraction()
+
+    if (markerProjection.mode === 'quote' && unmodifiedEnter) {
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const lineStart = draft.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+      const nextBreak = draft.indexOf('\n', start)
+      const lineEnd = nextBreak < 0 ? draft.length : nextBreak
+      const line = draft.slice(lineStart, lineEnd)
+      const prefix = line.match(/^[ \t]*(?:>[ \t]?)+/u)?.[0]
+      if (prefix && start >= lineStart + prefix.length && end <= lineEnd) {
+        event.preventDefault()
+        const snapshot = currentUndoSnapshot()
+        if (!line.slice(prefix.length).trim()) {
+          exitStructuredLine({ start: lineStart, end: lineEnd })
+          return
+        }
+        const nextDraft =
+          draft.slice(0, start) + `\n${prefix}` + draft.slice(end)
+        const caret = start + 1 + prefix.length
+        applyControlledTextareaEdit(
+          draft,
+          nextDraft,
+          caret,
+          caret,
+          undefined,
+          snapshot,
+        )
+        return
+      }
+    }
 
     if (
       event.ctrlKey &&
@@ -2575,7 +2996,7 @@ export function LiveEditor({
             return
           }
         }
-        exitListItem(listLine)
+        exitStructuredLine(listLine)
         return
       }
       const start = textarea.selectionStart
@@ -3385,8 +3806,8 @@ export function LiveEditor({
                   {...(block.list?.ordered ? { value: block.list.value } : {})}
                   className={
                     index === safeActive
-                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
-                      : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${block.list?.ordered ? ' custom-ordered-list-item' : ''} is-active${markerProjection.mode === 'quote' ? ' is-active-quote' : ''}${block.list?.task ? ' active-task-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${block.list?.ordered ? ' custom-ordered-list-item' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
                   }
                 >
                   {realIndex !== undefined && block.list && (
@@ -3430,8 +3851,29 @@ export function LiveEditor({
                       }}
                     />
                   )}
+                  {block.list?.ordered && !block.list.task && (
+                    <span className="ordered-list-marker" aria-hidden="true">
+                      {block.list.marker}
+                    </span>
+                  )}
                   {index === safeActive ? (
                     <div className="active-block">
+                      {active.list?.task && (
+                        <input
+                          className="active-task-marker"
+                          type="checkbox"
+                          checked={
+                            /^(?:\uFEFF)?[ \t]*(?:\d{1,9}[.)]|[-+*])[ \t]+\[[xX]\]/u.test(
+                              draft,
+                            )
+                          }
+                          disabled
+                          aria-label={
+                            markerProjection.visible.split(/\r?\n/u, 1)[0] ||
+                            'Task item'
+                          }
+                        />
+                      )}
                       <textarea
                         ref={textareaRef}
                         className={
@@ -3457,36 +3899,130 @@ export function LiveEditor({
                           !fencedCode && !displayMath && !activeFrontmatter
                         }
                         readOnly={readOnly}
-                        value={draft}
+                        value={markerProjection.visible}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
                           const textarea = event.currentTarget
+                          const visibleEdit = pendingVisibleEditRef.current
+                          pendingVisibleEditRef.current = null
                           const inputType = (event.nativeEvent as InputEvent)
                             .inputType
+                          const pendingStructuralUndo =
+                            pendingStructuralUndoRef.current
+                          pendingStructuralUndoRef.current = null
                           const historyInput =
                             inputType === 'historyUndo' ||
                             inputType === 'historyRedo'
                           if (
+                            inputType === 'historyUndo' &&
+                            markerProjection.mode !== 'plain'
+                          ) {
+                            const nativeValue = textarea.value
+                            const nativeSelectionStart = textarea.selectionStart
+                            const nativeSelectionEnd = textarea.selectionEnd
+                            const nativeSelectionDirection =
+                              textarea.selectionDirection ?? 'none'
+                            textarea.value = draft
+                            if (restoreEditorUndo()) {
+                              restoreProjectedTextarea(textarea)
+                              return
+                            }
+                            textarea.value = nativeValue
+                            textarea.setSelectionRange(
+                              nativeSelectionStart,
+                              nativeSelectionEnd,
+                              nativeSelectionDirection,
+                            )
+                          }
+                          const undoSnapshot =
+                            pendingStructuralUndo &&
+                            pendingStructuralUndo.inputType === inputType
+                              ? pendingStructuralUndo.snapshot
+                              : markerProjection.mode === 'plain' ||
+                                  historyInput ||
+                                  composingRef.current ||
+                                  inputType === 'insertText'
+                                ? null
+                                : {
+                                  ...currentUndoSnapshot(),
+                                  selection: {
+                                    start: markerProjection.toCanonicalOffset(
+                                      visibleEdit?.selectionStart ??
+                                        visibleSelectionRef.current.start,
+                                    ),
+                                    end: markerProjection.toCanonicalOffset(
+                                      visibleEdit?.selectionEnd ??
+                                        visibleSelectionRef.current.end,
+                                    ),
+                                    direction:
+                                      textarea.selectionDirection ?? 'none',
+                                  },
+                                }
+                          const canonicalValue =
+                            markerProjection.applyVisibleEdit(
+                              textarea.value,
+                              visibleEdit ?? {
+                                selectionStart: visibleSelectionRef.current.start,
+                                selectionEnd: visibleSelectionRef.current.end,
+                                inputType,
+                              },
+                            )
+                          const nextProjection = createMarkerProjection(
+                            canonicalValue,
+                            projectionModeFor(canonicalValue),
+                          )
+                          const selectionStart = nextProjection.toCanonicalOffset(
+                            textarea.selectionStart,
+                          )
+                          const selectionEnd = nextProjection.toCanonicalOffset(
+                            textarea.selectionEnd,
+                          )
+                          const direction = textarea.selectionDirection ?? 'none'
+                          textarea.value = canonicalValue
+                          textarea.setSelectionRange(
+                            selectionStart,
+                            selectionEnd,
+                            direction,
+                          )
+                          if (
                             !historyInput &&
                             !composingRef.current &&
-                            enterDisplayMathMode(textarea.value)
+                            enterDisplayMathMode(canonicalValue)
                           ) {
+                            restoreProjectedTextarea(textarea)
                             return
                           }
                           invalidateMathInteraction()
-                          commitDraft(textarea.value)
+                          commitDraft(canonicalValue, {
+                            start: selectionStart,
+                            end: selectionEnd,
+                            direction,
+                          })
+                          if (undoSnapshot) {
+                            pushEditorUndo(
+                              undoSnapshot,
+                              contentRef.current,
+                              safeActive,
+                              canonicalValue,
+                            )
+                          }
                           reportSelection(textarea)
                           if (!composingRef.current && autoSpacing) {
                             normalize(
-                              textarea.value,
-                              textarea.selectionStart,
-                              textarea.selectionEnd,
+                              canonicalValue,
+                              selectionStart,
+                              selectionEnd,
                             )
                           }
+                          restoreProjectedTextarea(textarea)
                         }}
                         onSelect={(event) => {
                           const textarea = event.currentTarget
+                          visibleSelectionRef.current = {
+                            start: textarea.selectionStart,
+                            end: textarea.selectionEnd,
+                          }
                           const deferred = deferredSelectionRef.current
                           const token = mathEnterTokenRef.current
                           if (deferred) {
@@ -3497,7 +4033,7 @@ export function LiveEditor({
                             ) {
                               deferredSelectionRef.current = null
                               invalidateMathInteraction()
-                              reportSelection(textarea)
+                              reportProjectedSelection(textarea)
                             }
                             return
                           }
@@ -3510,7 +4046,7 @@ export function LiveEditor({
                           ) {
                             invalidateMathInteraction()
                           }
-                          reportSelection(textarea)
+                          reportProjectedSelection(textarea)
                         }}
                         onPointerDown={() => {
                           invalidateMathInteraction()
@@ -3520,20 +4056,47 @@ export function LiveEditor({
                           setActiveInputFocused(false)
                           composingRef.current = false
                           codeTabEscapeRef.current = false
+                          canonicalizeProjectedTextarea(event.currentTarget)
                           normalize(
                             event.currentTarget.value,
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          finishCompositionTransaction()
+                          restoreProjectedTextarea(event.currentTarget)
                         }}
-                        onCompositionStart={() => {
+                        onCompositionStart={(event) => {
                           invalidateMathInteraction()
+                          const textarea = event.currentTarget
+                          compositionUndoRef.current = {
+                            ...currentUndoSnapshot(),
+                            selection: {
+                              start: markerProjection.toCanonicalOffset(
+                                textarea.selectionStart,
+                              ),
+                              end: markerProjection.toCanonicalOffset(
+                                textarea.selectionEnd,
+                              ),
+                              direction:
+                                textarea.selectionDirection ?? 'none',
+                            },
+                          }
                           composingRef.current = true
                         }}
                         onCompositionEnd={(event) => {
+                          const transactionSnapshot =
+                            compositionUndoRef.current ?? undefined
                           composingRef.current = false
                           invalidateMathInteraction()
-                          if (enterDisplayMathMode(event.currentTarget.value)) {
+                          canonicalizeProjectedTextarea(event.currentTarget)
+                          if (
+                            enterDisplayMathMode(
+                              event.currentTarget.value,
+                              transactionSnapshot,
+                            )
+                          ) {
+                            compositionUndoRef.current = null
+                            restoreProjectedTextarea(event.currentTarget)
                             return
                           }
                           normalize(
@@ -3541,8 +4104,14 @@ export function LiveEditor({
                             event.currentTarget.selectionStart,
                             event.currentTarget.selectionEnd,
                           )
+                          finishCompositionTransaction()
+                          restoreProjectedTextarea(event.currentTarget)
                         }}
-                        onKeyDown={handleKeyDown}
+                        onKeyDown={(event) => {
+                          canonicalizeProjectedTextarea(event.currentTarget)
+                          handleKeyDown(event)
+                          restoreProjectedTextarea(event.currentTarget)
+                        }}
                       />
                       {activeInputFocused && (
                         <ActiveBlockPreview source={draft} />
@@ -3572,7 +4141,7 @@ export function LiveEditor({
               blocks: MarkdownBlock[]
               start: number
             }> = []
-            blocks.forEach((block, index) => {
+            renderedBlocks.forEach((block, index) => {
               const previous = units.at(-1)
               if (
                 block.list &&
@@ -3591,7 +4160,7 @@ export function LiveEditor({
                   key={
                     safeActive >= unit.start &&
                     safeActive < unit.start + unit.blocks.length
-                      ? `active-list-group-${activeSession}`
+                      ? `active-list-group-${activeGroupSession}`
                       : first.list.groupId
                   }
                   blocks={unit.blocks}

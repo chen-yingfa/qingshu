@@ -1,0 +1,182 @@
+import { describe, expect, it } from 'vitest'
+
+import { createMarkerProjection } from './markerProjection'
+
+describe('marker projection', () => {
+  it.each([
+    ['- prose', 'prose'],
+    ['* prose', 'prose'],
+    ['+ prose', 'prose'],
+    ['007. prose', 'prose'],
+    ['09) prose', 'prose'],
+    ['- [x] done', 'done'],
+    ['+ [ ] pending', 'pending'],
+  ])('hides the first list marker in %s', (canonical, visible) => {
+    const projection = createMarkerProjection(canonical, 'list')
+
+    expect(projection.visible).toBe(visible)
+    expect(projection.toCanonicalOffset(0)).toBe(canonical.length - visible.length)
+    expect(projection.toVisibleOffset(canonical.length - visible.length - 1)).toBe(0)
+    expect(projection.toVisibleOffset(canonical.length)).toBe(visible.length)
+  })
+
+  it('keeps nested child source visible and reconstructs the exact parent marker', () => {
+    const canonical = '007) parent\r\n\t* child\r\n\t  continuation'
+    const projection = createMarkerProjection(canonical, 'list')
+
+    expect(projection.visible).toBe('parent\r\n\t* child\r\n\t  continuation')
+    expect(projection.applyVisibleEdit('changed\r\n\t* child\r\n\t  continuation')).toBe(
+      '007) changed\r\n\t* child\r\n\t  continuation',
+    )
+  })
+
+  it('hides every quote prefix and preserves nested depth and CRLF', () => {
+    const canonical = '> one\r\n>> two\r\n> > three'
+    const projection = createMarkerProjection(canonical, 'quote')
+
+    expect(projection.visible).toBe('one\r\ntwo\r\nthree')
+    expect(projection.applyVisibleEdit('ONE\r\ntwo\r\nthree')).toBe(
+      '> ONE\r\n>> two\r\n> > three',
+    )
+  })
+
+  it('continues the current quote prefix for inserted lines', () => {
+    const projection = createMarkerProjection('>> nested', 'quote')
+
+    expect(projection.applyVisibleEdit('nested\nnext')).toBe(
+      '>> nested\n>> next',
+    )
+  })
+
+  it('fills a projected empty quote line without moving its hidden marker', () => {
+    const projection = createMarkerProjection('> one\n>> two\n>> ', 'quote')
+
+    expect(projection.applyVisibleEdit('one\ntwo\nthree')).toBe(
+      '> one\n>> two\n>> three',
+    )
+  })
+
+  it('uses the actual selected range when identical quote lines are deleted', () => {
+    const projection = createMarkerProjection('> a\n>> a', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('a', {
+        selectionStart: 0,
+        selectionEnd: 2,
+        inputType: 'deleteByCut',
+      }),
+    ).toBe('>> a')
+  })
+
+  it.each([
+    ['Backspace', 'deleteContentBackward', 2],
+    ['forward Delete', 'deleteContentForward', 1],
+  ])('removes the joined-away quote marker on %s', (
+    _name,
+    inputType,
+    caret,
+  ) => {
+    const projection = createMarkerProjection('> a\n>> a', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('aa', {
+        selectionStart: caret,
+        selectionEnd: caret,
+        inputType,
+      }),
+    ).toBe('> aa')
+  })
+
+  it.each([
+    {
+      name: 'nested list',
+      canonical: '>> - parent\n> >   - child',
+      visible: '- parent\n  - child',
+      joined: '- parent  - child',
+      expected: '>> - parent  - child',
+    },
+    {
+      name: 'task list with CRLF',
+      canonical: '> - [x] done\r\n>>> - [ ] next',
+      visible: '- [x] done\r\n- [ ] next',
+      joined: '- [x] done- [ ] next',
+      expected: '> - [x] done- [ ] next',
+    },
+  ])('removes nested quote syntax when joining a multiline $name', ({
+    canonical,
+    visible,
+    joined,
+    expected,
+  }) => {
+    const projection = createMarkerProjection(canonical, 'quote')
+    const boundary = visible.indexOf('\n') + 1
+
+    expect(projection.visible).toBe(visible)
+    expect(
+      projection.applyVisibleEdit(joined, {
+        selectionStart: boundary,
+        selectionEnd: boundary,
+        inputType: 'deleteContentBackward',
+      }),
+    ).toBe(expected)
+  })
+
+  it('removes the joined-away marker when a selection spans a quote boundary', () => {
+    const projection = createMarkerProjection('>> ab\n> > cd', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('ad', {
+        selectionStart: 1,
+        selectionEnd: 4,
+        inputType: 'deleteContentBackward',
+      }),
+    ).toBe('>> ad')
+  })
+
+  it('removes the suffix marker when a replacement joins from a line start', () => {
+    const projection = createMarkerProjection('> a\n>> b', 'quote')
+
+    expect(
+      projection.applyVisibleEdit('xb', {
+        selectionStart: 0,
+        selectionEnd: 2,
+        inputType: 'insertText',
+      }),
+    ).toBe('> xb')
+  })
+
+  it('preserves line-specific quote markers for multiline replacement with CRLF', () => {
+    const projection = createMarkerProjection(
+      '> same\r\n>> same\r\n> > tail',
+      'quote',
+    )
+
+    expect(
+      projection.applyVisibleEdit('first\r\nsecond\r\nthird', {
+        selectionStart: 0,
+        selectionEnd: projection.visible.length,
+        inputType: 'insertText',
+      }),
+    ).toBe('> first\r\n>> second\r\n> > third')
+  })
+
+  it('maps quote offsets in both directions at line boundaries', () => {
+    const projection = createMarkerProjection('> one\n>> two', 'quote')
+
+    expect(projection.toCanonicalOffset(0)).toBe(2)
+    expect(projection.toCanonicalOffset(4)).toBe(9)
+    expect(projection.toCanonicalOffset(5)).toBe(10)
+    expect(projection.toVisibleOffset(7)).toBe(4)
+    expect(projection.toVisibleOffset(9)).toBe(4)
+  })
+
+  it('is identity for plain text and marker-shaped protected content', () => {
+    for (const source of ['- item', '> quote', '---\ntitle: x\n---', '```md\n- code\n```']) {
+      const projection = createMarkerProjection(source, 'plain')
+      expect(projection.visible).toBe(source)
+      expect(projection.applyVisibleEdit(`${source}!`)).toBe(`${source}!`)
+      expect(projection.toCanonicalOffset(2)).toBe(2)
+      expect(projection.toVisibleOffset(2)).toBe(2)
+    }
+  })
+})
