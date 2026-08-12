@@ -3608,7 +3608,10 @@ export function LiveEditor({
                           const historyInput =
                             inputType === 'historyUndo' ||
                             inputType === 'historyRedo'
-                          if (inputType === 'historyUndo') {
+                          if (
+                            inputType === 'historyUndo' &&
+                            markerProjection.mode !== 'plain'
+                          ) {
                             textarea.value = draft
                             if (restoreEditorUndo()) {
                               restoreProjectedTextarea(textarea)
