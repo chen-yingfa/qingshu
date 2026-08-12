@@ -426,6 +426,15 @@ button {
   margin-top: 0;
 }
 
+.editor-block-row[data-list-continuation="true"] {
+  margin-top: 0;
+}
+
+.editor-block-row[data-list-continuation="true"] .rendered-block > ol,
+.editor-block-row[data-list-continuation="true"] .rendered-block > ul {
+  margin-top: 0;
+}
+
 .block-drag-handle {
   position: absolute;
   z-index: 3;

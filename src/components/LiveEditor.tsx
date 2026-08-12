@@ -89,8 +89,8 @@ interface EditorUndoSnapshot {
   editingBoundary: EditingBoundary | null
   syntheticListSeparators: SyntheticListSeparator[]
   readonly expectedContent: string
-  readonly expectedActiveBlock: number
-  readonly expectedDraft: string
+  expectedActiveBlock: number
+  expectedDraft: string
 }
 
 export interface InsertedBlock {
@@ -580,6 +580,27 @@ function editorBlocks(
     }
   }
   return editable.sort((left, right) => left.start - right.start)
+}
+
+function semanticEditingBlock(
+  content: string,
+  block: MarkdownBlock,
+  parsedBlocks: MarkdownBlock[],
+): MarkdownBlock {
+  if (!block.list) return block
+  const group = parsedBlocks.filter(
+    (candidate) => candidate.list?.groupId === block.list?.groupId,
+  )
+  const first = group[0]
+  const last = group.at(-1)
+  if (!first || !last) return block
+  return {
+    ...block,
+    id: `${block.list.groupId}-editing`,
+    source: content.slice(first.start, last.end),
+    start: first.start,
+    end: last.end,
+  }
 }
 
 function preserveEditingBoundary(
@@ -1145,7 +1166,8 @@ export function LiveEditor({
   )
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
-  const [draft, setDraft] = useState(toEditorValue(active.source))
+  const initialEditingBlock = semanticEditingBlock(content, active, model.blocks)
+  const [draft, setDraft] = useState(toEditorValue(initialEditingBlock.source))
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
   const fencedCode = useMemo(() => parseFencedCode(draft), [draft])
@@ -1157,7 +1179,10 @@ export function LiveEditor({
     active.type === 'yaml' || active.type === 'toml'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef(content)
-  const rangeRef = useRef<SourceRange>({ start: active.start, end: active.end })
+  const rangeRef = useRef<SourceRange>({
+    start: initialEditingBlock.start,
+    end: initialEditingBlock.end,
+  })
   const composingRef = useRef(false)
   const codeTabEscapeRef = useRef(false)
   const mathEnterTokenRef = useRef<MathEnterToken | null>(null)
@@ -1340,8 +1365,13 @@ export function LiveEditor({
                 block.start <= active.start && block.end >= active.end,
             )
           : -1
-      const semanticActive =
-        semanticIndex >= 0 ? model.blocks[semanticIndex] : undefined
+      const semanticActive = retainBoundary
+        ? active
+        : active.list
+          ? semanticEditingBlock(content, active, model.blocks)
+          : semanticIndex >= 0
+            ? model.blocks[semanticIndex]
+            : undefined
       const semanticEditorIndex = semanticActive
         ? parsedEditorBlocks.findIndex(
             (block) =>
@@ -2263,15 +2293,14 @@ export function LiveEditor({
     )
     const semanticListBlock = model.blocks.find(
       (block) =>
-        block.type === 'list' &&
-        block.start <= rangeRef.current.start &&
-        block.end >= rangeRef.current.start,
+        block.type === 'listItem' &&
+        block.list?.groupId === active.list?.groupId,
     )
     const inSemanticList =
       !fencedCode &&
       !displayMath &&
       !activeFrontmatter &&
-      active.type === 'list' &&
+      active.type === 'listItem' &&
       semanticListBlock !== undefined
     const listLine = inSemanticList
       && !currentLineIsProtected
@@ -2331,6 +2360,9 @@ export function LiveEditor({
         suffix
       const caret = start + 1 + listLine.nextPrefix.length
       const snapshot = currentUndoSnapshot()
+      const previousRangeStart = rangeRef.current.start
+      const sourceSplitOffset = sourceOffsetForEditorOffset(currentSource, start)
+      const sourceEol = nearestEol(contentRef.current, rangeRef.current.start)
       applyControlledTextareaEdit(
         draft,
         nextDraft,
@@ -2339,6 +2371,31 @@ export function LiveEditor({
         undefined,
         snapshot,
       )
+      if (listLine.start === 0 && firstLineIndent.length === 0) {
+        const nextItemDraft = nextDraft.slice(start + 1)
+        const nextItemStart =
+          previousRangeStart + sourceSplitOffset + sourceEol.length
+        const nextEnd = rangeRef.current.end
+        setDraft(nextItemDraft)
+        rangeRef.current = {
+          start: nextItemStart,
+          end: nextEnd,
+        }
+        const nextBoundary = {
+          content: contentRef.current,
+          start: nextItemStart,
+          end: nextEnd,
+          retainOnActivation: true,
+        }
+        editingBoundaryRef.current = nextBoundary
+        setEditingBoundary(nextBoundary)
+        const undo = editorUndoRef.current.at(-1)
+        if (undo) {
+          undo.expectedActiveBlock = safeActive + 1
+          undo.expectedDraft = nextItemDraft
+        }
+        onActiveBlockChange(safeActive + 1)
+      }
       return
     }
 
@@ -3046,6 +3103,13 @@ export function LiveEditor({
                   />
                 )}
                 <div
+                  data-list-group={block.list?.groupId}
+                  data-list-continuation={
+                    block.list &&
+                    blocks[index - 1]?.list?.groupId === block.list.groupId
+                      ? 'true'
+                      : undefined
+                  }
                   className={
                     index === safeActive
                       ? 'editor-block-row is-active'

@@ -10,6 +10,10 @@ export interface MarkdownAstNode {
   url?: string
   identifier?: string
   label?: string
+  ordered?: boolean
+  start?: number | null
+  spread?: boolean
+  checked?: boolean | null
   children?: MarkdownAstNode[]
   position?: {
     start: { offset?: number }

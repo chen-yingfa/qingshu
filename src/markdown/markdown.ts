@@ -22,6 +22,19 @@ export interface MarkdownBlock {
   source: string
   start: number
   end: number
+  list?: MarkdownListBlockMetadata
+}
+
+export interface MarkdownListBlockMetadata {
+  groupId: string
+  ordered: boolean
+  start: number
+  index: number
+  value: number
+  marker: string
+  delimiter?: '.' | ')'
+  loose: boolean
+  task: boolean
 }
 
 interface FootnoteReference {
@@ -165,7 +178,7 @@ function sourceHash(source: string): string {
 function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
   const identities = new Map<string, number>()
 
-  return tree.children.flatMap((node) => {
+  return tree.children.flatMap((node, topLevelIndex) => {
     const start = node.position?.start.offset
     const end = node.position?.end.offset
 
@@ -173,20 +186,108 @@ function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
       return []
     }
 
-    const blockSource = source.slice(start, end)
-    const identity = `${node.type}-${sourceHash(blockSource)}`
-    const occurrence = (identities.get(identity) ?? 0) + 1
-    identities.set(identity, occurrence)
-
-    return [
-      {
+    const makeBlock = (
+      type: string,
+      blockStart: number,
+      blockEnd: number,
+      list?: MarkdownListBlockMetadata,
+    ): MarkdownBlock => {
+      const blockSource = source.slice(blockStart, blockEnd)
+      const identity = `${type}-${sourceHash(blockSource)}`
+      const occurrence = (identities.get(identity) ?? 0) + 1
+      identities.set(identity, occurrence)
+      return {
         id: `${identity}-${occurrence}`,
-        type: node.type,
+        type,
         source: blockSource,
-        start,
-        end,
-      },
-    ]
+        start: blockStart,
+        end: blockEnd,
+        ...(list ? { list } : {}),
+      }
+    }
+
+    if (node.type !== 'list') {
+      return [makeBlock(node.type, start, end)]
+    }
+
+    const items = node.children ?? []
+    const ordered = node.ordered === true
+    const semanticStart = ordered ? node.start ?? 1 : 1
+    const groupId = `list-${topLevelIndex}-${ordered ? 'ordered' : 'unordered'}`
+    const scanEnd =
+      tree.children[topLevelIndex + 1]?.position?.start.offset ?? source.length
+    const baseIndent =
+      source.slice(start).match(/^(?:\uFEFF)?([ \t]*)/u)?.[1] ?? ''
+    const semanticItems = items.flatMap((item, index) => {
+      const positionedStart = item.position?.start.offset
+      if (positionedStart === undefined) return []
+      return [{
+        item,
+        start:
+          index === 0 && source.startsWith('\uFEFF', start)
+            ? start
+            : positionedStart,
+      }]
+    })
+    const emptyStarts = Array.from(
+      source.slice(start, scanEnd).matchAll(
+        /^(?:\uFEFF)?([ \t]*)(?:\d+[.)]|[-+*])[ \t]*(?:\[[ xX]\][ \t]*)?$/gmu,
+      ),
+    ).filter((match) => match[1] === baseIndent)
+      .map((match) => start + match.index!)
+    const itemStarts = Array.from(
+      new Set([
+        ...semanticItems.map((entry) => entry.start),
+        ...emptyStarts,
+      ]),
+    ).sort((left, right) => left - right)
+
+    return itemStarts.flatMap((itemStart, index) => {
+      const semantic = semanticItems.find((entry) => entry.start === itemStart)
+      const nextStart = itemStarts[index + 1]
+      const emptyLineEnd = source.indexOf('\n', itemStart)
+      const candidateEnd =
+        semantic?.item.position?.end.offset ??
+        (emptyLineEnd < 0
+          ? source.length
+          : emptyLineEnd - (source[emptyLineEnd - 1] === '\r' ? 1 : 0))
+      let itemEnd = Math.min(candidateEnd, nextStart ?? scanEnd)
+      if (nextStart !== undefined) {
+        const beforeNext = source.slice(itemStart, nextStart)
+        const trailing = beforeNext.match(/(?:[ \t]*\r?\n)+$/u)?.[0] ?? ''
+        itemEnd = nextStart - trailing.length
+      }
+      const firstLine =
+        source.slice(itemStart, itemEnd).split(/\r?\n/u, 1)[0] ?? ''
+      const markerMatch = firstLine.match(
+        /^(?:\uFEFF)?[ \t]*(?:(\d+)([.)])|([-+*]))(?=[ \t]|$)/u,
+      )
+      const marker = markerMatch
+        ? markerMatch[1]
+          ? `${markerMatch[1]}${markerMatch[2]}`
+          : markerMatch[3]
+        : ordered
+          ? `${semanticStart + index}.`
+          : '-'
+      return [
+        makeBlock('listItem', itemStart, itemEnd, {
+          groupId,
+          ordered,
+          start: semanticStart,
+          index,
+          value: semanticStart + index,
+          marker,
+          ...(ordered && markerMatch?.[2]
+            ? { delimiter: markerMatch[2] as '.' | ')' }
+            : {}),
+          loose: node.spread === true || semantic?.item.spread === true,
+          task:
+            semantic?.item.checked === true ||
+            semantic?.item.checked === false ||
+            /^(?:\uFEFF)?[ \t]*[-+*][ \t]+\[[ xX]\]/u.test(firstLine),
+        }),
+      ]
+    })
   })
 }
 
@@ -401,7 +502,24 @@ export async function renderMarkdownBlock(
   const references = context.references.filter(
     (reference) => reference.start >= block.start && reference.end <= block.end,
   )
-  return withoutFootnoteSection(await processMarkdown(input, references))
+  let renderAst: MarkdownRoot | undefined
+  if (block.list?.loose) {
+    renderAst = parseMarkdownAst(input)
+    const list = renderAst.children.find((node) => node.type === 'list')
+    if (list) {
+      list.spread = true
+      const item = list.children?.find((child) => child.type === 'listItem')
+      if (item) item.spread = true
+    }
+  }
+  const html = withoutFootnoteSection(
+    await processMarkdown(input, references, renderAst),
+  )
+  if (!block.list?.ordered) return html
+  return html.replace(
+    /<ol(?: start="\d+")?>/u,
+    `<ol start="${block.list.value}">`,
+  )
 }
 
 export async function renderDocumentFootnotes(

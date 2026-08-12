@@ -62,20 +62,85 @@ describe('parseBlocks', () => {
     )
   })
 
-  it('retains blank-line-separated items as one semantic loose list', () => {
+  it('retains blank-line-separated items as one loose list group', () => {
     const blocks = parseBlocks('- Previous item\n\n-')
 
     expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
-      { type: 'list', source: '- Previous item\n\n-' },
+      { type: 'listItem', source: '- Previous item' },
+      { type: 'listItem', source: '-' },
     ])
+    expect(blocks.map((block) => block.list?.loose)).toEqual([true, true])
+    expect(blocks[1].list?.groupId).toBe(blocks[0].list?.groupId)
   })
 
   it('keeps adjacent items in one tight list block', () => {
     const blocks = parseBlocks('- First\n- Second')
 
     expect(blocks.map(({ type, source }) => ({ type, source }))).toEqual([
-      { type: 'list', source: '- First\n- Second' },
+      { type: 'listItem', source: '- First' },
+      { type: 'listItem', source: '- Second' },
     ])
+  })
+
+  it('exposes a trailing empty marker as its own item block', () => {
+    expect(
+      parseBlocks('- first\n- ').map(({ source: blockSource }) => blockSource),
+    ).toEqual(['- first', '- '])
+  })
+
+  it('models every top-level item as an exact list-item block', () => {
+    const source = [
+      '\uFEFF1. first\r\n',
+      '   continued\r\n',
+      '   - nested\r\n',
+      '\r\n',
+      '1. second\r\n',
+      '\r\n',
+      '   second paragraph\r\n',
+      '\r\n',
+      '- [x] task',
+    ].join('')
+    const blocks = parseBlocks(source)
+
+    expect(blocks.map(({ type, source: blockSource }) => ({
+      type,
+      source: blockSource,
+    }))).toEqual([
+      {
+        type: 'listItem',
+        source: '\uFEFF1. first\r\n   continued\r\n   - nested',
+      },
+      {
+        type: 'listItem',
+        source: '1. second\r\n\r\n   second paragraph',
+      },
+      { type: 'listItem', source: '- [x] task' },
+    ])
+    expect(blocks[0].list).toMatchObject({
+      ordered: true,
+      start: 1,
+      index: 0,
+      value: 1,
+      marker: '1.',
+    })
+    expect(blocks[1].list).toMatchObject({
+      groupId: blocks[0].list?.groupId,
+      ordered: true,
+      start: 1,
+      index: 1,
+      value: 2,
+      marker: '1.',
+      loose: true,
+    })
+    expect(blocks[2].list).toMatchObject({
+      ordered: false,
+      index: 0,
+      marker: '-',
+      task: true,
+    })
+    for (const block of blocks) {
+      expect(source.slice(block.start, block.end)).toBe(block.source)
+    }
   })
 
   it('renders loose ordered items as one semantic list', async () => {
@@ -85,6 +150,22 @@ describe('parseBlocks', () => {
     expect(html.match(/<li/g)).toHaveLength(2)
   })
 
+  it('renders independent ordered item blocks with their combined-list values', async () => {
+    const source = '03. alpha\n1. beta\n1. gamma'
+    const model = parseDocument(source)
+    const rendered = await Promise.all(
+      model.blocks.map((block) =>
+        renderMarkdownBlock(block, model.renderContext),
+      ),
+    )
+
+    expect(model.blocks.map((block) => block.list?.value)).toEqual([3, 4, 5])
+    expect(rendered[0]).toMatch(/<ol start="3">/)
+    expect(rendered[1]).toMatch(/<ol start="4">/)
+    expect(rendered[2]).toMatch(/<ol start="5">/)
+    expect(rendered.join('')).toContain('<li>gamma</li>')
+  })
+
   it('preserves exact source slices and offsets for top-level blocks', () => {
     const source = '# 标题  \r\n\r\n- first\r\n  continued\r\n- second\r\n\r\n```ts\r\nconst n = 1\r\n```\r\n'
 
@@ -92,7 +173,8 @@ describe('parseBlocks', () => {
 
     expect(blocks.map(({ type, source: blockSource }) => ({ type, source: blockSource }))).toEqual([
       { type: 'heading', source: '# 标题  ' },
-      { type: 'list', source: '- first\r\n  continued\r\n- second' },
+      { type: 'listItem', source: '- first\r\n  continued' },
+      { type: 'listItem', source: '- second' },
       { type: 'code', source: '```ts\r\nconst n = 1\r\n```' },
     ])
     for (const block of blocks) {

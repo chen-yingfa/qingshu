@@ -36,6 +36,58 @@ function renderEditor(
 }
 
 describe('LiveEditor state synchronization', () => {
+  it('renders adjacent list-item blocks as one visual group with semantic numbering', async () => {
+    const source = '1. first\n1. second\n\n- [x] done\n- [ ] pending\n\nAfter'
+    const result = renderEditor(source, { activeBlock: 4 })
+
+    await waitFor(() => {
+      const lists = result.container.querySelectorAll(
+        '.editor-block-row[data-list-group]',
+      )
+      expect(lists).toHaveLength(4)
+      expect(lists[0].getAttribute('data-list-group')).toBe(
+        lists[1].getAttribute('data-list-group'),
+      )
+      expect(lists[2].getAttribute('data-list-group')).toBe(
+        lists[3].getAttribute('data-list-group'),
+      )
+    })
+    expect(
+      Array.from(result.container.querySelectorAll('ol'), (list) =>
+        list.getAttribute('start'),
+      ),
+    ).toEqual(['1', '2'])
+    expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
+  })
+
+  it('continues a top-level list into a newly focused item block', async () => {
+    const result = renderEditor('- first')
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    result.rerender(
+      <LiveEditor
+        content="- first\n- "
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+    await waitFor(() => {
+      const next = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      expect(next.value).toBe('- ')
+      expect(document.activeElement).toBe(next)
+    })
+  })
+
   it('shows frontmatter as one protected metadata block', async () => {
     const source = '---\ntitle: Test\ntags: [notes]\n---\n\n# Heading'
     const result = renderEditor(source, { activeBlock: 1 })
