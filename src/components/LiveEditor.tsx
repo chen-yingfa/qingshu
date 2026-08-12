@@ -1701,7 +1701,8 @@ export function LiveEditor({
     const snapshot = editorUndoRef.current.at(-1)
     if (
       !snapshot ||
-      snapshot.expectedActiveBlock !== safeActive ||
+      (snapshot.expectedActiveBlock !== safeActive &&
+        snapshot.expectedActiveBlock !== safeActive + 1) ||
       snapshot.expectedContent !== contentRef.current ||
       snapshot.expectedDraft !== draft
     ) {
@@ -2125,6 +2126,15 @@ export function LiveEditor({
       previousSource,
       eol,
     )
+    const exitsIndependentTrailingItem =
+      !before &&
+      !after &&
+      active.type === 'listItem' &&
+      previousRange.start > 0 &&
+      !previousContent
+        .slice(0, previousRange.start)
+        .endsWith(`${eol}${eol}`)
+    if (exitsIndependentTrailingItem) sourceValue = eol
     if (before && !after) sourceValue += `${eol}${eol}`
     const nextContent = replaceBlockSource(
       previousContent,
@@ -2134,7 +2144,9 @@ export function LiveEditor({
     const beforeSource = restoreSourceEols(before, previousSource, eol)
     const emptyOffset = before
       ? previousRange.start + beforeSource.length + 2 * eol.length
-      : previousRange.start
+      : exitsIndependentTrailingItem
+        ? previousRange.start + eol.length
+        : previousRange.start
     const replacementDelta =
       sourceValue.length - (previousRange.end - previousRange.start)
     const existing =

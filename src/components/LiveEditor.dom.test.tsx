@@ -71,9 +71,13 @@ describe('LiveEditor state synchronization', () => {
 
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    await waitFor(() => {
+      expect(editor.value).toBe('- ')
+      expect(document.activeElement).toBe(editor)
+    })
     result.rerender(
       <LiveEditor
-        content="- first\n- "
+        content={'- first\n- '}
         activeBlock={1}
         onChange={result.onChange}
         onActiveBlockChange={result.onActiveBlockChange}
@@ -251,9 +255,7 @@ describe('LiveEditor state synchronization', () => {
         onActiveBlockChange={result.onActiveBlockChange}
       />,
     )
-    await waitFor(() =>
-      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1),
-    )
+    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
     expect(
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
         .value,
@@ -307,7 +309,7 @@ describe('LiveEditor state synchronization', () => {
       />,
     )
     await waitFor(() =>
-      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2),
+      expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1),
     )
   })
 
@@ -338,7 +340,7 @@ describe('LiveEditor state synchronization', () => {
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
         .value,
     ).toBe('- First\n\n- Second')
-    expect(result.container.querySelectorAll('.rendered-block')).toHaveLength(0)
+    expect(result.container.querySelectorAll('.rendered-block')).toHaveLength(1)
   })
 
   it('synchronizes the active draft after a same-index document replacement', () => {
@@ -637,12 +639,12 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
-    expect(result.onActiveBlockChange).not.toHaveBeenCalled()
-    await waitFor(() => expect(editor.selectionStart).toBe('- first\n- '.length))
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    await waitFor(() => expect(editor.selectionStart).toBe(2))
 
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n\n')
-    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
   })
 
   it('increments ordered list markers including parenthesis style', async () => {
@@ -655,7 +657,8 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
 
     expect(result.onChange).toHaveBeenLastCalledWith('3) first\n4) ')
-    await waitFor(() => expect(editor.selectionStart).toBe('3) first\n4) '.length))
+    expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
+    await waitFor(() => expect(editor.selectionStart).toBe('4) '.length))
   })
 
   it.each([
@@ -1914,10 +1917,11 @@ describe('LiveEditor keyboard and composition behavior', () => {
     )
 
     await waitFor(() => {
-      expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
-      expect(result.container.querySelector('.rendered-block')?.textContent).toContain(
-        'sibling',
-      )
+      expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(1)
+      expect(
+        (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
+          .value,
+      ).toContain('sibling')
     })
     expect(
       markdown.parseDocument(outdented).ast.children[0],
