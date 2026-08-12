@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Toolbar } from './Toolbar'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 function renderToolbar() {
   const onRecent = vi.fn()
@@ -66,24 +70,28 @@ describe('recent files menu', () => {
 })
 
 describe('toolbar tooltips', () => {
-  it('associates every toolbar button with a custom tooltip', () => {
+  it('associates buttons with a custom tooltip only while it is visible', () => {
     renderToolbar()
 
     for (const button of screen.getAllByRole('button')) {
+      expect(button.getAttribute('aria-describedby')).toBeNull()
+      expect(button.getAttribute('title')).toBeNull()
+      fireEvent.mouseEnter(button)
       const tooltipId = button.getAttribute('aria-describedby')
-      expect(tooltipId).toBeTruthy()
       const tooltip = document.getElementById(tooltipId!)
       expect(tooltip?.getAttribute('role')).toBe('tooltip')
       expect(tooltip?.textContent).toBe(button.getAttribute('aria-label'))
+      fireEvent.mouseLeave(button)
+      expect(button.getAttribute('aria-describedby')).toBeNull()
     }
   })
 
   it('shows the recent-files tooltip on hover and keyboard focus', () => {
     renderToolbar()
     const button = screen.getByRole('button', { name: 'Recent files' })
-    const tooltip = document.getElementById(button.getAttribute('aria-describedby')!)
 
     fireEvent.mouseEnter(button)
+    const tooltip = document.getElementById(button.getAttribute('aria-describedby')!)
     expect(tooltip?.getAttribute('data-visible')).toBe('true')
     fireEvent.mouseLeave(button)
     expect(tooltip?.getAttribute('data-visible')).toBe('false')
@@ -91,5 +99,78 @@ describe('toolbar tooltips', () => {
     expect(tooltip?.getAttribute('data-visible')).toBe('true')
     fireEvent.blur(button)
     expect(tooltip?.getAttribute('data-visible')).toBe('false')
+  })
+
+  it('measures a wrapped tooltip and flips it inside a narrow viewport', () => {
+    vi.stubGlobal('innerWidth', 100)
+    vi.stubGlobal('innerHeight', 100)
+    renderToolbar()
+    const button = screen.getByRole('button', { name: 'Recent files' })
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      x: 2,
+      y: 70,
+      top: 70,
+      right: 22,
+      bottom: 90,
+      left: 2,
+      width: 20,
+      height: 20,
+      toJSON: () => ({}),
+    })
+    const tooltip = button.querySelector('[role="tooltip"]') as HTMLElement
+    vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 84,
+      bottom: 50,
+      left: 0,
+      width: 84,
+      height: 50,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseEnter(button)
+
+    expect(tooltip.style.getPropertyValue('--tooltip-left')).toBe('8px')
+    expect(tooltip.style.getPropertyValue('--tooltip-top')).toBe('13px')
+  })
+
+  it('remeasures a visible tooltip on viewport resize and scroll', () => {
+    renderToolbar()
+    const button = screen.getByRole('button', { name: 'Recent files' })
+    let left = 20
+    vi.spyOn(button, 'getBoundingClientRect').mockImplementation(() => ({
+      x: left,
+      y: 10,
+      top: 10,
+      right: left + 20,
+      bottom: 30,
+      left,
+      width: 20,
+      height: 20,
+      toJSON: () => ({}),
+    }))
+    const tooltip = button.querySelector('[role="tooltip"]') as HTMLElement
+    vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 60,
+      bottom: 20,
+      left: 0,
+      width: 60,
+      height: 20,
+      toJSON: () => ({}),
+    })
+    fireEvent.mouseEnter(button)
+    const initial = tooltip.style.getPropertyValue('--tooltip-left')
+
+    left = 200
+    fireEvent(window, new Event('resize'))
+    expect(tooltip.style.getPropertyValue('--tooltip-left')).not.toBe(initial)
+    left = 300
+    fireEvent.scroll(window)
+    expect(tooltip.style.getPropertyValue('--tooltip-left')).toBe('280px')
   })
 })

@@ -168,7 +168,7 @@ button {
   position: relative;
 }
 
-.recent-files-button span {
+.recent-files-button > .recent-files-icon {
   font-size: 20px;
   line-height: 1;
 }
@@ -346,7 +346,7 @@ button {
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transform: translateX(-50%) translateY(-2px);
+  transform: translateY(-2px);
   transition:
     opacity 110ms ease 180ms,
     transform 110ms ease 180ms,
@@ -357,7 +357,7 @@ button {
 .toolbar-tooltip[data-visible="true"] {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
   transition:
     opacity 110ms ease 180ms,
     transform 110ms ease 180ms,

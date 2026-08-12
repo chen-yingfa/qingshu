@@ -1,7 +1,9 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -47,17 +49,47 @@ function useToolbarTooltip(label: string) {
   const id = `toolbar-tooltip-${useId().replace(/:/gu, '')}`
   const [visible, setVisible] = useState(false)
   const [position, setPosition] = useState({ left: 0, top: 0 })
+  const anchorRef = useRef<HTMLButtonElement | null>(null)
+  const tooltipRef = useRef<HTMLSpanElement>(null)
+  const measure = useCallback(() => {
+    const button = anchorRef.current
+    const tooltip = tooltipRef.current
+    if (!button || !tooltip) return
+    const anchor = button.getBoundingClientRect()
+    const dimensions = tooltip.getBoundingClientRect()
+    const gap = 7
+    const inset = 8
+    const maxLeft = Math.max(inset, window.innerWidth - dimensions.width - inset)
+    const left = Math.max(
+      inset,
+      Math.min(anchor.left + anchor.width / 2 - dimensions.width / 2, maxLeft),
+    )
+    const below = anchor.bottom + gap
+    const top =
+      below + dimensions.height <= window.innerHeight - inset
+        ? below
+        : Math.max(inset, anchor.top - gap - dimensions.height)
+    setPosition({ left, top })
+  }, [])
   const show = (button: HTMLButtonElement) => {
-    const rect = button.getBoundingClientRect()
-    const halfWidth = Math.min(110, window.innerWidth / 2 - 8)
-    setPosition({
-      left: Math.max(halfWidth, Math.min(rect.left + rect.width / 2, window.innerWidth - halfWidth)),
-      top: Math.min(rect.bottom + 7, window.innerHeight - 32),
-    })
+    anchorRef.current = button
     setVisible(true)
   }
+  useLayoutEffect(() => {
+    if (visible) measure()
+  }, [measure, visible])
+  useEffect(() => {
+    if (!visible) return undefined
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [measure, visible])
   const tooltip = (
     <span
+      ref={tooltipRef}
       id={id}
       role="tooltip"
       className="toolbar-tooltip"
@@ -74,6 +106,7 @@ function useToolbarTooltip(label: string) {
   )
   return {
     id,
+    visible,
     tooltip,
     events: {
       onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) =>
@@ -103,8 +136,7 @@ function ToolButton({
       type="button"
       className={active ? 'tool-button is-active' : 'tool-button'}
       aria-label={label}
-      aria-describedby={tooltip.id}
-      title={label}
+      aria-describedby={tooltip.visible ? tooltip.id : undefined}
       aria-pressed={active}
       onClick={onClick}
       {...tooltip.events}
@@ -181,14 +213,13 @@ export const Toolbar = memo(function Toolbar({
             type="button"
             className="tool-button recent-files-button"
             aria-label="Recent files"
-            aria-describedby={recentTooltip.id}
-            title="Recent files"
+            aria-describedby={recentTooltip.visible ? recentTooltip.id : undefined}
             aria-haspopup="menu"
             aria-expanded={recentOpen}
             onClick={() => setRecentOpen((open) => !open)}
             {...recentTooltip.events}
           >
-            <span aria-hidden="true">↶</span>
+            <span className="recent-files-icon" aria-hidden="true">↶</span>
             {recentTooltip.tooltip}
           </button>
           {recentOpen && (
