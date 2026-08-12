@@ -11,9 +11,11 @@ afterEach(cleanup)
 function ControlledEditor({
   initial,
   sourceMode = false,
+  onChangeSpy,
 }: {
   initial: string
   sourceMode?: boolean
+  onChangeSpy?: (content: string) => void
 }) {
   const [content, setContent] = useState(initial)
   const [activeBlock, setActiveBlock] = useState(0)
@@ -23,7 +25,10 @@ function ControlledEditor({
       contentRevision={0}
       activeBlock={activeBlock}
       sourceMode={sourceMode}
-      onChange={setContent}
+      onChange={(nextContent) => {
+        onChangeSpy?.(nextContent)
+        setContent(nextContent)
+      }}
       onActiveBlockChange={setActiveBlock}
     />
   )
@@ -151,17 +156,72 @@ describe('LiveEditor marker projection', () => {
     expect(editor.value).toBe('nested\nsecond\n')
   })
 
-  it('exits an empty quote line to plain paragraph mode', () => {
+  it('exits an empty quote line to plain paragraph mode', async () => {
     render(<ControlledEditor initial="> " />)
     const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
     expect(editor.value).toBe('')
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
-    expect(editor.value).toBe('')
-    expect(
-      editor.closest('.editor-block-row')?.classList.contains('is-active-quote'),
-    ).toBe(false)
+    await waitFor(() => {
+      const paragraph = screen.getByLabelText('Active Markdown block')
+      expect((paragraph as HTMLTextAreaElement).value).toBe('')
+      expect(
+        paragraph.closest('.editor-block-row')?.classList.contains('is-active-quote'),
+      ).toBe(false)
+    })
+  })
+
+  it.each([
+    ['first', '> \n>> two', '\n\n>> two'],
+    ['middle', '>> one\n>> \n>> two', '>> one\n\n\n\n>> two'],
+    ['last CRLF', '> one\r\n> ', '> one\r\n\r\n'],
+  ])('exits an empty quote in the %s position through a real paragraph boundary', async (
+    _position,
+    source,
+    expected,
+  ) => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial={source} onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    const emptyLine = editor.value
+      .split('\n')
+      .slice(0, editor.value.split('\n').findIndex((line) => line === ''))
+      .reduce((offset, line) => offset + line.length + 1, 0)
+    editor.setSelectionRange(emptyLine, emptyLine)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(onChange).toHaveBeenLastCalledWith(expected)
+    await waitFor(() => {
+      const paragraph = screen.getByLabelText('Active Markdown block')
+      expect((paragraph as HTMLTextAreaElement).value).toBe('')
+      expect(document.activeElement).toBe(paragraph)
+      expect(
+        paragraph.closest('.editor-block-row')?.classList.contains('is-active-quote'),
+      ).toBe(false)
+    })
+  })
+
+  it('continues a quote once and exits it on the immediately empty quote Enter', async () => {
+    const onChange = vi.fn()
+    render(<ControlledEditor initial="> one" onChangeSpy={onChange} />)
+    const editor = screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(onChange).toHaveBeenLastCalledWith('> one\n> ')
+    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), { key: 'Enter' })
+
+    expect(onChange).toHaveBeenLastCalledWith('> one\n\n')
+    await waitFor(() =>
+      expect((screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value).toBe(''),
+    )
+    fireEvent.keyDown(screen.getByLabelText('Active Markdown block'), {
+      key: 'z',
+      ctrlKey: true,
+    })
+    expect(onChange).toHaveBeenLastCalledWith('> one\n> ')
   })
 
   it('maps visible selections for toolbar formatting without touching the marker', async () => {

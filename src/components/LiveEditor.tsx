@@ -2339,7 +2339,7 @@ export function LiveEditor({
     return true
   }
 
-  const exitListItem = (line: ListLine) => {
+  const exitStructuredLine = (line: Pick<ListLine, 'start' | 'end'>) => {
     const snapshot = currentUndoSnapshot()
     const previousContent = contentRef.current
     const previousRange = { ...rangeRef.current }
@@ -2548,16 +2548,7 @@ export function LiveEditor({
         event.preventDefault()
         const snapshot = currentUndoSnapshot()
         if (!line.slice(prefix.length).trim()) {
-          const nextDraft =
-            draft.slice(0, lineStart) + draft.slice(lineStart + prefix.length)
-          applyControlledTextareaEdit(
-            draft,
-            nextDraft,
-            lineStart,
-            lineStart,
-            undefined,
-            snapshot,
-          )
+          exitStructuredLine({ start: lineStart, end: lineEnd })
           return
         }
         const nextDraft =
@@ -2686,7 +2677,7 @@ export function LiveEditor({
             return
           }
         }
-        exitListItem(listLine)
+        exitStructuredLine(listLine)
         return
       }
       const start = textarea.selectionStart
