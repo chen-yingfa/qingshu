@@ -886,24 +886,28 @@ function SemanticListGroup({
     const keys = blocks.map((block, index) =>
       index === activeItem ? '' : markdownListItemRenderKey(block, context),
     )
-    setRendered((previous) =>
-      keys.map((key, index) =>
-        previous[index]?.key === key ? previous[index] : { key },
-      ),
+    const previousByKey = new Map(
+      rendered
+        .filter((entry) => entry.item)
+        .map((entry) => [entry.key, entry] as const),
     )
+    const nextRendered = keys.map(
+      (key) => previousByKey.get(key) ?? { key },
+    )
+    setRendered(nextRendered)
     const cancel = deferWork(() => {
+      const scheduled = new Set<string>()
       blocks.forEach((block, index) => {
         const key = keys[index]
-        if (!key || rendered[index]?.key === key && rendered[index]?.item) return
+        if (!key || nextRendered[index]?.item || scheduled.has(key)) return
+        scheduled.add(key)
         void renderMarkdownListItem(block, context).then(
           (item) => {
             if (!current) return
             setRendered((latest) =>
-              latest[index]?.key === key
-                ? latest.map((entry, itemIndex) =>
-                    itemIndex === index ? { key, item } : entry,
-                  )
-                : latest,
+              latest.map((entry) =>
+                entry.key === key ? { key, item } : entry,
+              ),
             )
           },
           (reason: unknown) => {
@@ -3378,6 +3382,7 @@ export function LiveEditor({
                 )}
                 <Row
                   data-list-group={block.list?.groupId}
+                  {...(block.list?.ordered ? { value: block.list.value } : {})}
                   className={
                     index === safeActive
                       ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`

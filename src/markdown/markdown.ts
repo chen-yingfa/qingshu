@@ -414,13 +414,7 @@ function labelTaskCheckboxes(node: HastNode): void {
     const label = hastTextWithoutNestedLists(node).trim()
     if (label) labelOwnTaskCheckbox(node, label)
   }
-  node.children?.forEach((child) => {
-    if (child.tagName === 'ul' || child.tagName === 'ol') {
-      child.children?.forEach(labelTaskCheckboxes)
-    } else if (node.tagName !== 'li') {
-      labelTaskCheckboxes(child)
-    }
-  })
+  node.children?.forEach(labelTaskCheckboxes)
 }
 
 const listItemRenderCache = new Map<string, Promise<RenderedListItem>>()
@@ -443,11 +437,6 @@ export function markdownListItemRenderKey(
   return [
     block.source,
     metadata.ordered ? 'ordered' : 'unordered',
-    metadata.start,
-    metadata.index,
-    metadata.value,
-    metadata.marker,
-    metadata.delimiter ?? '',
     metadata.loose ? 'loose' : 'tight',
     metadata.task ? 'task' : 'plain',
     context.signature,

@@ -286,6 +286,38 @@ describe('LiveEditor state synchronization', () => {
     ).toHaveLength(2)
   })
 
+  it('labels task checkboxes nested through blockquote wrappers from their nearest list item', async () => {
+    const source = [
+      '- [ ] parent prose',
+      '  > parent quote',
+      '  >',
+      '  > - [x] child prose',
+      '  >   > child quote',
+      '  >   >',
+      '  >   > - [ ] grandchild prose',
+      '',
+      'After',
+    ].join('\n')
+    const result = renderEditor(source, { activeBlock: 1 })
+
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'parent prose parent quote',
+      }),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'child prose child quote',
+      }),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('checkbox', { name: 'grandchild prose' }),
+    ).not.toBeNull()
+    expect(
+      result.container.querySelectorAll('input[type="checkbox"]'),
+    ).toHaveLength(3)
+  })
+
   it('keeps task-list container semantics when its only item is active', () => {
     const result = renderEditor('- [ ] active task')
 
@@ -795,6 +827,84 @@ describe('LiveEditor state synchronization', () => {
     expect(result.container.querySelectorAll('ol.semantic-list-group > li')).toHaveLength(
       100,
     )
+  })
+
+  it('renders O(1) item HTML and updates numbering after insertion near a repeated-marker list start', async () => {
+    const renderItem = vi.spyOn(markdown, 'renderMarkdownListItem')
+    const source = Array.from(
+      { length: 100 },
+      (_, index) => `${index === 0 ? 7 : 1}. item ${index + 1}`,
+    ).join('\n')
+    const result = renderEditor(source)
+    await waitFor(() => expect(renderItem).toHaveBeenCalledTimes(99))
+    renderItem.mockClear()
+
+    const inserted = source.replace('7. item 1', '7. item 1\n1. inserted')
+    fireEvent.change(screen.getByLabelText('Active Markdown block'), {
+      target: { value: '7. item 1\n1. inserted' },
+    })
+    result.rerender(
+      <LiveEditor
+        content={inserted}
+        activeBlock={0}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(
+        result.container.querySelectorAll('ol.semantic-list-group > li'),
+      ).toHaveLength(101)
+    })
+    expect(renderItem.mock.calls.length).toBeLessThanOrEqual(1)
+    const list = result.container.querySelector('ol.semantic-list-group')!
+    expect(list.getAttribute('start')).toBe('7')
+    expect(
+      Array.from(list.children)
+        .slice(0, 4)
+        .map((item) => item.getAttribute('value')),
+    ).toEqual(['7', '8', '9', '10'])
+  })
+
+  it('reuses item HTML and updates numbering after reordering near a repeated-marker list start', async () => {
+    const renderItem = vi.spyOn(markdown, 'renderMarkdownListItem')
+    const source = Array.from(
+      { length: 100 },
+      (_, index) => `${index === 0 ? 7 : 1}. item ${index + 1}`,
+    ).join('\n')
+    const result = renderEditor(source, { activeBlock: 99 })
+    await waitFor(() => expect(renderItem).toHaveBeenCalledTimes(99))
+    renderItem.mockClear()
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move block 1' }), {
+      key: 'ArrowDown',
+      altKey: true,
+    })
+    const reordered = `1. item 2\n7. item 1\n${source.split('\n').slice(2).join('\n')}`
+    expect(result.onChange).toHaveBeenLastCalledWith(reordered)
+    result.rerender(
+      <LiveEditor
+        content={reordered}
+        activeBlock={1}
+        onChange={result.onChange}
+        onActiveBlockChange={result.onActiveBlockChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(
+        result.container.querySelectorAll('ol.semantic-list-group > li'),
+      ).toHaveLength(100)
+    })
+    expect(renderItem.mock.calls.length).toBeLessThanOrEqual(1)
+    const list = result.container.querySelector('ol.semantic-list-group')!
+    expect(list.getAttribute('start')).toBe('1')
+    expect(
+      Array.from(list.children)
+        .slice(0, 4)
+        .map((item) => item.getAttribute('value')),
+    ).toEqual(['1', '2', '3', '4'])
   })
 })
 
