@@ -1984,17 +1984,33 @@ export function LiveEditor({
     if (readOnly) return
     invalidateMathInteraction()
     handledFormatRef.current = formatRequest.id
+    const selectionStart = markerProjection.toCanonicalOffset(
+      textarea.selectionStart,
+    )
+    const selectionEnd = markerProjection.toCanonicalOffset(textarea.selectionEnd)
     const result = formattedValue(
       formatRequest.command,
       draft,
-      textarea.selectionStart,
-      textarea.selectionEnd,
+      selectionStart,
+      selectionEnd,
     )
     commitDraft(result.value)
     afterInteractionPaint(textarea, () => {
-      setEditorSelection(textarea, result.selectionStart, result.selectionEnd)
+      const projection = createMarkerProjection(
+        result.value,
+        projectionModeFor(result.value),
+      )
+      selectionRef.current = {
+        start: result.selectionStart,
+        end: result.selectionEnd,
+        direction: 'none',
+      }
+      textarea.setSelectionRange(
+        projection.toVisibleOffset(result.selectionStart),
+        projection.toVisibleOffset(result.selectionEnd),
+      )
     })
-  }, [content, draft, formatRequest, onChange])
+  }, [content, draft, formatRequest, markerProjection, onChange])
 
   const normalize = (
     value: string,

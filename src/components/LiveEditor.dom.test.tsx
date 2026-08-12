@@ -1343,7 +1343,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
       start: start + 4,
-      end: end + 8,
+      end: end + 2,
       direction: 'forward',
     })
   })
