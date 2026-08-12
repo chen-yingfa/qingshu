@@ -421,6 +421,150 @@ describe('LiveEditor state synchronization', () => {
     )
   })
 
+  it('undoes an ordinary mixed-list paste after reconciliation remounts the textarea', async () => {
+    const onChange = vi.fn()
+    render(
+      <StatefulEditor
+        initialContent={'Seed\r\n\r\nAfter'}
+        onChange={onChange}
+      />,
+    )
+    const original = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    original.focus()
+    original.setSelectionRange(0, 4)
+    fireEvent.select(original)
+    original.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertFromPaste',
+    }))
+
+    fireEvent.input(original, {
+      target: {
+        value: '- duplicate\r\n\t- child\r\n- duplicate',
+        selectionStart: 34,
+        selectionEnd: 34,
+      },
+      inputType: 'insertFromPaste',
+    })
+
+    const pasted = await screen.findByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(pasted).not.toBe(original)
+      expect(pasted.value).toBe('duplicate')
+      expect(pasted.selectionStart).toBe(9)
+      expect(document.activeElement).toBe(pasted)
+    })
+
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(pasted, undo)
+
+    await waitFor(() => {
+      const restored = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      expect(undo.defaultPrevented).toBe(true)
+      expect(onChange).toHaveBeenLastCalledWith('Seed\r\n\r\nAfter')
+      expect(restored.value).toBe('Seed')
+      expect(restored.selectionStart).toBe(0)
+      expect(restored.selectionEnd).toBe(4)
+      expect(document.activeElement).toBe(restored)
+    })
+  })
+
+  it.each([
+    ['drop', 'insertFromDrop'],
+    ['replacement', 'insertReplacementText'],
+  ])('undoes a structural %s in a projected list', async (_name, inputType) => {
+    const onChange = vi.fn()
+    render(<StatefulEditor initialContent="- Seed" onChange={onChange} />)
+    const original = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    original.focus()
+    original.setSelectionRange(0, 4)
+    fireEvent.select(original)
+    original.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType,
+    }))
+
+    fireEvent.input(original, {
+      target: {
+        value: 'duplicate\n- duplicate',
+        selectionStart: 21,
+        selectionEnd: 21,
+      },
+      inputType,
+    })
+
+    const inserted = await screen.findByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(inserted.value).toBe('duplicate')
+      expect(inserted.selectionStart).toBe(9)
+      expect(document.activeElement).toBe(inserted)
+    })
+    fireEvent.keyDown(inserted, { key: 'z', ctrlKey: true })
+
+    await waitFor(() => {
+      const restored = screen.getByLabelText(
+        'Active Markdown block',
+      ) as HTMLTextAreaElement
+      expect(onChange).toHaveBeenLastCalledWith('- Seed')
+      expect(restored.value).toBe('Seed')
+      expect(restored.selectionStart).toBe(0)
+      expect(restored.selectionEnd).toBe(4)
+      expect(document.activeElement).toBe(restored)
+    })
+  })
+
+  it('leaves ordinary projected typing in native history without remounting', async () => {
+    const onChange = vi.fn()
+    render(<StatefulEditor initialContent="- Seed" onChange={onChange} />)
+    const editor = screen.getByLabelText(
+      'Active Markdown block',
+    ) as HTMLTextAreaElement
+    editor.focus()
+    editor.setSelectionRange(4, 4)
+    editor.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: '!',
+    }))
+    fireEvent.input(editor, {
+      target: { value: 'Seed!', selectionStart: 5, selectionEnd: 5 },
+      inputType: 'insertText',
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Active Markdown block')).toBe(editor)
+      expect(editor.value).toBe('Seed!')
+    })
+    const undo = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(editor, undo)
+
+    expect(undo.defaultPrevented).toBe(false)
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps each mixed pasted item isolated when later duplicate and quote rows activate', async () => {
     const mixed = [
       '- duplicate',

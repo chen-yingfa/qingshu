@@ -114,6 +114,12 @@ interface EditorUndoSnapshot {
   expectedSession: number
 }
 
+const STRUCTURAL_INPUT_TYPES = new Set([
+  'insertFromPaste',
+  'insertFromDrop',
+  'insertReplacementText',
+])
+
 export interface InsertedBlock {
   offset: number
   length: number
@@ -1397,6 +1403,10 @@ export function LiveEditor({
     direction: 'none' as SelectionDirection,
   })
   const pendingVisibleEditRef = useRef<VisibleEdit | null>(null)
+  const pendingStructuralUndoRef = useRef<{
+    inputType: string
+    snapshot: EditorUndoSnapshot
+  } | null>(null)
   const visibleSelectionRef = useRef({ start: 0, end: 0 })
   const deferredSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
@@ -1748,8 +1758,8 @@ export function LiveEditor({
     textarea.focus()
     selectionRef.current = { ...snapshot.selection }
     textarea.setSelectionRange(
-      snapshot.selection.start,
-      snapshot.selection.end,
+      markerProjection.toVisibleOffset(snapshot.selection.start),
+      markerProjection.toVisibleOffset(snapshot.selection.end),
       snapshot.selection.direction,
     )
     mathEnterTokenRef.current = snapshot.mathToken
@@ -1776,8 +1786,8 @@ export function LiveEditor({
         ...snapshot.selection,
       }
       current.setSelectionRange(
-        snapshot.selection.start,
-        snapshot.selection.end,
+        markerProjection.toVisibleOffset(snapshot.selection.start),
+        markerProjection.toVisibleOffset(snapshot.selection.end),
         snapshot.selection.direction,
       )
       deferredSelectionRef.current = null
@@ -2041,6 +2051,38 @@ export function LiveEditor({
     }
   }
 
+  const currentCanonicalUndoSnapshot = (
+    textarea: HTMLTextAreaElement,
+  ): EditorUndoSnapshot => ({
+    ...currentUndoSnapshot(),
+    selection: {
+      start: markerProjection.toCanonicalOffset(textarea.selectionStart),
+      end: markerProjection.toCanonicalOffset(textarea.selectionEnd),
+      direction: textarea.selectionDirection ?? 'none',
+    },
+  })
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const captureNativeEdit = (event: InputEvent) => {
+      pendingVisibleEditRef.current = {
+        selectionStart: textarea.selectionStart,
+        selectionEnd: textarea.selectionEnd,
+        inputType: event.inputType,
+      }
+      pendingStructuralUndoRef.current =
+        STRUCTURAL_INPUT_TYPES.has(event.inputType) && !composingRef.current
+          ? {
+              inputType: event.inputType,
+              snapshot: currentCanonicalUndoSnapshot(textarea),
+            }
+          : null
+    }
+    textarea.addEventListener('beforeinput', captureNativeEdit)
+    return () => textarea.removeEventListener('beforeinput', captureNativeEdit)
+  }, [activeSession, markerProjection, safeActive])
+
   const pushEditorUndo = (
     snapshot: EditorUndoSnapshot,
     expectedContent: string,
@@ -2174,13 +2216,31 @@ export function LiveEditor({
       textarea.selectionStart,
     )
     const selectionEnd = markerProjection.toCanonicalOffset(textarea.selectionEnd)
+    const selectionDirection = textarea.selectionDirection ?? 'none'
+    const undoSnapshot = currentCanonicalUndoSnapshot(textarea)
     const result = formattedValue(
       formatRequest.command,
       draft,
       selectionStart,
       selectionEnd,
     )
-    commitDraft(result.value)
+    commitDraft(result.value, {
+      start: result.selectionStart,
+      end: result.selectionEnd,
+      direction: selectionDirection,
+    })
+    if (
+      formatRequest.command === 'heading' ||
+      formatRequest.command === 'quote' ||
+      formatRequest.command === 'unordered-list'
+    ) {
+      pushEditorUndo(
+        undoSnapshot,
+        contentRef.current,
+        safeActive,
+        result.value,
+      )
+    }
     afterInteractionPaint(textarea, () => {
       const projection = createMarkerProjection(
         result.value,
@@ -2189,14 +2249,20 @@ export function LiveEditor({
       selectionRef.current = {
         start: result.selectionStart,
         end: result.selectionEnd,
-        direction: 'none',
+        direction: selectionDirection,
       }
       textarea.setSelectionRange(
         projection.toVisibleOffset(result.selectionStart),
         projection.toVisibleOffset(result.selectionEnd),
+        selectionDirection,
       )
+      onSelectionChange?.({
+        start: result.selectionStart,
+        end: result.selectionEnd,
+        direction: selectionDirection,
+      })
     })
-  }, [content, draft, formatRequest, markerProjection, onChange])
+  }, [content, draft, formatRequest, markerProjection, onChange, onSelectionChange])
 
   const normalize = (
     value: string,
@@ -3769,14 +3835,6 @@ export function LiveEditor({
                         }
                         readOnly={readOnly}
                         value={markerProjection.visible}
-                        onBeforeInput={(event) => {
-                          const textarea = event.currentTarget
-                          pendingVisibleEditRef.current = {
-                            selectionStart: textarea.selectionStart,
-                            selectionEnd: textarea.selectionEnd,
-                            inputType: (event.nativeEvent as InputEvent).inputType,
-                          }
-                        }}
                         onFocus={() => setActiveInputFocused(true)}
                         onChange={(event) => {
                           if (readOnly) return
@@ -3785,6 +3843,9 @@ export function LiveEditor({
                           pendingVisibleEditRef.current = null
                           const inputType = (event.nativeEvent as InputEvent)
                             .inputType
+                          const pendingStructuralUndo =
+                            pendingStructuralUndoRef.current
+                          pendingStructuralUndoRef.current = null
                           const historyInput =
                             inputType === 'historyUndo' ||
                             inputType === 'historyRedo'
@@ -3810,11 +3871,15 @@ export function LiveEditor({
                             )
                           }
                           const undoSnapshot =
-                            markerProjection.mode === 'plain' ||
-                            historyInput ||
-                            composingRef.current
-                              ? null
-                              : {
+                            pendingStructuralUndo &&
+                            pendingStructuralUndo.inputType === inputType
+                              ? pendingStructuralUndo.snapshot
+                              : markerProjection.mode === 'plain' ||
+                                  historyInput ||
+                                  composingRef.current ||
+                                  inputType === 'insertText'
+                                ? null
+                                : {
                                   ...currentUndoSnapshot(),
                                   selection: {
                                     start: markerProjection.toCanonicalOffset(
