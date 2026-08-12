@@ -61,7 +61,7 @@ describe('LiveEditor state synchronization', () => {
     expect(
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
         .value,
-    ).toBe('1. Ordered 2')
+    ).toBe('Ordered 2')
   })
 
   it('renders adjacent list-item blocks in one semantic list with per-item rows', async () => {
@@ -100,7 +100,7 @@ describe('LiveEditor state synchronization', () => {
 
     expect(
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement).value,
-    ).toBe('- second\n  continuation\n  - nested')
+    ).toBe('second\n  continuation\n  - nested')
   })
 
   it('continues a later item into a new independently focused block', async () => {
@@ -117,7 +117,7 @@ describe('LiveEditor state synchronization', () => {
       '- first\n- second\n- \n- third',
     )
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(2)
-    await waitFor(() => expect(editor.value).toBe('- '))
+    await waitFor(() => expect(editor.value).toBe(''))
   })
 
   it('removes and undoes the marker of the exact later item', async () => {
@@ -126,14 +126,14 @@ describe('LiveEditor state synchronization', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Backspace' })
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n- second\nthird')
 
     fireEvent.keyDown(editor, { key: 'z', ctrlKey: true })
     expect(result.onChange).toHaveBeenLastCalledWith(source)
-    await waitFor(() => expect(editor.value).toBe('- third'))
+    await waitFor(() => expect(editor.value).toBe('third'))
   })
 
   it('continues a top-level list into a newly focused item block', async () => {
@@ -148,7 +148,7 @@ describe('LiveEditor state synchronization', () => {
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
     await waitFor(() => {
-      expect(editor.value).toBe('- ')
+      expect(editor.value).toBe('')
       expect(document.activeElement).toBe(editor)
     })
     result.rerender(
@@ -163,7 +163,7 @@ describe('LiveEditor state synchronization', () => {
       const next = screen.getByLabelText(
         'Active Markdown block',
       ) as HTMLTextAreaElement
-      expect(next.value).toBe('- ')
+      expect(next.value).toBe('')
       expect(document.activeElement).toBe(next)
     })
   })
@@ -256,9 +256,9 @@ describe('LiveEditor state synchronization', () => {
     fireEvent.compositionStart(editor)
     fireEvent.change(editor, {
       target: {
-        value: '- 中文字',
-        selectionStart: 5,
-        selectionEnd: 5,
+        value: '中文字',
+        selectionStart: 3,
+        selectionEnd: 3,
       },
     })
 
@@ -277,7 +277,7 @@ describe('LiveEditor state synchronization', () => {
     expect(acknowledged).toBe(editor)
     expect(result.container.querySelector('ul.semantic-list-group')).toBe(group)
     expect(document.activeElement).toBe(editor)
-    expect(editor.selectionStart).toBe(5)
+    expect(editor.selectionStart).toBe(3)
     result.onChange.mockClear()
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).not.toHaveBeenCalled()
@@ -380,8 +380,8 @@ describe('LiveEditor state synchronization', () => {
     const current = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    expect(current.value).toBe('-')
-    expect(current.selectionStart).toBe(1)
+    expect(current.value).toBe('')
+    expect(current.selectionStart).toBe(0)
     expect(document.activeElement).toBe(current)
     expect(screen.getByRole('button', { name: 'Move block 1' })).not.toBeNull()
   })
@@ -414,7 +414,7 @@ describe('LiveEditor state synchronization', () => {
       expect(
         (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
           .value,
-      ).toBe('- Previous item  '),
+      ).toBe('Previous item  '),
     )
   })
 
@@ -447,7 +447,7 @@ describe('LiveEditor state synchronization', () => {
     expect(
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
         .value,
-    ).toBe('- Three')
+    ).toBe('Three')
   })
 
   it('includes explicit empty rows when remapping a collapsed list index', async () => {
@@ -509,9 +509,9 @@ describe('LiveEditor state synchronization', () => {
 
     fireEvent.change(editor, {
       target: {
-        value: '- First\n\n- Second',
-        selectionStart: 9,
-        selectionEnd: 9,
+        value: 'First\n\n- Second',
+        selectionStart: 7,
+        selectionEnd: 7,
       },
     })
     result.rerender(
@@ -527,7 +527,7 @@ describe('LiveEditor state synchronization', () => {
     expect(
       (screen.getByLabelText('Active Markdown block') as HTMLTextAreaElement)
         .value,
-    ).toBe('- First')
+    ).toBe('First')
     expect(result.container.querySelectorAll('.rendered-block')).toHaveLength(1)
   })
 
@@ -838,7 +838,7 @@ describe('LiveEditor state synchronization', () => {
       'Active Markdown block',
     ) as HTMLTextAreaElement
     fireEvent.change(editor, {
-      target: { value: '1. changed item 100' },
+      target: { value: 'changed item 100' },
     })
     result.rerender(
       <LiveEditor
@@ -869,7 +869,7 @@ describe('LiveEditor state synchronization', () => {
 
     const inserted = source.replace('7. item 1', '7. item 1\n1. inserted')
     fireEvent.change(screen.getByLabelText('Active Markdown block'), {
-      target: { value: '7. item 1\n1. inserted' },
+      target: { value: 'item 1\n1. inserted' },
     })
     result.rerender(
       <LiveEditor
@@ -947,7 +947,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith('- first\n- ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
-    await waitFor(() => expect(editor.selectionStart).toBe(2))
+    await waitFor(() => expect(editor.selectionStart).toBe(0))
 
     const empty = screen.getByLabelText(
       'Active Markdown block',
@@ -969,7 +969,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(result.onChange).toHaveBeenLastCalledWith('3) first\n4) ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
-    await waitFor(() => expect(editor.selectionStart).toBe('4) '.length))
+    await waitFor(() => expect(editor.selectionStart).toBe(0))
   })
 
   it.each([
@@ -995,7 +995,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(7, 7)
+    editor.setSelectionRange(5, 5)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
@@ -1010,7 +1010,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
@@ -1036,7 +1036,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
@@ -1068,7 +1068,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).toHaveBeenLastCalledWith('- parent\n  - nested')
-    await waitFor(() => expect(editor.selectionStart).toBe(4))
+    await waitFor(() => expect(editor.selectionStart).toBe(0))
 
     fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
     expect(result.onChange).toHaveBeenLastCalledWith('- parent\n- nested')
@@ -1082,7 +1082,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       'Active Markdown block',
     ) as HTMLTextAreaElement
     editor.focus()
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).toHaveBeenLastCalledWith(nested)
@@ -1099,7 +1099,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       const remapped = screen.getByLabelText(
         'Active Markdown block',
       ) as HTMLTextAreaElement
-      expect(remapped.value).toBe(nested)
+      expect(remapped.value).toBe('parent\n  - child')
       expect(document.activeElement).toBe(remapped)
       expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(0)
     })
@@ -1125,7 +1125,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       const restored = screen.getByLabelText(
         'Active Markdown block',
       ) as HTMLTextAreaElement
-      expect(restored.value).toBe('- child')
+      expect(restored.value).toBe('child')
       expect(document.activeElement).toBe(restored)
     })
   })
@@ -1135,7 +1135,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
     const event = new KeyboardEvent('keydown', {
       key: 'Tab',
       bubbles: true,
@@ -1162,8 +1162,8 @@ describe('LiveEditor keyboard and composition behavior', () => {
       'Active Markdown block',
     ) as HTMLTextAreaElement
     editor.setSelectionRange(
-      2,
-      2,
+      0,
+      0,
     )
 
     fireEvent.keyDown(editor, { key: 'Tab' })
@@ -1176,7 +1176,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(3, 3)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Backspace' })
 
@@ -1246,8 +1246,9 @@ describe('LiveEditor keyboard and composition behavior', () => {
       'Active Markdown block',
     ) as HTMLTextAreaElement
     const itemSource = source.slice(source.indexOf('- item'))
-    expect(editor.value).toBe(itemSource)
-    const caret = itemSource.indexOf(marker) + 2
+    const visibleItemSource = itemSource.slice(2)
+    expect(editor.value).toBe(visibleItemSource)
+    const caret = visibleItemSource.indexOf(marker) + 2
     editor.setSelectionRange(caret, caret)
     const event = new KeyboardEvent('keydown', {
       key: 'Tab',
@@ -1287,7 +1288,8 @@ describe('LiveEditor keyboard and composition behavior', () => {
       'Active Markdown block',
     ) as HTMLTextAreaElement
     const itemSource = source.slice(source.indexOf('- item'))
-    const caret = itemSource.indexOf('- ', '- item'.length) + 2
+    const visibleItemSource = itemSource.slice(2)
+    const caret = visibleItemSource.indexOf('- ', 'item'.length) + 2
     editor.setSelectionRange(caret, caret)
 
     for (const key of ['Enter', 'Backspace', 'Tab']) {
@@ -1300,7 +1302,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       expect(event.defaultPrevented).toBe(false)
     }
     expect(result.onChange).not.toHaveBeenCalled()
-    expect(editor.value).toBe(itemSource)
+    expect(editor.value).toBe(visibleItemSource)
   })
 
   it('indents complete selected items with continuations and nested children', async () => {
@@ -1327,7 +1329,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    const start = 2
+    const start = 0
     const end = editor.value.length
     editor.setSelectionRange(start, end, 'forward')
 
@@ -1335,12 +1337,12 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(result.onChange).toHaveBeenLastCalledWith(expected)
     await waitFor(() => {
-      expect(editor.selectionStart).toBe(start + 2)
+      expect(editor.selectionStart).toBe(start)
       expect(editor.selectionEnd).toBe(end + 8)
       expect(editor.selectionDirection).toBe('forward')
     })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
-      start: start + 2,
+      start: start + 4,
       end: end + 8,
       direction: 'forward',
     })
@@ -1359,7 +1361,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Tab' })
 
@@ -1420,7 +1422,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
     const event = new KeyboardEvent('keydown', {
       key: 'Tab',
       shiftKey: true,
@@ -1432,7 +1434,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(event.defaultPrevented).toBe(false)
     expect(result.onChange).not.toHaveBeenCalled()
-    expect(editor.value).toBe(source)
+    expect(editor.value).toBe(source.slice(2))
   })
 
   it('leaves selected root items and descendants unchanged on Shift+Tab', () => {
@@ -1446,7 +1448,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, editor.value.length)
+    editor.setSelectionRange(0, editor.value.length)
     const event = new KeyboardEvent('keydown', {
       key: 'Tab',
       shiftKey: true,
@@ -1458,7 +1460,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(event.defaultPrevented).toBe(false)
     expect(result.onChange).not.toHaveBeenCalled()
-    expect(editor.value).toBe('- first\n    - first child')
+    expect(editor.value).toBe('first\n    - first child')
   })
 
   it.each([1, 2, 3])(
@@ -1479,7 +1481,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
       const editor = screen.getByLabelText(
         'Active Markdown block',
       ) as HTMLTextAreaElement
-      editor.setSelectionRange(2, 2)
+      editor.setSelectionRange(0, 0)
 
       fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
 
@@ -1504,7 +1506,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(source.indexOf('- child') + 2, source.indexOf('- child') + 2)
+    editor.setSelectionRange(source.indexOf('- child'), source.indexOf('- child'))
 
     fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
 
@@ -1581,7 +1583,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent.keyDown(editor, { key: 'Tab' })
 
     expect(result.onChange).toHaveBeenLastCalledWith('- parent\n  - child')
-    await waitFor(() => expect(editor.selectionStart).toBe(2))
+    await waitFor(() => expect(editor.selectionStart).toBe(0))
   })
 
   it('edits AST-external leading indentation without losing canonical source', async () => {
@@ -1589,8 +1591,8 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    expect(editor.value).toBe('- item')
-    editor.setSelectionRange(2, 2)
+    expect(editor.value).toBe('item')
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
     expect(result.onChange).toHaveBeenLastCalledWith('- item')
@@ -1603,7 +1605,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent(editor, undo)
     expect(undo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith('   - item')
-    await waitFor(() => expect(editor.value).toBe('- item'))
+    await waitFor(() => expect(editor.value).toBe('item'))
   })
 
   it.each([
@@ -1661,7 +1663,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
     const event = new KeyboardEvent('keydown', {
       key: 'Backspace',
       bubbles: true,
@@ -1696,7 +1698,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(2, 2)
+    editor.setSelectionRange(0, 0)
 
     fireEvent.keyDown(editor, { key: 'Tab' })
     expect(result.onChange).toHaveBeenLastCalledWith(
@@ -1815,7 +1817,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     fireEvent(editor, undo)
     expect(undo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith(source)
-    await waitFor(() => expect(editor.value).toBe('2. first'))
+    await waitFor(() => expect(editor.value).toBe('first'))
   })
 
   it('does not remove a real separator from an identical loose-list block after switching blocks', () => {
@@ -1843,7 +1845,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const second = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    expect(second.value).toBe(loose)
+    expect(second.value).toBe('parent\n\n   2. child')
     second.setSelectionRange(
       second.value.indexOf('2. child'),
       second.value.indexOf('2. child'),
@@ -1984,7 +1986,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const moved = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    expect(moved.value).toBe(loose)
+    expect(moved.value).toBe('parent\n\n   2. child')
     moved.setSelectionRange(
       moved.value.indexOf('2. child'),
       moved.value.indexOf('2. child'),
@@ -2013,7 +2015,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     })
     fireEvent(editor, undo)
     expect(undo.defaultPrevented).toBe(true)
-    await waitFor(() => expect(editor.value).toBe('2. child'))
+    await waitFor(() => expect(editor.value).toBe('child'))
 
     result.rerender(
       <LiveEditor
@@ -2044,23 +2046,23 @@ describe('LiveEditor keyboard and composition behavior', () => {
       caret: 6,
       key: 'Enter',
       active: 0,
-      expectedDraft: '- item',
+      expectedDraft: 'item',
     },
     {
       name: 'indent',
       source: '- parent\n- item',
-      caret: 2,
+      caret: 0,
       key: 'Tab',
       active: 1,
-      expectedDraft: '- item',
+      expectedDraft: 'item',
     },
     {
       name: 'marker removal',
       source: '- item',
-      caret: 2,
+      caret: 0,
       key: 'Backspace',
       active: 0,
-      expectedDraft: '- item',
+      expectedDraft: 'item',
     },
   ])('undoes list $name as one controlled transaction', async ({
     source,
@@ -2196,7 +2198,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     expect(undo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith('- before\n- ')
     expect(result.onActiveBlockChange).toHaveBeenLastCalledWith(1)
-    await waitFor(() => expect(list.value).toBe('- '))
+    await waitFor(() => expect(list.value).toBe(''))
   })
 
   it('outdents an empty nested item before exiting the list', async () => {
@@ -2206,13 +2208,13 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(source.indexOf('    - ') + 6, source.indexOf('    - ') + 6)
+    editor.setSelectionRange(source.indexOf('    - ') + 4, source.indexOf('    - ') + 4)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
     expect(result.onChange).toHaveBeenLastCalledWith(outdented)
-    expect(editor.value).toBe('- parent\n- \n    - sibling')
-    await waitFor(() => expect(editor.selectionStart).toBe(11))
+    expect(editor.value).toBe('parent\n- \n    - sibling')
+    await waitFor(() => expect(editor.selectionStart).toBe(9))
 
     const marker = screen.getByLabelText(
       'Active Markdown block',
@@ -2230,7 +2232,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(13, 13)
+    editor.setSelectionRange(11, 11)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
 
@@ -2246,7 +2248,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
     const editor = screen.getByLabelText(
       'Active Markdown block',
     ) as HTMLTextAreaElement
-    editor.setSelectionRange(source.indexOf('  - [ ] ') + 8, source.indexOf('  - [ ] ') + 8)
+    editor.setSelectionRange(source.indexOf('  - [ ] ') + 6, source.indexOf('  - [ ] ') + 6)
 
     fireEvent.keyDown(editor, { key: 'Enter' })
     expect(result.onChange).toHaveBeenLastCalledWith(outdented)
@@ -2291,7 +2293,7 @@ describe('LiveEditor keyboard and composition behavior', () => {
 
     expect(undo.defaultPrevented).toBe(true)
     expect(result.onChange).toHaveBeenLastCalledWith(source)
-    await waitFor(() => expect(editor.value).toBe(source))
+    await waitFor(() => expect(editor.value).toBe('parent\n  - '))
   })
 
   it('deduplicates synthetic paragraph metadata when exiting a typed marker', async () => {
