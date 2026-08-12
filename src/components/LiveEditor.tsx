@@ -3,6 +3,7 @@ import {
   memo,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -25,9 +26,11 @@ import {
   renderDocumentFootnotes,
   renderMarkdown,
   renderMarkdownBlock,
+  renderMarkdownListGroup,
   type DocumentRenderContext,
   type MarkdownBlock,
   type MarkdownDocumentModel,
+  type RenderedListGroup,
 } from '../markdown/markdown'
 import { reorderMarkdownBlocks } from '../markdown/reorder'
 import {
@@ -91,6 +94,8 @@ interface EditorUndoSnapshot {
   readonly expectedContent: string
   expectedActiveBlock: number
   expectedDraft: string
+  expectedBlockId?: string
+  expectedSession: number
 }
 
 export interface InsertedBlock {
@@ -108,6 +113,7 @@ export interface EditingBoundary {
 }
 
 const EMPTY_RENDER_CONTEXT: DocumentRenderContext = {
+  source: '',
   supportSource: '',
   footnoteSource: '',
   references: [],
@@ -582,27 +588,6 @@ function editorBlocks(
   return editable.sort((left, right) => left.start - right.start)
 }
 
-function semanticEditingBlock(
-  content: string,
-  block: MarkdownBlock,
-  parsedBlocks: MarkdownBlock[],
-): MarkdownBlock {
-  if (!block.list) return block
-  const group = parsedBlocks.filter(
-    (candidate) => candidate.list?.groupId === block.list?.groupId,
-  )
-  const first = group[0]
-  const last = group.at(-1)
-  if (!first || !last) return block
-  return {
-    ...block,
-    id: `${block.list.groupId}-editing`,
-    source: content.slice(first.start, last.end),
-    start: first.start,
-    end: last.end,
-  }
-}
-
 function preserveEditingBoundary(
   content: string,
   blocks: MarkdownBlock[],
@@ -869,6 +854,105 @@ function deferWork(callback: () => void): () => void {
   }
   const id = setTimeout(callback, 0)
   return () => clearTimeout(id)
+}
+
+function SemanticListGroup({
+  blocks,
+  context,
+  children,
+}: {
+  blocks: MarkdownBlock[]
+  context: DocumentRenderContext
+  children(block: MarkdownBlock, item: RenderedListGroup['items'][number] | undefined): ReactNode
+}) {
+  const [rendered, setRendered] = useState<RenderedListGroup | null>(null)
+  const [error, setError] = useState<Error | null>(null)
+  const first = blocks[0]
+
+  useEffect(() => {
+    let current = true
+    setRendered(null)
+    setError(null)
+    const cancel = deferWork(() => {
+      void renderMarkdownListGroup(blocks, context).then(
+        (value) => {
+          if (current) setRendered(value)
+        },
+        (reason: unknown) => {
+          if (current) {
+            setError(reason instanceof Error ? reason : new Error(String(reason)))
+          }
+        },
+      )
+    })
+    return () => {
+      current = false
+      cancel()
+    }
+  }, [blocks, context])
+
+  const className = ['semantic-list-group', rendered?.className]
+    .filter(Boolean)
+    .join(' ')
+  const items = blocks.map((block, index) => children(block, rendered?.items[index]))
+  const list = first.list?.ordered ? (
+    <ol className={className} start={first.list.start}>
+      {items}
+    </ol>
+  ) : (
+    <ul className={className}>{items}</ul>
+  )
+  return (
+    <>
+      {list}
+      {error && (
+        <div className="block-render-error" role="alert">
+          Unable to render this list: {error.message}
+        </div>
+      )}
+    </>
+  )
+}
+
+function RenderedListItem({
+  block,
+  item,
+  index,
+  onActivate,
+}: {
+  block: MarkdownBlock
+  item: RenderedListGroup['items'][number] | undefined
+  index: number
+  onActivate(index: number): void
+}) {
+  const activateFromPreview = (event: MouseEvent<HTMLElement>) => {
+    if (
+      !(event.target as HTMLElement).closest(
+        'a, button, input, select, textarea, summary',
+      )
+    ) {
+      onActivate(index)
+    }
+  }
+  return (
+    <div className="preview-block" data-block-id={block.id}>
+      <div
+        className="rendered-block semantic-list-item-content"
+        onError={(event) => markImageFailure(event.target)}
+        onClick={activateFromPreview}
+        dangerouslySetInnerHTML={{ __html: item?.html ?? '' }}
+      />
+      <button
+        type="button"
+        className="edit-block-button"
+        aria-label="Edit Markdown block"
+        title="Edit Markdown block"
+        onClick={() => onActivate(index)}
+      >
+        Edit
+      </button>
+    </div>
+  )
 }
 
 const RenderedBlock = memo(function RenderedBlock({
@@ -1166,7 +1250,7 @@ export function LiveEditor({
   )
   const safeActive = Math.min(activeBlock, blocks.length - 1)
   const active = blocks[safeActive]
-  const initialEditingBlock = semanticEditingBlock(content, active, model.blocks)
+  const initialEditingBlock = active
   const [draft, setDraft] = useState(toEditorValue(initialEditingBlock.source))
   const [activeInputFocused, setActiveInputFocused] = useState(false)
   const [activeSession, setActiveSession] = useState(0)
@@ -1205,6 +1289,8 @@ export function LiveEditor({
     null,
   )
   const previousActiveRef = useRef(safeActive)
+  const activeIndexRef = useRef(safeActive)
+  const undoSessionRef = useRef(0)
   const previousSourceModeRef = useRef(sourceMode)
   const previousDisplayModeRef = useRef({ sourceMode, previewAll })
   const parentContentRef = useRef(content)
@@ -1335,6 +1421,7 @@ export function LiveEditor({
 
   useLayoutEffect(() => {
     const activeChanged = previousActiveRef.current !== safeActive
+    if (activeChanged) activeIndexRef.current = safeActive
     const sourceModeChanged = previousSourceModeRef.current !== sourceMode
     const parentChanged = content !== parentContentRef.current
     const acknowledged =
@@ -1351,6 +1438,13 @@ export function LiveEditor({
       return
     }
     const externalChange = parentChanged && !acknowledged
+    const transactionActivation =
+      activeChanged &&
+      editorUndoRef.current.at(-1)?.expectedActiveBlock === safeActive &&
+      editorUndoRef.current.at(-1)?.expectedContent === content
+    if ((activeChanged && !transactionActivation) || externalChange) {
+      undoSessionRef.current += 1
+    }
     if (sourceModeChanged || activeChanged || externalChange) {
       const retainBoundary =
         activeChanged &&
@@ -1367,9 +1461,7 @@ export function LiveEditor({
           : -1
       const semanticActive = retainBoundary
         ? active
-        : active.list
-          ? semanticEditingBlock(content, active, model.blocks)
-          : semanticIndex >= 0
+        : semanticIndex >= 0
             ? model.blocks[semanticIndex]
             : undefined
       const semanticEditorIndex = semanticActive
@@ -1494,8 +1586,18 @@ export function LiveEditor({
   }, [previewAll, sourceMode])
 
   useLayoutEffect(() => {
-    resizeTextarea(textareaRef.current)
-  }, [draft, safeActive])
+    const textarea = textareaRef.current
+    resizeTextarea(textarea)
+    if (textarea && document.activeElement === textarea) {
+      const deferred = deferredSelectionRef.current
+      const pending = deferred ?? selectionRef.current
+      textarea.setSelectionRange(
+        Math.min(pending.start, textarea.value.length),
+        Math.min(pending.end, textarea.value.length),
+        selectionRef.current.direction,
+      )
+    }
+  }, [active.id, draft, safeActive])
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
@@ -1649,6 +1751,7 @@ export function LiveEditor({
       expectedContent: '',
       expectedActiveBlock: safeActive,
       expectedDraft: '',
+      expectedSession: undoSessionRef.current,
     }
   }
 
@@ -1682,6 +1785,7 @@ export function LiveEditor({
       expectedContent: '',
       expectedActiveBlock: safeActive,
       expectedDraft: '',
+      expectedSession: undoSessionRef.current,
     }
   }
 
@@ -1691,9 +1795,19 @@ export function LiveEditor({
     expectedActiveBlock = safeActive,
     expectedDraft = draft,
   ) => {
+    activeIndexRef.current = expectedActiveBlock
+    const expectedBlockId =
+      parseDocument(expectedContent).blocks[expectedActiveBlock]?.id
     editorUndoRef.current = [
       ...editorUndoRef.current,
-      { ...snapshot, expectedContent, expectedActiveBlock, expectedDraft },
+      {
+        ...snapshot,
+        expectedContent,
+        expectedActiveBlock,
+        expectedDraft,
+        expectedBlockId,
+        expectedSession: undoSessionRef.current,
+      },
     ].slice(-32)
   }
 
@@ -1701,10 +1815,13 @@ export function LiveEditor({
     const snapshot = editorUndoRef.current.at(-1)
     if (
       !snapshot ||
-      (snapshot.expectedActiveBlock !== safeActive &&
-        snapshot.expectedActiveBlock !== safeActive + 1) ||
+      snapshot.expectedActiveBlock !== activeIndexRef.current ||
+      snapshot.expectedSession !== undoSessionRef.current ||
       snapshot.expectedContent !== contentRef.current ||
-      snapshot.expectedDraft !== draft
+      snapshot.expectedDraft !== (textareaRef.current?.value ?? draft) ||
+      (snapshot.expectedBlockId !== undefined &&
+        parseDocument(contentRef.current).blocks[activeIndexRef.current]?.id !==
+          snapshot.expectedBlockId)
     ) {
       return false
     }
@@ -2126,6 +2243,24 @@ export function LiveEditor({
     const before = draft.slice(0, line.start).replace(/\n$/u, '')
     const afterStart = line.end + (draft[line.end] === '\n' ? 1 : 0)
     const after = draft.slice(afterStart)
+    const exactEmptyItem =
+      active.type === 'listItem' &&
+      !before &&
+      !after &&
+      line.start === 0 &&
+      line.end === draft.length
+    const previousListItem =
+      blocks[safeActive - 1]?.list?.groupId === active.list?.groupId
+    const nextListItem =
+      blocks[safeActive + 1]?.list?.groupId === active.list?.groupId
+    const hasPreviousItem =
+      previousListItem ||
+      (activeIndexRef.current > 0 && previousRange.start > 0)
+    const needsPreviousSeparator =
+      hasPreviousItem &&
+      !previousContent
+        .slice(0, previousRange.start)
+        .endsWith(eol.repeat(2))
     const editorSource = before
       ? after
         ? `${before}\n\n\n\n${after}`
@@ -2138,7 +2273,12 @@ export function LiveEditor({
       previousSource,
       eol,
     )
+    if (exactEmptyItem) {
+      sourceValue =
+        `${needsPreviousSeparator ? eol : ''}${nextListItem ? eol : ''}`
+    }
     const exitsIndependentTrailingItem =
+      !exactEmptyItem &&
       !before &&
       !after &&
       active.type === 'listItem' &&
@@ -2154,7 +2294,9 @@ export function LiveEditor({
       sourceValue,
     )
     const beforeSource = restoreSourceEols(before, previousSource, eol)
-    const emptyOffset = before
+    const emptyOffset = exactEmptyItem
+      ? previousRange.start + (needsPreviousSeparator ? eol.length : 0)
+      : before
       ? previousRange.start + beforeSource.length + 2 * eol.length
       : exitsIndependentTrailingItem
         ? previousRange.start + eol.length
@@ -2194,7 +2336,9 @@ export function LiveEditor({
       end: emptyOffset,
       retainOnActivation: true,
     }
-    const targetIndex = safeActive + (before ? 1 : 0)
+    const targetIndex = exactEmptyItem
+      ? activeIndexRef.current
+      : safeActive + (before ? 1 : 0)
     rotateEditorSession(true)
     setDraft('')
     rangeRef.current = { start: emptyOffset, end: emptyOffset }
@@ -2417,6 +2561,9 @@ export function LiveEditor({
         if (undo) {
           undo.expectedActiveBlock = safeActive + 1
           undo.expectedDraft = nextItemDraft
+          undo.expectedBlockId =
+            parseDocument(contentRef.current).blocks[safeActive + 1]?.id
+          activeIndexRef.current = safeActive + 1
         }
         onActiveBlockChange(safeActive + 1)
       }
@@ -2450,15 +2597,44 @@ export function LiveEditor({
       if (!selectedRoot) return
       let indentUnit = ''
       if (!event.shiftKey) {
-        const previousSibling = items.find(
+        let previousSibling = items.find(
           (item) =>
             item.logicalIndent === selectedRoot.logicalIndent &&
             item.itemEnd === selectedRange.start,
         )
+        let contextualItems = items
+        if (!previousSibling && selectedRange.start === 0) {
+          const previousBlock = blocks[safeActive - 1]
+          if (previousBlock?.list?.groupId === active.list?.groupId) {
+            const eol = nearestEol(contentRef.current, rangeRef.current.start)
+            const prefixLength = toEditorValue(`${previousBlock.source}${eol}`).length
+            const contextualDraft = `${toEditorValue(previousBlock.source)}\n${draft}`
+            contextualItems = listItemRanges(contextualDraft, '')
+            const contextualRoot = contextualItems.find(
+              (item) => item.start === prefixLength,
+            )
+            previousSibling = contextualRoot
+              ? contextualItems.find(
+                  (item) =>
+                    item.logicalIndent === contextualRoot.logicalIndent &&
+                    item.itemEnd === contextualRoot.start,
+                )
+              : undefined
+          }
+        }
         if (!previousSibling) return
-        indentUnit = listIndentUnitForParent(items, previousSibling)
+        indentUnit = listIndentUnitForParent(contextualItems, previousSibling)
       } else {
-        const width = listOutdentWidth(items, selectedRoot, sourcePrefix)
+        let width = listOutdentWidth(items, selectedRoot, sourcePrefix)
+        if (
+          width === 0 &&
+          selectedRange.start === 0 &&
+          !sourcePrefix &&
+          selectedRoot.logicalIndent > 0 &&
+          blocks[safeActive - 1]?.list?.groupId === active.list?.groupId
+        ) {
+          width = selectedRoot.logicalIndent
+        }
         if (width === 0) return
         const outdentEdits = textOutdentEdits(
           draft,
@@ -2544,9 +2720,17 @@ export function LiveEditor({
       if (
         /^\d+[.)]$/u.test(selectedRoot.marker) &&
         !/^1[.)]$/u.test(selectedRoot.marker) &&
-        selectedRange.start > 0 &&
-        draft[selectedRange.start - 1] === '\n' &&
-        draft[selectedRange.start - 2] !== '\n'
+        !(
+          selectedRange.start === 0 &&
+          contentRef.current
+            .slice(0, rangeRef.current.start)
+            .endsWith(
+              nearestEol(contentRef.current, rangeRef.current.start).repeat(2),
+            )
+        ) &&
+        (selectedRange.start === 0 ||
+          (draft[selectedRange.start - 1] === '\n' &&
+            draft[selectedRange.start - 2] !== '\n'))
       ) {
         edits.push({
           start: selectedRange.start,
@@ -3098,7 +3282,12 @@ export function LiveEditor({
         />
       ) : (
         <>
-          {blocks.map((block, index) => {
+          {(() => {
+            const renderRow = (
+              block: MarkdownBlock,
+              index: number,
+              renderedListItem?: RenderedListGroup['items'][number],
+            ) => {
             const directRealIndex = realBlockIndexes.get(block.id)
             const containingRealIndex =
               directRealIndex === undefined
@@ -3111,6 +3300,7 @@ export function LiveEditor({
             const realIndex =
               directRealIndex ??
               (containingRealIndex >= 0 ? containingRealIndex : undefined)
+            const Row = block.list ? 'li' : 'div'
             return (
               <Fragment
                 key={
@@ -3119,7 +3309,7 @@ export function LiveEditor({
                     : block.id
                 }
               >
-                {realIndex !== undefined && (
+                {realIndex !== undefined && !block.list && (
                   <ExtractedBlockDropZone
                     boundary={realIndex}
                     dragging={draggedBlock !== null}
@@ -3128,20 +3318,23 @@ export function LiveEditor({
                     onTarget={targetDropBoundary}
                   />
                 )}
-                <div
+                <Row
                   data-list-group={block.list?.groupId}
-                  data-list-continuation={
-                    block.list &&
-                    blocks[index - 1]?.list?.groupId === block.list.groupId
-                      ? 'true'
-                      : undefined
-                  }
                   className={
                     index === safeActive
-                      ? 'editor-block-row is-active'
-                      : 'editor-block-row'
+                      ? `editor-block-row${block.list ? ' semantic-list-item-row' : ''} is-active${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
+                      : `editor-block-row${block.list ? ' semantic-list-item-row' : ''}${renderedListItem?.className ? ` ${renderedListItem.className}` : ''}`
                   }
                 >
+                  {realIndex !== undefined && block.list && (
+                    <ExtractedBlockDropZone
+                      boundary={realIndex}
+                      dragging={draggedBlock !== null}
+                      pointerId={dragPointerRef.current}
+                      active={dropBoundary === realIndex}
+                      onTarget={targetDropBoundary}
+                    />
+                  )}
                   {realIndex !== undefined && (
                     <ExtractedBlockDragHandle
                       index={realIndex}
@@ -3292,6 +3485,13 @@ export function LiveEditor({
                         <ActiveBlockPreview source={draft} />
                       )}
                     </div>
+                  ) : block.list ? (
+                    <RenderedListItem
+                      block={block}
+                      item={renderedListItem}
+                      index={index}
+                      onActivate={activateBlock}
+                    />
                   ) : (
                     <RenderedBlock
                       block={block}
@@ -3301,10 +3501,45 @@ export function LiveEditor({
                       onActivate={activateBlock}
                     />
                   )}
-                </div>
+                </Row>
               </Fragment>
             )
-          })}
+            }
+            const units: Array<{
+              blocks: MarkdownBlock[]
+              start: number
+            }> = []
+            blocks.forEach((block, index) => {
+              const previous = units.at(-1)
+              if (
+                block.list &&
+                previous?.blocks.at(-1)?.list?.groupId === block.list.groupId
+              ) {
+                previous.blocks.push(block)
+              } else {
+                units.push({ blocks: [block], start: index })
+              }
+            })
+            return units.map((unit) => {
+              const first = unit.blocks[0]
+              if (!first.list) return renderRow(first, unit.start)
+              return (
+                <SemanticListGroup
+                  key={first.list.groupId}
+                  blocks={unit.blocks}
+                  context={renderContext}
+                >
+                  {(block, item) =>
+                    renderRow(
+                      block,
+                      unit.start + unit.blocks.indexOf(block),
+                      item,
+                    )
+                  }
+                </SemanticListGroup>
+              )
+            })
+          })()}
           {movableBlocks.length > 0 && (
             <ExtractedBlockDropZone
               boundary={movableBlocks.length}

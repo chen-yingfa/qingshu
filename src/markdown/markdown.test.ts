@@ -143,6 +143,14 @@ describe('parseBlocks', () => {
     }
   })
 
+  it('keeps list group identity stable when preceding blocks are inserted', () => {
+    const before = parseBlocks('- first\n- second')
+    const after = parseBlocks('Introduction\n\n- first\n- second')
+
+    expect(after[1].list?.groupId).toBe(before[0].list?.groupId)
+    expect(after[2].list?.groupId).toBe(before[1].list?.groupId)
+  })
+
   it('renders loose ordered items as one semantic list', async () => {
     const html = await renderMarkdown('3. alpha\n\n9. beta')
 

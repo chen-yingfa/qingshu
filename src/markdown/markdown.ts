@@ -46,6 +46,7 @@ interface FootnoteReference {
 }
 
 export interface DocumentRenderContext {
+  source: string
   supportSource: string
   footnoteSource: string
   references: FootnoteReference[]
@@ -65,6 +66,18 @@ interface HastNode {
   tagName?: string
   properties?: Record<string, unknown>
   children?: HastNode[]
+}
+
+export interface RenderedListItem {
+  html: string
+  className?: string
+}
+
+export interface RenderedListGroup {
+  ordered: boolean
+  start: number
+  className?: string
+  items: RenderedListItem[]
 }
 
 function highlightRenderedCode() {
@@ -177,6 +190,7 @@ function sourceHash(source: string): string {
 
 function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
   const identities = new Map<string, number>()
+  const listIdentities = new Map<string, number>()
 
   return tree.children.flatMap((node, topLevelIndex) => {
     const start = node.position?.start.offset
@@ -213,7 +227,12 @@ function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
     const items = node.children ?? []
     const ordered = node.ordered === true
     const semanticStart = ordered ? node.start ?? 1 : 1
-    const groupId = `list-${topLevelIndex}-${ordered ? 'ordered' : 'unordered'}`
+    const groupIdentity = `${ordered ? 'ordered' : 'unordered'}-${sourceHash(
+      source.slice(start, end),
+    )}`
+    const groupOccurrence = (listIdentities.get(groupIdentity) ?? 0) + 1
+    listIdentities.set(groupIdentity, groupOccurrence)
+    const groupId = `list-${groupIdentity}-${groupOccurrence}`
     const scanEnd =
       tree.children[topLevelIndex + 1]?.position?.start.offset ?? source.length
     const baseIndent =
@@ -254,8 +273,10 @@ function blocksFromTree(source: string, tree: MarkdownRoot): MarkdownBlock[] {
       let itemEnd = Math.min(candidateEnd, nextStart ?? scanEnd)
       if (nextStart !== undefined) {
         const beforeNext = source.slice(itemStart, nextStart)
-        const trailing = beforeNext.match(/(?:[ \t]*\r?\n)+$/u)?.[0] ?? ''
-        itemEnd = nextStart - trailing.length
+        const separators = beforeNext.match(/(?:\r?\n[ \t]*)+$/u)
+        if (separators?.index !== undefined) {
+          itemEnd = itemStart + separators.index
+        }
       }
       const firstLine =
         source.slice(itemStart, itemEnd).split(/\r?\n/u, 1)[0] ?? ''
@@ -353,6 +374,7 @@ function renderContextFromTree(
   const separator = eol + eol
   const supportSource = support.join(separator)
   return {
+    source,
     supportSource,
     footnoteSource: footnotes.join(separator),
     references,
@@ -360,6 +382,100 @@ function renderContextFromTree(
     signature: `${supportSource}\u0000${references
       .map(({ identifier, ordinal }) => `${identifier}:${ordinal}`)
       .join(',')}`,
+  }
+}
+
+function stringifyHastChildren(children: HastNode[] = []): string {
+  const serializer = unified().use(rehypeStringify)
+  return serializer.stringify({
+    type: 'root',
+    children,
+  } as Parameters<typeof serializer.stringify>[0])
+}
+
+function hastText(node: HastNode): string {
+  if (node.type === 'text') return node.value ?? ''
+  return (node.children ?? []).map(hastText).join('')
+}
+
+function labelTaskCheckbox(node: HastNode, label: string): void {
+  if (node.tagName === 'input' && node.properties?.type === 'checkbox') {
+    node.properties.ariaLabel = label
+    return
+  }
+  node.children?.forEach((child) => labelTaskCheckbox(child, label))
+}
+
+const listRenderCache = new Map<string, Promise<RenderedListGroup>>()
+
+export async function renderMarkdownListGroup(
+  blocks: MarkdownBlock[],
+  context: DocumentRenderContext,
+): Promise<RenderedListGroup> {
+  const first = blocks[0]
+  const last = blocks.at(-1)
+  if (!first?.list || !last?.list) {
+    throw new Error('A semantic list group requires list-item blocks')
+  }
+  const groupSource = context.source.slice(first.start, last.end)
+  const cacheKey = `${first.list.groupId}\u0000${groupSource}\u0000${context.signature}`
+  const cached = listRenderCache.get(cacheKey)
+  if (cached) return cached
+
+  const rendered = (async () => {
+    const input = context.supportSource
+      ? `${groupSource}${context.eol}${context.eol}${context.supportSource}`
+      : groupSource
+    const references = context.references.filter(
+      (reference) => reference.start >= first.start && reference.end <= last.end,
+    )
+    const html = withoutFootnoteSection(await processMarkdown(input, references))
+    const fragment = fromHtmlIsomorphic(html, { fragment: true }) as HastNode
+    const list = fragment.children?.find(
+      (node) => node.tagName === (first.list!.ordered ? 'ol' : 'ul'),
+    )
+    if (!list) throw new Error('Rendered list group has no list container')
+    const classNames = list.properties?.className
+    return {
+      ordered: first.list!.ordered,
+      start: first.list!.start,
+      ...(classNames
+        ? {
+            className: (Array.isArray(classNames)
+              ? classNames
+              : [classNames]
+            ).map(String).join(' '),
+          }
+        : {}),
+      items: (list.children ?? [])
+        .filter((node) => node.tagName === 'li')
+        .map((item) => {
+          const itemClasses = item.properties?.className
+          const label = hastText(item).trim()
+          if (label) labelTaskCheckbox(item, label)
+          return {
+            html: stringifyHastChildren(item.children),
+            ...(itemClasses
+              ? {
+                  className: (Array.isArray(itemClasses)
+                    ? itemClasses
+                    : [itemClasses]
+                  ).map(String).join(' '),
+                }
+              : {}),
+          }
+        }),
+    }
+  })()
+  listRenderCache.set(cacheKey, rendered)
+  if (listRenderCache.size > 64) {
+    listRenderCache.delete(listRenderCache.keys().next().value!)
+  }
+  try {
+    return await rendered
+  } catch (error) {
+    listRenderCache.delete(cacheKey)
+    throw error
   }
 }
 

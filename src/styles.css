@@ -426,13 +426,33 @@ button {
   margin-top: 0;
 }
 
-.editor-block-row[data-list-continuation="true"] {
+.semantic-list-group {
+  margin-top: 1.15em;
+  margin-bottom: 0;
+  padding-left: 2em;
+}
+
+.editor > .block-drop-zone:first-child + .semantic-list-group {
   margin-top: 0;
 }
 
-.editor-block-row[data-list-continuation="true"] .rendered-block > ol,
-.editor-block-row[data-list-continuation="true"] .rendered-block > ul {
-  margin-top: 0;
+.semantic-list-item-row {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.semantic-list-item-row::marker {
+  color: currentColor;
+}
+
+.semantic-list-item-content {
+  min-height: 1.85em;
+}
+
+.semantic-list-item-row > .block-drop-zone.is-dragging {
+  margin-left: -2em;
 }
 
 .block-drag-handle {
