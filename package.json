@@ -30,7 +30,7 @@
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
     "hast-util-from-html-isomorphic": "^2.0.0",
-    "highlight.js": "^11.11.1",
+    "highlight.js": "^11.12.0",
     "jsdom": "^29.1.1",
     "katex": "^0.18.4",
     "png-to-ico": "^3.0.2",
